@@ -161,6 +161,13 @@ suite('yard parts: latch, sled, board, post', () => {
     const bad = Y.build({ parts: [part('board', { id: 'b', dials: { length: '1 m', hole: '1.2 m' } })] });
     ok(bad.errors.length && /past the end/.test(bad.errors[0].error));
   });
+  test('gate and board snap anchors follow their dials', () => {
+    const g = Y.anchorsOf({ parts: [part('gate', { id: 'g', x: 1, y: 2, dials: { width: '4 m' } })] });
+    ok(g.some(a => a.anchor === 'a8' && Math.abs(a.x - 5) < 1e-12)); ok(g.some(a => a.anchor === 'end' && Math.abs(a.x - 5) < 1e-12));
+    const bd = Y.anchorsOf({ parts: [part('board', { id: 'b', x: 0, y: 1, dials: { length: '1.2 m', hole: '300 mm' } })] });
+    ok(bd.some(a => a.anchor === 'hole' && Math.abs(a.x + 0.3) < 1e-12)); ok(bd.some(a => a.anchor === 'right' && Math.abs(a.x - 0.6) < 1e-12));
+    eq(Y.sizeOf(part('board', { id: 'b', dials: { length: '1.2 m' } })).w, 1.2);
+  });
   test('a fence post holds a cable at its top', () => {
     const d = { parts: [part('post', { id: 'p', x: 0, y: 0.6 }), part('cart', { id: 'c', x: 3, y: 0.25, v: { x: 1 } }),
       part('cable', { id: 'k', a: { part: 'p', anchor: 'top' }, b: { part: 'c', anchor: 'left' }, dials: { length: '2.5 m' } })] };

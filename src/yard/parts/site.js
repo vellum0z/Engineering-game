@@ -106,6 +106,9 @@
       { key: 'rating', label: 'Pin rating', q: 'force', def: '', optional: true, min: 1 }
     ],
     anchors: gateAnchorTable(3),
+    // the pin is at x,y and the panel can swing either way, so the box is 2·width wide
+    sizeFor: function (inst, v) { return v.width ? { w: 2 * v.width, h: 0.3 } : null; },
+    anchorsFor: function (inst, v) { return v.width ? gateAnchorTable(v.width) : null; },
     build: function (b) {
       var W = b.si('width'), ang = b.inst.angle || 0, pin = b.at({ x: 0, y: 0 });
       var c = b.at({ x: W / 2, y: 0 });
@@ -327,6 +330,13 @@
       { key: 'fixed', label: 'Fixed', choice: ['no', 'yes'], def: 'no' }
     ],
     anchors: { left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, mid: { x: 0, y: 0 } },
+    sizeFor: function (inst, v) { return v.length && v.width ? { w: v.length, h: v.width } : null; },
+    anchorsFor: function (inst, v) {
+      if (!v.length) return null;
+      var t = { left: { x: -v.length / 2, y: 0 }, right: { x: v.length / 2, y: 0 }, mid: { x: 0, y: 0 } };
+      if (v.hole != null && v.hole <= v.length) t.hole = { x: -v.length / 2 + v.hole, y: 0 };
+      return t;
+    },
     build: function (b) {
       var L = b.si('length'), w = b.si('width'), hole = b.si('hole');
       if (hole != null && hole > L) throw new Error('the hole is past the end of the board');

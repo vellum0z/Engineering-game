@@ -82,6 +82,17 @@ suite('yard parts: measure', () => {
     const r = run(parts, 6);
     near(r.state.read('sw.t'), 3, 0.02);
   });
+  test('typed ids pick the zones, and a part id limits impact to that part', () => {
+    const parts = [part('surface', { x: 10, y: -0.1, dials: { length: '30 m', material: 'frictionless' } }),
+      part('cart', { id: 'cart', x: 0, y: 0.25, dials: { mass: '100 kg' }, v: { x: 2 } }),
+      part('zone', { id: 'z1', x: 4, y: 0.75, dials: { width: '0.2 m' } }), part('zone', { id: 'z2', x: 8, y: 0.75, dials: { width: '0.2 m' } }),
+      part('zone', { id: 'z3', x: 10, y: 0.75, dials: { width: '0.2 m' } }),
+      part('stopwatch', { id: 'sw', x: 0, y: 3, dials: { start: 'zone', stop: 'zone', zone: 'z1, z3' } })];
+    near(run(parts, 6).state.read('sw.t'), 3, 0.02);
+    const drops = [part('crate', { id: 'a', x: 0, y: 2.5, dials: { mass: '5 kg' } }), part('crate', { id: 'b', x: 3, y: 5.5, dials: { mass: '5 kg' } }),
+      part('stopwatch', { id: 'sw', x: 6, y: 2, dials: { zone: 'b' } })];
+    near(run(drops, 2.5).state.read('sw.t'), Math.sqrt(2 * 5 / 9.81), 0.025);
+  });
   test('start on release waits until something moves', () => {
     const parts = [part('cart', { id: 'cart', x: 0, y: 0.25, dials: { mass: '100 kg' } }),
       part('push', { a: { part: 'cart' }, dials: { force: '100 N', time: '1 s', start: '1 s' } }),

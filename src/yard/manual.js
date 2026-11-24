@@ -144,13 +144,13 @@
       js.wrong++;
       var ctx = { result: r, yard: this.yard };
       fb.appendChild(el('div', { class: 'feedback bad' }, [el('div', { class: 'feedback-head', text: 'Failed the test.' }), el('div', { html: md(r.reason) }),
-        j.onFail ? el('div', { class: 'sim-msg', html: md(j.onFail(ctx) || '') }) : null]));
+        (function () { var t = j.onFail && j.onFail(ctx); return t ? el('div', { class: 'sim-msg', html: md(t) }) : null; })()]));
       SE.game.persist();
       return;
     }
     var score = Y.jobScore(j, { pass: true, state: r.state, hintTier: js.hintTier, failedRuns: js.wrong });
     if (j.grade) {
-      var inst = this.yard.inst(j.grade.part);
+      var inst = this.yard.gradePart(j.grade.part);
       var res = SE.checker.check(inst ? inst.dials[j.grade.key] : '', j.grade.spec);
       score = Math.round((score + SE.scoring.taskScore({ result: res, spec: j.grade.spec, hintTier: js.hintTier, wrongAttempts: js.wrong })) / 2);
     }

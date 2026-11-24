@@ -94,6 +94,32 @@ A cable over a sheave is a `PulleyJoint` with both sides on the sheave, so the s
 
 A typical crane: a `jib`, a `winch` from the jib's `base` to the load's `top` with `route: 'over sheave'`.
 
+## Measuring parts
+
+`src/yard/parts/measure.js`, tested in `tests/yard-parts-measure.test.js`. They only read the world; none of them decides a job. Readouts are SI like every gauge.
+
+| Part | Kind | Dials | Readouts | Anchors |
+| --- | --- | --- | --- | --- |
+| `springscale` | connector: `a` = hook above, `b` = load | `k`, `face` N/kN/lb/kgf (the printed unit), `capacity` (empty = never snaps) | `force`, `stretch` | |
+| `weight` | load | `nominal` stamp: 1 to 20 kg, 1 to 25 lb, 1 slug | | `top` |
+| `loadcell` | connector, a rigid link | `rating` (fails above it) | `force` (+ = tension) | |
+| `stopwatch` | static, one per design | `start` run/release/zone, `stop` impact/zone/time, `zone` (ids), `limit` (for stop = time) | `t` | |
+| `tape` | connector, adds nothing to the world | | `length`, `dx`, `dy` | |
+| `pendulum` | static pivot + bob | `length`, `mass`, `angle` (pulled back), `line` string/rod | `period`, `angle`, `swings` | `pivot`, `bob` |
+| `balance` | stand, beam on a pin, two hanging pans | `arm`, `beam` (mass) | `tilt` (+ = right pan down) | `left`, `right` (the pans), `pivot` |
+| `caliper` | clips onto a part (`attach`) | | `width`, `height`, `hole` (only if the part has one) | |
+
+What each one does in the engine:
+
+- **Spring scale**: a `DistanceJoint` spring rested at the rigged length, F = k·x, with a dashpot at about half critical for the hung load so the needle settles. The face art draws the reading in the face unit (kgf uses 9.80665 N).
+- **Weight**: mass from the stamp. Kilograms are masses; a pound stamp weighs that many pounds at the game's g, so m = n·4.448 / 9.81 kg; 1 slug is 14.59 kg. `SE.yard.weightMass(stamp)` gives the mass. On another site's g it weighs differently, which a spring scale shows and a balance doesn't.
+- **Load cell**: a rigid `DistanceJoint` with `breakForce` = rating.
+- **Stopwatch**: `release` starts when a `latch` lets go (on the step it releases), or with no latch on the first motion. `zone` starts when a body's centre enters the zone. `impact` stops on the first hit of a free body (touching nothing, on no joint) faster than 0.5 m/s; `zone` stops when a body enters the stop zone (with start = zone and one zone, when it leaves it); `time` stops after `limit`. The `zone` dial takes ids, "start, stop"; empty uses the design's zones in order. Other part ids there limit `impact` to hits on those parts.
+- **Tape**: a `TapeMeasure` between the two ends; it follows parts that move.
+- **Pendulum**: a bob on a rope (string) or rod `DistanceJoint`. It times passes through straight down; `period` is twice the mean time between passes, 0 until it has seen two. For small swings T = 2π√(L/g), so it measures local g.
+- **Balance**: the beam pins 4 cm above its centre of mass, so it hangs level with equal pans and tips (up to about 17°) toward the heavier one. A `weight` sits on a pan at the balance's y + 0.59 m. It compares masses, so it reads the same on any site.
+- **Caliper**: the part's extent along its own x (width) and y (height) from its shapes, rounded to 0.01 mm. `hole` is the hole centre from the left end, from the part's `holeLocal` or its `hole` dial (the `board`).
+
 ## Writing a yard level
 
 See `src/chapters/ch01/levels/h01-still-or-moving.js` for a complete example.
