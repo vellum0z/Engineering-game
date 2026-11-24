@@ -164,6 +164,8 @@
       shapes: b.fixtures.map(function (f) {
         var s = { shape: jsonOrUndefined(f.shape), material: materialJSON(f.material),
           density: f.density, friction: f.friction, restitution: f.restitution };
+        if (f.muS != null) s.muS = f.muS;
+        if (f.muK != null) s.muK = f.muK;
         if (f.sensor) s.sensor = true;
         if (f.group) s.group = f.group;
         return s;
@@ -187,7 +189,7 @@
       velocity: o.velocity, angularVelocity: o.angularVelocity || 0,
       shapes: (o.shapes || []).map(function (s) {
         return { shape: s.shape, material: s.material, density: s.density, friction: s.friction,
-          restitution: s.restitution, sensor: s.sensor, group: s.group };
+          muS: s.muS, muK: s.muK, restitution: s.restitution, sensor: s.sensor, group: s.group };
       }),
       mass: o.mass, fixedRotation: o.fixedRotation, linearDamping: o.linearDamping,
       angularDamping: o.angularDamping, gravityScale: o.gravityScale,
