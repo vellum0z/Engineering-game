@@ -2,106 +2,263 @@
  * H4 · Newton's Yard: Newton's three laws of motion, measured from a
  * non-accelerating frame. First law, second law F = ma (Eq. 1–1) and its
  * momentum form, third law (equal, opposite, collinear, on different bodies).
- * Course section 1.2.
+ * Course section 1.2. Played in the build yard: winch carts along a greased
+ * rail, then two carts kicked apart by a spring pack, with gauges on both.
+ *
+ * Parts: cart, hook and push (core), winch (rigging), and two level parts
+ * defined at the bottom of this file: h04-pack (the pack coming up the rail)
+ * and h04-kicker (a spring pack that shoves two carts apart and falls away).
  */
 (function (SE) {
   'use strict';
+  var Y = SE.yard, G = Y.goals, D = Y.dial;
+  var f3 = function (x) { return D.fmtNum(x, 3); };
 
-  var P = SE.physics.track;
+  /* ------------------------------------------------------- level parts */
 
-  // Frictionless ice yard unless a body says otherwise.
-  function yard(bodies, extra) {
-    return { type: 'track', params: Object.assign({ surface: 'ice', length: 30, trail: true, showVectors: true, bodies: bodies }, extra || {}) };
-  }
-  function sled(id, m, x, label, more) { return Object.assign({ id: id, m: m, x: x, v: 0, mu: 0, label: label, kind: 'sled' }, more || {}); }
-  function cart(id, m, x, label, more) { return Object.assign({ id: id, m: m, x: x, v: 0, mu: 0, label: label, kind: 'cart' }, more || {}); }
-  function f3(x) { return SE.sigfig.roundSig(x, 3).text; }
-
-  // The scene keeps integrating for a moment after a run finishes (while the
-  // result is handed back), so read velocities from the log at the finish
-  // time rather than from the live body.
-  function velAt(scene, id, t) {
-    var log = scene.getLog(id), v = 0;
-    for (var i = 0; i < log.length && log[i].t <= t + 1e-9; i++) v = log[i].v;
-    return v;
-  }
-  // Average acceleration of a body from rest over a run of length t.
-  function measuredAccel(scene, id, t) { return t > 0 ? velAt(scene, id, t) / t : 0; }
-
-  // ---- 2nd-law experiments: winch on a sled from rest, frictionless ice
-  var RUNS = [
-    { key: 'r1', m: 50, F: 100, label: 'Run 1: 50 kg sled, 100 N' },
-    { key: 'r2', m: 50, F: 200, label: 'Run 2: 50 kg sled, 200 N' },
-    { key: 'r3', m: 100, F: 200, label: 'Run 3: 100 kg sled, 200 N' }
-  ];
-  // Closed-form values for the data table: 100/50 = 2.00, 200/50 = 4.00, 200/100 = 2.00 m/s^2
-  RUNS.forEach(function (r) { r.a = P.accel(r.F, r.m, 0); });
-
-  function runExperiment(ctx, r) {
-    var s = ctx.setScene('track', yard([sled('s', r.m, 3, r.m + ' kg sled')]).params);
-    ctx.hud(['Winch: **' + r.F + ' N** on a **' + r.m + ' kg** sled, frictionless ice']);
-    return s.run({ forces: { s: r.F }, duration: 3, settle: false }).then(function (res) {
-      var a = measuredAccel(s, 's', res.detail.time);
-      ctx.runner._h4runs = ctx.runner._h4runs || {};
-      ctx.runner._h4runs[r.key] = a;
-      return '**' + r.label + '**: speed went from 0 to ' + res.detail.v.toFixed(2) + ' m/s in ' + res.detail.time.toFixed(2) + ' s, so **a = ' + a.toFixed(2) + ' m/s²**.';
+  // A minimal winch for running this level before the rigging parts land.
+  // It follows the parts contract (dials pull, speed, rating, brake, stop;
+  // readouts tension, lineOut, speed) and is skipped once the real one exists.
+  if (!Y.partDef('winch')) {
+    Y.definePart({
+      type: 'winch', name: 'Winch', category: 'Rigging',
+      blurb: 'A motor drum that reels its line in at the set speed, pulling no harder than its maximum pull.',
+      size: { w: 0.8, h: 0.6 },
+      connector: true,
+      dials: [
+        { key: 'pull', label: 'Max pull', q: 'force', def: '5 kN', min: 0 },
+        { key: 'speed', label: 'Line speed', q: 'speed', def: '0.3 m/s' },
+        { key: 'rating', label: 'Line breaks at', q: 'force', def: '20 kN', min: 1 },
+        { key: 'brake', label: 'Brake', choice: ['on', 'off'], def: 'on' },
+        { key: 'stop', label: 'Stop at line out', q: 'length', def: '', optional: true }
+      ],
+      build: function (b) {
+        var A = b.end('a'), B = b.end('b');
+        var j = b.joint(new b.P.WinchJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
+          reelSpeed: b.si('speed'), maxPull: b.si('pull'), brake: b.text('brake') === 'on',
+          minLength: b.si('stop') || 0, breakForce: b.si('rating'), label: b.inst.label || 'winch' }));
+        return { joint: j };
+      },
+      plate: function (inst) { return ['Max pull ' + inst.dials.pull, 'Line breaks at ' + inst.dials.rating]; },
+      readouts: function (built) {
+        var j = built.joint;
+        return [
+          { key: 'tension', label: 'line tension', q: 'force', read: function () { return j.broken ? 0 : Math.max(0, j.lineTension()); } },
+          { key: 'lineOut', label: 'line out', q: 'length', read: function () { return j.lineOut(); } },
+          { key: 'speed', label: 'line speed', q: 'speed', read: function () { return j.speed; } }
+        ];
+      }
     });
   }
 
-  // ---- H4.winch: get the supply sled through the shed door ahead of the pack
-  // The sled starts with its tail 6.10 m ahead of the pack and has to roll
-  // 25.1 m before its nose meets the shed buffer. The pack speed and the
-  // buffer rating are set so that only accelerations within about ±0.4 % of
-  // 1.60 m/s^2 work:
-  //   pack catches the sled if  v_z^2 > 2 a g0   (closest approach g0 - v_z^2/(2a))
-  //   buffer fails if           sqrt(2 a d) > rating
-  var W = { m: 125, x0: 4, w: 1.8, zombieStart: -3, length: 30, goalX: 14, aNeed: 1.60 };
-  W.gap0 = W.x0 - W.w / 2 - W.zombieStart;           // 4 - 0.9 + 3 = 6.10 m
-  W.run = W.length - W.w / 2 - W.x0;                 // 30 - 0.9 - 4 = 25.1 m
-  W.vz = Math.sqrt(2 * 1.594 * W.gap0);              // 4.41 m/s: pack just catches below a = 1.594
-  W.rating = Math.sqrt(2 * 1.606 * W.run);           // 8.98 m/s: buffer gives above a = 1.606
-  // F = m a = 125 kg × 1.60 m/s² = 200 N
-  W.F = W.m * W.aNeed;
+  // The pack: a crowd shambling up the rail at a steady speed. A sensor, so
+  // it touches nothing; the job's goal checks whether it reaches the cart.
+  Y.definePart({
+    type: 'h04-pack', name: 'The pack', category: 'Site', library: false,
+    blurb: 'Something walking up the spur at a steady pace. It does not get tired.',
+    size: { w: 1.2, h: 1.7 },
+    dials: [{ key: 'speed', label: 'Walking speed', q: 'speed', def: '4 m/s', min: 0 }],
+    build: function (b) {
+      var body = b.body({ type: 'kinematic', position: b.at({ x: 0, y: 0 }), velocity: { x: b.si('speed'), y: 0 }, label: b.inst.label || 'pack',
+        shapes: [{ shape: b.P.box(0.6, 0.85), sensor: true }] });
+      return { body: body, half: 0.6 };
+    },
+    readouts: function (built) { return [{ key: 'front', label: 'front at', q: 'length', read: function () { return built.body.c.x + built.half; } }]; },
+    draw: function (ctx, cam, built) {
+      var c = built.body.c;
+      ctx.save();
+      [-0.4, 0, 0.4].forEach(function (dx, i) {
+        var bob = Math.sin((c.x + dx) * 3 + i) * 0.04;
+        var head = cam.worldToScreen({ x: c.x + dx, y: c.y + 0.65 + bob }), feet = cam.worldToScreen({ x: c.x + dx - 0.1, y: c.y - 0.85 });
+        var r = Math.max(3, 0.14 * cam.zoom);
+        ctx.strokeStyle = 'rgba(150,190,120,.95)'; ctx.fillStyle = 'rgba(110,150,90,.95)'; ctx.lineWidth = Math.max(2, 0.08 * cam.zoom);
+        ctx.beginPath(); ctx.moveTo(head.x, head.y + r); ctx.lineTo(feet.x, feet.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(head.x, head.y + r * 2); ctx.lineTo(head.x + r * 2.4, head.y + r * 2.2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.restore();
+    }
+  });
 
-  function winchScene() {
-    return yard([sled('sled', W.m, W.x0, 'supplies 125 kg', { w: W.w })], {
-      length: W.length, goalX: W.goalX, bumperRating: W.rating, zombieStart: W.zombieStart, zombies: 7
-    });
+  // A spring pack wedged between two parts. For `time` after `start` it
+  // pushes them apart with `force` along the line between its two ends,
+  // the same push on each end in opposite directions, then it drops away.
+  Y.definePart({
+    type: 'h04-kicker', name: 'Spring pack', category: 'Forces',
+    blurb: 'A loaded spring pack wedged between two carts. When it fires it shoves both ends apart, then falls clear.',
+    size: { w: 0.4, h: 0.3 },
+    connector: true,
+    dials: [
+      { key: 'force', label: 'Push', q: 'force', def: '200 N', min: 0, max: 1e6 },
+      { key: 'time', label: 'For', q: 'time', def: '0.4 s', min: 0, max: 60 },
+      { key: 'start', label: 'Fires at', q: 'time', def: '0 s', min: 0, max: 600 }
+    ],
+    build: function (b) {
+      var A = b.end('a'), B = b.end('b'), world = b.world, eps = 1e-9;
+      var F = b.si('force'), T = b.si('time'), t0 = b.si('start') || 0;
+      var built = { a: A, b: B, onA: 0, onB: 0, dir: { x: 1, y: 0 } };
+      built.active = function () { var t = world.time; return t >= t0 - eps && t < t0 + T - eps; };
+      built.spent = function () { return world.time >= t0 + T - eps; };
+      function apply() {
+        built.onA = built.onB = 0;
+        if (!built.active()) return;
+        var pa = A.body.worldPoint(A.local), pb = B.body.worldPoint(B.local);
+        var dx = pb.x - pa.x, dy = pb.y - pa.y, L = Math.hypot(dx, dy);
+        var u = L > 1e-6 ? { x: dx / L, y: dy / L } : built.dir;
+        built.dir = u;
+        if (B.body.type === 'dynamic') { B.body.applyForce({ x: F * u.x, y: F * u.y }, pb); built.onB = F; }
+        if (A.body.type === 'dynamic') { A.body.applyForce({ x: -F * u.x, y: -F * u.y }, pa); built.onA = F; }
+      }
+      apply();
+      b.on('step', apply);
+      return built;
+    },
+    readouts: function (built) {
+      var lab = function (end) { var p = end.body.userData && end.body.userData.part; return p && p !== 'ground' ? ' on ' + p : ''; };
+      return [
+        { key: 'onA', label: 'push' + lab(built.a), q: 'force', read: function () { return built.onA; } },
+        { key: 'onB', label: 'push' + lab(built.b), q: 'force', read: function () { return built.onB; } }
+      ];
+    },
+    draw: function (ctx, cam, built) {
+      if (built.spent()) return;          // fired and fallen clear
+      var pa = cam.worldToScreen(built.a.body.worldPoint(built.a.local)), pb = cam.worldToScreen(built.b.body.worldPoint(built.b.local));
+      ctx.save();
+      ctx.strokeStyle = built.active() ? '#ffb347' : 'rgba(200,200,200,.6)'; ctx.lineWidth = 3;
+      var n = 6, dx = (pb.x - pa.x) / n, amp = 6;
+      ctx.beginPath(); ctx.moveTo(pa.x, pa.y);
+      for (var i = 1; i < n; i++) ctx.lineTo(pa.x + dx * i, pa.y + (i % 2 ? -amp : amp));
+      ctx.lineTo(pb.x, pb.y); ctx.stroke();
+      if (built.active()) {
+        ctx.fillStyle = '#ffb347';
+        [[pa, -1], [pb, 1]].forEach(function (e) {
+          var p = e[0], s = e[1];
+          ctx.beginPath(); ctx.moveTo(p.x + s * 22, p.y - 18); ctx.lineTo(p.x + s * 10, p.y - 24); ctx.lineTo(p.x + s * 10, p.y - 12); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(p.x, p.y - 18); ctx.lineTo(p.x + s * 12, p.y - 18); ctx.strokeStyle = '#ffb347'; ctx.stroke();
+        });
+      }
+      ctx.restore();
+    }
+  });
+
+  /* ------------------------------------------------------------ layouts */
+
+  var SITE = { g: 9.81, floor: 'concrete' };
+
+  // The test rail: one cart, a bollard the winch drum bolts to.
+  function rail(winch) {
+    var parts = [
+      { id: 'cart', type: 'cart', x: 2, y: 0.25, dials: { mass: '50 kg' }, locked: true, open: ['mass'], label: 'test cart' },
+      { id: 'bollard', type: 'hook', x: 26, y: 0.25, locked: true, label: 'bollard' }
+    ];
+    if (winch) parts.push(Object.assign({ id: 'winch', type: 'winch', a: { part: 'bollard', anchor: 'eye' }, b: { part: 'cart', anchor: 'right' },
+      locked: true, open: ['pull'], label: 'winch' }, winch));
+    return { parts: parts };
   }
+  var RAIL_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 28, y: 4 } } };
 
-  // ---- H4.reaction: two carts spring apart
-  var R = { mA: 60.0, mB: 240, aA: 3.20, t: 0.5 };
-  R.F = R.mA * R.aA;          // 60.0 × 3.20 = 192 N, the same on both carts
-  R.aB = R.F / R.mB;          // 192 / 240 = 0.800 m/s²
+  // ---- H4.winch: get the supply cart into the shed ahead of the pack.
+  // The cart (125 kg, 1.6 m long) starts with its tail 6.10 m ahead of the
+  // pack's front and its nose 25.1 m short of the shed buffer. The winch is
+  // the only force along the rail, so a = F / m. For a pull from rest:
+  //   the pack (speed vz) gets closest at t = vz / a, gap = 6.10 - vz^2 / (2a)
+  //   the cart hits the buffer at v = sqrt(2 a 25.1)
+  // vz and the buffer rating are set so that only a = 1.60 m/s^2 works:
+  // F = m a = 125 kg × 1.60 m/s^2 = 200 N. 199 N and 201 N both fail.
+  var W = { m: 125, x0: 4, half: 0.8, gap0: 6.10, run: 25.1, aNeed: 1.60 };
+  W.packFront0 = W.x0 - W.half - W.gap0;               // -2.90 m
+  W.bufferFace = W.x0 + W.half + W.run;                 // 29.9 m
+  W.vz = 4.416;                                         // m/s: the pack catches the cart below about 199.6 N
+  W.rating = 8.968;                                     // m/s: the buffer gives above about 200.4 N
+  W.F = W.m * W.aNeed;                                  // 200 N
 
-  function pairScene(mA, mB, labA, labB) {
-    return yard([cart('A', mA, 9, labA), cart('B', mB, 10.75, labB, { w: 1.8 })], { surface: 'rail', length: 30, zombieStart: -6 });
+  var SUPPLY = { parts: [
+    { id: 'sled', type: 'cart', x: W.x0, y: 0.25, dials: { mass: '125 kg' }, locked: true, label: 'supply cart' },
+    { id: 'pack', type: 'h04-pack', x: W.packFront0 - 0.6, y: 0.85, dials: { speed: W.vz + ' m/s' }, locked: true, label: 'the pack' },
+    { id: 'buffer', type: 'block', x: W.bufferFace + 0.3, y: 0.6, locked: true, label: 'shed buffer' },
+    { id: 'drum', type: 'hook', x: W.bufferFace + 1.2, y: 0.25, locked: true, label: 'shed drum' },
+    { id: 'winch', type: 'winch', a: { part: 'drum', anchor: 'eye' }, b: { part: 'sled', anchor: 'right' },
+      dials: { pull: '100 N', speed: '12 m/s' }, locked: true, open: ['pull'], label: 'shed winch' }
+  ] };
+
+  // Speed of the cart's nose as it meets the buffer face. The contact stops
+  // the cart inside one step, so read the last two samples before the hit and
+  // carry the motion on (or back) to the face: v^2 = v1^2 + 2 a (face - nose1), with a
+  // the cart's own measured acceleration over that step.
+  function track(s) {
+    var m = s.memo, p = s.pos('sled'), v = s.vel('sled');
+    if (!m.hit) {
+      var hit = s.impacts.filter(function (i) { return (i.a === 'sled' && i.b === 'buffer') || (i.a === 'buffer' && i.b === 'sled'); })[0];
+      if (hit && m.prev && m.prev2) {
+        var a = (m.prev.v - m.prev2.v) / (m.prev.t - m.prev2.t), gap = W.bufferFace - (m.prev.x + W.half);
+        m.hit = { speed: Math.sqrt(Math.max(0, m.prev.v * m.prev.v + 2 * a * gap)), t: s.t };
+      } else if (hit) m.hit = { speed: hit.speed, t: s.t };
+      if (!m.prev || m.prev.t !== s.t) { m.prev2 = m.prev; m.prev = { t: s.t, x: p.x, v: v.x }; }
+    }
+    return m.hit;
   }
+  var WINCH_GOAL = G.all(
+    G.never(function (s) {
+      var p = s.pos('pack'), c = s.pos('sled');
+      return p && c && p.x + 0.6 >= c.x - W.half ? 'The pack caught the cart at x = ' + f3(c.x) + ' m, ' + f3(s.t) + ' s in.' : null;
+    }),
+    G.never(function (s) {
+      var h = track(s);
+      return h && h.speed > W.rating ? 'The cart reached the shed ahead of the pack, then hit the buffer at ' + D.fmtNum(h.speed, 4) + ' m/s. It is rated for ' + D.fmtNum(W.rating, 4) + ' m/s, so it tore loose.' : null;
+    }),
+    function (s) { return track(s) ? 'pass' : null; }
+  );
 
-  // ---- proveIt givens
-  var PV = { m: 80.0, F: 52.0, mA: 30.0, aA: 2.40 };
-  PV.a = PV.F / PV.m;          // 52.0 / 80.0 = 0.650 m/s²
-  PV.FB = PV.mA * PV.aA;       // 30.0 × 2.40 = 72.0 N
-
-  // ---- leaking sand sled
-  var LEAK = { m0: 120, leak: 4, mDry: 60, F: 60, t: 8 };
-  // constant-mass guess: v = F t / m0 = 60 × 8 / 120 = 4.00 m/s
-  // leaking: v = (F / leak) ln(m0 / (m0 − leak t)) = 15 ln(120/88) = 4.65 m/s
-  LEAK.vNaive = LEAK.F * LEAK.t / LEAK.m0;
-  LEAK.vTrue = P.leakSpeed(LEAK.F, LEAK.m0, LEAK.leak, LEAK.t);
-  function leakScene(v0) {
-    return yard([sled('sand', LEAK.m0, 3, 'sand sled', { v: v0 || 0, leak: LEAK.leak, mDry: LEAK.mDry })], { length: 40 });
+  // ---- third law: two carts on the rail, a spring pack between them.
+  function pair(mA, mB, labA, labB, kick) {
+    return { parts: [
+      { id: 'A', type: 'cart', x: 9, y: 0.25, dials: { mass: mA }, locked: true, open: ['mass'], label: labA },
+      { id: 'B', type: 'cart', x: 10.8, y: 0.25, dials: { mass: mB }, locked: true, open: ['mass'], label: labB },
+      Object.assign({ id: 'kick', type: 'h04-kicker', a: { part: 'A', anchor: 'right' }, b: { part: 'B', anchor: 'left' },
+        dials: { force: '200 N', time: '0.4 s', start: '0 s' }, locked: true, label: 'spring pack' }, kick || {})
+    ] };
   }
+  var PAIR_CAM = { fit: { lo: { x: 0, y: -1 }, hi: { x: 20, y: 4 } } };
 
-  // Stage overlays set by ctx.hud() persist until replaced, so every step
-  // that loads a fresh scene starts with an empty overlay unless it sets one.
-  function freshHud(steps) {
-    steps.forEach(function (s) {
-      if (s.scene && s.hud === undefined) s.hud = [];
-      if (s.steps) freshHud(s.steps);
-    });
-    return steps;
+  // ---- H4.reaction: B has to meet the coupler at 0.400 m/s.
+  // The spring pack is calibrated on a 60.0 kg cart: it gives it 3.20 m/s^2
+  // for 0.500 s. Third law: it pushes B just as hard, F = 60.0 × 3.20 = 192 N.
+  // B leaves at v = F t / m_B, so for 0.400 m/s, m_B = 192 × 0.500 / 0.400 = 240 kg.
+  var R = { mA: 60.0, aA: 3.20, t: 0.5, vB: 0.400, couplerFace: 16 };
+  R.F = R.mA * R.aA;                                    // 192 N
+  R.mB = R.F * R.t / R.vB;                              // 240 kg
+  R.lo = 0.39; R.hi = 0.41;                             // the coupling latches between these, m/s
+
+  function couplerDesign() {
+    var d = pair(R.mA.toFixed(1) + ' kg', '120 kg', 'cart A', 'ore cart B', { dials: { force: R.F + ' N', time: R.t + ' s', start: '0 s' }, hide: ['force'] });
+    d.parts[0].open = [];
+    d.parts.push({ id: 'coupler', type: 'block', x: R.couplerFace + 0.3, y: 0.6, dials: { height: '0.8 m' }, locked: true, label: 'coupler' });
+    return d;
   }
+  // Judged on the impact the engine reports when B meets the coupler (its
+  // approach speed), so it doesn't matter how many steps a frame takes.
+  var COUPLE_GOAL = G.all(
+    G.never(function (s) { var a = s.pos('A'); return a && a.x < -30 ? 'Cart A ran off the end of the rail.' : null; }),
+    function (s) {
+      var hit = s.impacts.filter(function (i) { return (i.a === 'B' && i.b === 'coupler') || (i.a === 'coupler' && i.b === 'B'); })[0];
+      if (!hit) return null;
+      var v = hit.speed;
+      if (v > R.hi) return { fail: 'Cart B reached the coupler at ' + f3(v) + ' m/s and bounced off. The coupling only latches between ' + R.lo + ' and ' + R.hi + ' m/s.' };
+      if (v < R.lo) return { fail: 'Cart B crept up at ' + f3(v) + ' m/s, too slow to trip the latch (it needs ' + R.lo + ' to ' + R.hi + ' m/s).' };
+      return 'pass';
+    }
+  );
+
+  /* -------------------------------------------------------------- data */
+
+  // The three runs the second-law step asks for (others are recorded too).
+  var WANT = [{ m: 50, F: 100 }, { m: 50, F: 200 }, { m: 100, F: 200 }];
+  function runs(ctx) { return (ctx.values.h4runs = ctx.values.h4runs || []); }
+  function findRun(ctx, m, F) { return runs(ctx).filter(function (r) { return Math.abs(r.m - m) < 0.01 && Math.abs(r.F - F) < 0.01; })[0]; }
+  function winchOn(ctx, id) {
+    return ctx.all('winch').filter(function (w) { return w.a && w.b && ((w.a.part === 'bollard' && w.b.part === id) || (w.b.part === 'bollard' && w.a.part === id)); })[0];
+  }
+  function endSpeed(r, id) { var v = r && r.state && r.state.vel(id); return v ? v.x : NaN; }
 
   SE.content.registerLevel('ch01', {
     id: 'H4', order: 4, title: 'Newton\'s Yard',
@@ -109,8 +266,8 @@
     sections: ['1.2'],
     minutes: 25,
     intro: [
-      'The east yard froze solid overnight. Hask has dragged three sleds, two ore carts and a winch out onto the ice, and is chalking a grid on the frozen slab.',
-      '"Everything in this game runs on three rules Newton wrote down in 1687. They came from experiment, not from anyone\'s say-so, so that\'s how you\'ll learn them: by watching sleds. Ice is handy. It takes friction out of the picture, so the only forces left are the ones we put there."'
+      'The east yard froze solid overnight, so Hask has moved everything onto the greased rail: two ore carts, a test cart and a winch bolted to a bollard.',
+      '"Everything in this game runs on three rules Newton wrote down in 1687. They came from experiment, not from anyone\'s say-so, so that\'s how you\'ll learn them: by pulling carts. The rollers take friction out of the picture, so the only forces left along the rail are the ones we put there."'
     ].join('\n\n'),
     goals: [
       'State Newton\'s **first**, **second** and **third** laws and the frame they hold in',
@@ -118,355 +275,206 @@
       'Explain why action and reaction are equal yet give different accelerations',
       'Connect F = ma to the rate of change of momentum'
     ],
-    scene: yard([sled('s', 50, 4, '50 kg sled')]),
-    proveIt: [
-      {
-        id: 'H4.prove-2nd', text: 'An 80.0 kg cart on frictionless rails has an unbalanced force of 52.0 N on it. Its acceleration?',
-        inputs: [{
-          key: 'a', label: 'Acceleration', placeholder: 'e.g. 1.25 m/s^2',
-          spec: { value: PV.a, unit: 'm/s^2', sf: 3, form: 'si-units' },
-          answer: '0.650 m/s^2',                 // 52.0 / 80.0 = 0.650
-          wrong: [{ input: '0.65 m/s^2', kind: 'sigfig' }, { input: '1.54 m/s^2', kind: 'algebra' }]
-        }]
-      },
-      {
-        id: 'H4.prove-3rd', text: 'Crate A (30.0 kg) and crate B shove apart on ice. A accelerates at 2.40 m/s². How hard did A push on B?',
-        inputs: [{
-          key: 'F', label: 'Force of A on B', placeholder: 'e.g. 50.0 N',
-          spec: { value: PV.FB, unit: 'N', sf: 3, form: 'si' },
-          answer: '72.0 N',                      // 30.0 × 2.40 = 72.0
-          wrong: [{ input: '72 N', kind: 'sigfig' }, { input: '12.5 N', kind: 'algebra' }]
-        }]
-      }
-    ],
+    yard: { site: SITE, camera: RAIL_CAM, poke: false, design: rail(null) },
     unlocks: { tools: [], formulas: ['ch01.newton1', 'ch01.newton2', 'ch01.newton3'], materials: [] },
-    steps: freshHud([
+    // Reference builds for the scored jobs (checked by tests/yard.test.js).
+    solutions: {
+      'H4.winch': [
+        { set: { winch: { pull: '200 N' } } },
+        { set: { winch: { pull: '0.200 kN' } } },
+        { pass: false, set: { winch: { pull: '199 N' } } },       // a = 1.592: the pack gets a hand on it
+        { pass: false, set: { winch: { pull: '201 N' } } },       // a = 1.608: too fast into the buffer
+        { pass: false, set: { winch: { pull: '1.23 kN' } } },     // m g instead of m a
+        { pass: false, set: { winch: { pull: '78.1 N' } } }       // m / a
+      ],
+      'H4.reaction': [
+        { set: { B: { mass: '240 kg' } } },
+        { pass: false, set: { B: { mass: '60 kg' } } },          // same acceleration as A: far too fast
+        { pass: false, set: { B: { mass: '15 kg' } } },          // mass ratio upside down
+        { pass: false, set: { B: { mass: '270 kg' } } }
+      ]
+    },
+    steps: [
       {
         type: 'say', who: 'hask',
-        text: 'One rule before any of the laws. Newton\'s laws describe a **particle** as seen from a **non-accelerating reference frame**: the ground under your boots, the chalk grid, anything that isn\'t itself speeding up, slowing down or turning.\n\nIf you measure from inside a braking truck, the laws stop working as written. We\'ll come back to that. For now, the frozen yard is our frame.'
+        text: 'One rule before any of the laws. Newton\'s laws describe a **particle** as seen from a **non-accelerating reference frame**: the ground under your boots, the rail, anything that isn\'t itself speeding up, slowing down or turning.\n\nMeasure from inside a braking truck and the laws stop working as written. We\'ll come back to that. For now, the yard is our frame.'
       },
 
       // ------------------------------------------------------- first law
       {
-        type: 'predict', who: 'hask',
-        scene: yard([sled('s', 50, 3, '50 kg sled')]),
-        q: 'I\'m going to kick this 50 kg sled once, hard enough to get it to **2 m/s**, and then nobody touches it. The ice is effectively frictionless.\n\nAfter the kick, the sled…',
-        choices: [
-          { t: '…keeps sliding at 2 m/s, in a straight line.', correct: true, why: 'Right. Nothing unbalanced acts on it after the kick, so nothing changes its velocity. The trail marks stay evenly spaced.' },
-          { t: '…slowly loses speed, because the kick wears off.', why: 'A kick isn\'t a supply that runs down. Look at the trail marks: evenly spaced the whole way. Things slow down on ordinary ground because friction pushes on them, and there is none here.' },
-          { t: '…stops as soon as the boot leaves it.', why: 'That\'s what pushing a crate on concrete feels like, because friction is doing the stopping. On the ice it just keeps going.' }
-        ],
-        run: function (ctx) {
-          // 400 N for 0.25 s on 50 kg: Δv = F t / m = 400 × 0.25 / 50 = 2.00 m/s
-          var s = ctx.scene;
-          return s.run({ pushes: [{ id: 's', F: 400, duration: 0.25 }], duration: 6, settle: false }).then(function (r) {
-            var log = s.getLog('s'), mid = log.filter(function (p) { return p.t >= 1 && p.t <= 1.05; })[0];
-            return 'Measured: **' + (mid ? mid.v.toFixed(2) : '?') + ' m/s** one second after the kick and **' + r.detail.v.toFixed(2) + ' m/s** after ' + r.detail.time.toFixed(1) + ' s. Acceleration after the kick: **0.000 m/s²**.';
-          });
-        },
-        reveal: 'No unbalanced force, no change in velocity. A body at rest stays at rest, and a moving body keeps moving in a straight line at constant speed.'
+        type: 'build', who: 'hask',
+        yard: { design: rail(null), camera: RAIL_CAM, bin: [{ type: 'winch', count: 1, dials: { pull: '100 N', speed: '1 m/s' } }] },
+        text: 'Take the **Winch** from the bin. Click the **bollard** on the right for the drum end, then the **cart** for the hook.\n\nSelect the winch to see its dials: **100 N** max pull, line speed **1 m/s**. The drum reels in at 1 m/s and never pulls harder than 100 N.',
+        goalText: 'Winch from the bollard to the cart',
+        until: function (ctx) { return winchOn(ctx, 'cart') ? true : (ctx.find('winch') ? 'One end on the **bollard**, the other on the **cart**.' : false); }
       },
       {
-        type: 'reveal', kicker: 'Newton\'s first law', title: 'Rest and steady motion are the same state',
-        eq: '\\Sigma F = 0 \\quad \\implies \\quad v = \\t{constant}',
-        text: 'A particle that sits still keeps sitting, and one cruising in a straight line at steady speed keeps cruising: it **stays that way** until the forces on it stop cancelling, that is, until it feels an **unbalanced force**.\n\nForces can still act. What matters is whether they cancel. A sled with two equal ropes pulling opposite ways is in exactly the same state as a sled with no ropes at all: equilibrium, the a = 0 case you met in Still or Moving.',
+        type: 'watch', who: 'hask',
+        yard: { keep: true, goal: G.after(8), readouts: null },
+        text: 'Press **▶ Run** and watch two gauges: the cart\'s **speed** and the winch\'s **line tension**.\n\nAt first the cart is slower than the line, so the winch pulls as hard as it can. Keep watching after the cart catches up with the line.',
+        goalText: 'Run it for 8 s',
+        until: function (ctx, type) { return type === 'result' && !!ctx.result && !!winchOn(ctx, 'cart'); },
+        after: function (ctx) {
+          var w = winchOn(ctx, 'cart'), T = ctx.result.state.read(w.id + '.tension');
+          return 'At **t = 8 s**: the cart rolls at **' + f3(endSpeed(ctx.result, 'cart')) + ' m/s** and the line tension is **' + f3(Math.max(0, T)) + ' N**. Nothing pushes or pulls the cart along the rail any more, and it keeps going at the same speed.';
+        }
+      },
+      {
+        type: 'rule', title: 'Newton\'s first law',
+        law: '\\Sigma F = 0 \\quad \\Rightarrow \\quad v = \\t{constant}',
+        text: 'A particle at rest stays at rest, and one moving in a straight line at steady speed keeps doing exactly that, until an **unbalanced force** acts on it.\n\nWhile the line was tight, there was an unbalanced force and the speed climbed. Once the cart was moving with the line, the tension dropped to nothing and the speed simply **stayed**. Forces can still act on a body in this state (weight down, rollers up) as long as they cancel.',
         formula: 'ch01.newton1'
       },
 
       // ------------------------------------------------------ second law
       {
-        type: 'try', who: 'hask',
-        scene: yard([sled('s', 50, 3, '50 kg sled')]),
-        onEnter: function (ctx) { ctx.runner._h4runs = {}; },
-        text: 'Now the winch. It holds a steady pull, so the sled has one unbalanced force on it. Run all three experiments and note the acceleration each time. Watch the spacing of the trail marks too: it grows when the sled speeds up.',
-        actions: RUNS.map(function (r) { return { label: '▶ ' + r.label, run: function (ctx) { return runExperiment(ctx, r); } }; }),
-        goalText: 'Run all three experiments',
-        goal: function (ctx) {
-          var d = ctx.runner._h4runs || {};
-          return RUNS.every(function (r) { return d[r.key] != null; });
+        type: 'watch', who: 'hask',
+        kicker: 'Experiment',
+        yard: { design: rail({ dials: { pull: '100 N', speed: '12 m/s' } }), camera: RAIL_CAM, goal: G.after(3), readouts: ['cart.speed', 'winch.tension'] },
+        onEnter: function (ctx) { ctx.values.h4runs = []; },
+        text: 'Hask has swapped in a fast drum (**12 m/s** line speed), so the cart never catches the line and the winch always pulls at its **max pull**. That is the one unbalanced force on the cart.\n\nEach run lasts **3 s** from rest. Do these three, changing the cart\'s **mass** and the winch\'s **max pull**:\n\n1. 50 kg, 100 N\n2. 50 kg, 200 N\n3. 100 kg, 200 N\n\nThe acceleration is the final speed divided by 3 s.',
+        goalText: 'All three runs done',
+        until: function (ctx, type) {
+          if (type === 'result' && ctx.result) {
+            var m = ctx.si('cart', 'mass'), F = ctx.si('winch', 'pull'), v = endSpeed(ctx.result, 'cart');
+            if (isFinite(m) && isFinite(F) && !findRun(ctx, m, F)) runs(ctx).push({ m: m, F: F, v: v, t: ctx.result.time, a: v / ctx.result.time });
+          }
+          var left = WANT.filter(function (w) { return !findRun(ctx, w.m, w.F); });
+          if (!left.length) return true;
+          return runs(ctx).length ? 'Still to do: ' + left.map(function (w) { return '**' + w.m + ' kg, ' + w.F + ' N**'; }).join(' and ') + '.' : false;
         },
-        after: 'Lay the three results side by side and look for the pattern before the next card does it for you.'
+        after: 'Put the three results side by side before reading on. What happens when only the force changes? When only the mass changes?'
       },
       {
-        type: 'reveal', kicker: 'Your data', title: 'Three winch runs',
-        table: {
-          head: ['Run', 'Mass m', 'Winch force F', 'Measured a'],
-          rows: RUNS.map(function (r, i) { return [String(i + 1), r.m + ' kg', r.F + ' N', r.a.toFixed(2) + ' m/s²']; })
+        type: 'rule', title: 'Your three runs',
+        kicker: 'What the rail says',
+        eq: function (ctx) {
+          return WANT.map(function (w, i) {
+            var r = findRun(ctx, w.m, w.F);
+            return '\\t{Run ' + (i + 1) + ':}\\quad a = \\frac{' + f3(r.v) + '\\u{ m/s}}{' + f3(r.t) + '\\u{ s}} = ' + f3(r.a) + '\\u{ m/s^2} \\qquad (' + f3(w.m) + '\\u{ kg},\\ ' + f3(w.F) + '\\u{ N})';
+          });
         },
-        text: 'Runs 1 and 2 keep the mass and change the force. Runs 2 and 3 keep the force and change the mass.'
+        text: function (ctx) {
+          var r1 = findRun(ctx, 50, 100), r2 = findRun(ctx, 50, 200), r3 = findRun(ctx, 100, 200);
+          return '**Runs 1 → 2**: same cart, twice the pull, and the acceleration went from ' + f3(r1.a) + ' to ' + f3(r2.a) + ' m/s². It doubled: **a ∝ F**, and it points the way the winch pulls.\n\n' +
+            '**Runs 2 → 3**: same pull, twice the mass, and it fell from ' + f3(r2.a) + ' to ' + f3(r3.a) + ' m/s². It halved: **a ∝ 1/m**.\n\n' +
+            'Both at once: a ∝ F/m, so **F = k m a** for some constant k that depends only on the units we pick. Look at your numbers: F ÷ (m a) is ' + f3(100 / (50 * r1.a)) + ', ' + f3(200 / (50 * r2.a)) + ' and ' + f3(200 / (100 * r3.a)) + '.';
+        }
       },
       {
-        type: 'derive', who: 'hask', title: 'From three sled runs to F = ma',
-        intro: 'Read the table one comparison at a time.',
-        lines: [
-          {
-            eq: 'a \\propto F \\quad (m \\t{ fixed})',
-            why: 'Same 50 kg sled: 100 N gave 2.00 m/s², 200 N gave 4.00 m/s².',
-            ask: { q: 'Runs 1 → 2: the force doubled on the same sled. What did the acceleration do?', choices: [
-              { t: 'It doubled', correct: true, why: 'Twice the force, twice the acceleration. The acceleration is **proportional** to the force, and it points the same way the winch pulls.' },
-              { t: 'It stayed the same', why: 'Check the table again: 2.00 then 4.00 m/s².' },
-              { t: 'It went up by 100', why: 'The force went up by 100 N, but the acceleration went from 2.00 to 4.00 m/s². Compare ratios, not differences.' }
-            ] }
-          },
-          {
-            eq: 'a \\propto \\frac{1}{m} \\quad (F \\t{ fixed})',
-            why: 'Same 200 N pull: the 50 kg sled made 4.00 m/s², the 100 kg sled 2.00 m/s².',
-            ask: { q: 'Runs 2 → 3: same 200 N, twice the mass. What happened to the acceleration?', choices: [
-              { t: 'It halved', correct: true, why: 'Twice the mass, half the acceleration. Mass measures how hard a body is to speed up.' },
-              { t: 'It doubled', why: 'A heavier sled is harder to get moving, not easier. 4.00 dropped to 2.00 m/s².' },
-              { t: 'Nothing, because the force was the same', why: 'The force was the same, but the result wasn\'t: 4.00 then 2.00 m/s².' }
-            ] }
-          },
-          {
-            eq: 'a \\propto \\frac{F}{m} \\quad \\implies \\quad F = k\\,m\\,a',
-            why: 'Both proportionalities at once. The constant *k* depends only on which units we pick.'
-          },
-          {
-            eq: '1\\u{ N} = 1\\u{ kg} \\times 1\\u{ m/s^2} \\quad \\implies \\quad k = 1',
-            why: 'Define the unit of force so that the constant disappears.',
-            ask: { q: 'We get to choose the size of our force unit. Which choice makes the law cleanest?', choices: [
-              { t: 'Call one unit of force whatever gives 1 kg an acceleration of 1 m/s²', correct: true, why: 'That is exactly the **newton**. With it, k = 1, and the newton turns out to be a derived unit: 1 N = 1 kg·m/s².' },
-              { t: 'Use the weight of 1 kg as the unit of force', why: 'People have done that (the kilogram-force), but then k = 1/9.81 and it follows you through every calculation.' },
-              { t: 'Keep k and measure it for each sled', why: 'k is the same for every sled. It only depends on the units, so set it once and forget it.' }
-            ] }
-          },
-          { eq: 'F = ma', tag: '1–1', why: 'Newton\'s second law, with F the unbalanced force on the particle.' }
-        ],
-        outro: 'The acceleration has the **same direction** as the unbalanced force, and a size **proportional** to it. Mass is the constant of proportionality.'
-      },
-      {
-        type: 'reveal', kicker: 'Newton\'s second law', title: 'Unbalanced force makes acceleration',
-        eq: 'F = ma', tag: '1–1',
-        text: 'Put an unbalanced force **F** on a particle and it speeds up along the **line and sense of that force**, and the acceleration **a** grows in **proportion** to it. For a particle of mass *m*, F = ma.\n\nThe first law is the special case F = 0, so a = 0.',
+        type: 'rule', title: 'Newton\'s second law',
+        kicker: 'Newton\'s second law',
+        law: 'F = ma \\qquad \\t{(Eq. 1–1)}',
+        eq: '1\\u{ N} = 1\\u{ kg} \\times 1\\u{ m/s^2} \\quad \\Rightarrow \\quad k = 1',
+        text: 'We get to choose the size of the force unit, so choose the one that makes k = 1: the force that gives **1 kg** an acceleration of **1 m/s²**. That is the **newton**, a derived unit, 1 N = 1 kg·m/s².\n\nAn unbalanced force **F** on a particle of mass **m** gives it an acceleration **a** in the **same direction** as the force and **proportional** to it. The first law is the special case F = 0, so a = 0.',
         formula: 'ch01.newton2'
       },
       {
-        type: 'task', id: 'H4.winch', who: 'juno',
-        title: 'Supply run',
-        scene: winchScene(),
-        text: 'Juno, over the radio: "The pack is coming up the spur. That sled is 125 kg of fuel and medicine and it has to get through the shed door before they reach it."\n\nHask has already worked the timing: on the frictionless ice the sled needs an acceleration of exactly **1.60 m/s²**. Any less and the lead runner gets a hand on it. Any more and it hits the shed buffer faster than the buffer is rated for. The winch holds whatever pull you set.\n\nWhat winch force should you set? (3 s.f.)',
-        inputs: [{
-          key: 'F', label: 'Winch force', placeholder: 'e.g. 150 N',
-          // F = m a = 125 × 1.60 = 200 N; 199 N and 201 N both fail in the sim, so the tolerance is tighter than 0.5 %
-          spec: { value: W.F, unit: 'N', sf: 3, form: 'si', tol: 0.003, mistakes: [
-            { ratio: 1 / (W.aNeed * W.aNeed), kind: 'algebra', msg: 'That looks like m ÷ a. Newton\'s second law multiplies: F = m a.' },
-            { ratio: 9.81 / W.aNeed, kind: 'concept', msg: 'That\'s the sled\'s weight, m g. On level ice the winch only has to supply m a.' }
-          ] },
-          answer: '0.200 kN',
-          wrong: [{ input: '78.1 N', kind: 'algebra' }, { input: '1.23 kN', kind: 'concept' }, { input: '199 N', kind: 'rounding' }, { input: '200', kind: 'unit' }]
-        }],
+        type: 'job', id: 'H4.winch', who: 'juno',
+        yard: { design: SUPPLY, camera: { fit: { lo: { x: -5, y: -1 }, hi: { x: 32, y: 4 } } }, bin: [], readouts: ['sled.speed', 'winch.tension', 'pack.front'] },
+        text: 'Juno, over the radio: "The pack is coming up the spur. That cart is **125 kg** of fuel and medicine and it has to get into the shed before they reach it."\n\nHask has worked the timing: on the greased rail the cart needs an acceleration of exactly **1.60 m/s²**. Any less and the lead runner gets a hand on it. Any more and it hits the shed buffer faster than the buffer is rated for.\n\nThe shed winch is the only force along the rail. Set its **max pull** and run it.',
+        goalText: 'Cart into the shed, ahead of the pack, without wrecking the buffer',
+        goal: WINCH_GOAL,
+        timeout: 20,
         hints: [
-          'The ice is frictionless, so the winch is the only horizontal force. That makes it the unbalanced force.',
+          'The rollers are frictionless and the winch line is level, so the winch pull is the **unbalanced force** on the cart.',
           'Newton\'s second law: unbalanced force = mass × acceleration.',
-          'F = m a = 125 kg × 1.60 m/s² = 200 kg·m/s² = 200 N. Written plainly, "200" hides how many figures are significant, so give it as **0.200 kN**.'
+          'F = m a = 125 kg × 1.60 m/s² = **200 N**. Type it as 200 N or 0.200 kN.'
         ],
-        consequence: function (ctx, a) {
-          var F = a.F.si == null ? 0 : a.F.si;
-          var s = ctx.setScene('track', winchScene().params);
-          var acc = F / W.m;
-          ctx.hud(['Winch **' + f3(F) + ' N** on **125 kg**: a = ' + f3(acc) + ' m/s²', 'Buffer rated **' + W.rating.toFixed(2) + ' m/s**']);
-          return s.run({ forces: { sled: F }, zombieSpeed: W.vz, duration: 14 }).then(function (r) {
-            var d = r.detail;
-            if (r.outcome === 'caught') return 'At a = ' + f3(acc) + ' m/s² the sled was too slow off the mark. The pack caught its tail at x = ' + d.x.toFixed(1) + ' m, ' + d.time.toFixed(1) + ' s in.';
-            if (r.outcome === 'bumperBroken') return 'The sled made it in ahead of the pack, then hit the shed buffer at **' + d.impactSpeed.toFixed(2) + ' m/s**, over its ' + W.rating.toFixed(2) + ' m/s rating. The buffer tore loose and the sled went through the back wall.';
-            if (d.reached) {
-              var closest = acc > 0 ? W.gap0 - W.vz * W.vz / (2 * acc) : 0;
-              return 'Through the door at ' + d.arrivalTime.toFixed(2) + ' s. The lead runner came within **' + Math.max(0, closest * 100).toFixed(0) + ' cm** of the tail. The sled met the buffer at **' + d.impactSpeed.toFixed(2) + ' m/s** (rated ' + W.rating.toFixed(2) + ' m/s) and settled. Door shut.';
-            }
-            return 'The sled never reached the door (outcome: ' + r.outcome + ').';
-          });
+        onFail: function (ctx) {
+          var F = ctx.si('winch', 'pull');
+          return isFinite(F) ? 'With **' + f3(F) + ' N** on 125 kg the cart accelerated at **' + f3(F / W.m) + ' m/s²**. It needs 1.60 m/s².' : '';
         },
-        explain: 'Only one horizontal force acts, so it is the unbalanced force, and F = ma gives it directly. Notice how small the margin was: a 0.5 % error in either direction would have cost you the sled.'
-      },
-      {
-        type: 'sandbox',
-        scene: yard([sled('s', 125, 3, 'test sled')]),
-        text: 'The yard is yours. Change the mass and the winch force, add a little friction, and give the sled a starting speed. Keep an eye on the cyan acceleration arrow: it always points along the **unbalanced** force.',
-        controls: ['mass', 'force', 'mu', 'v0'],
-        prompts: ['Pull backwards on a sled that is sliding forwards. Which way does the acceleration point?', 'Add friction and find the winch force that keeps a moving sled at constant speed. What is the unbalanced force then?', 'Halve the mass at a fixed force. Does the acceleration exactly double?']
+        success: function (ctx) {
+          var a = ctx.si('winch', 'pull') / W.m, closest = W.gap0 - W.vz * W.vz / (2 * a);
+          return 'Door shut. At a = ' + f3(a) + ' m/s² the lead runner came within **' + Math.max(0, closest * 100).toFixed(0) + ' cm** of the tail. One force along the rail, so F = ma gave the setting directly, and half a percent either way would have cost you the cart.';
+        }
       },
 
       // ------------------------------------------------------- third law
       {
-        type: 'predict', who: 'hask',
-        scene: pairScene(40, 200, 'survivor 40 kg', 'ore cart 200 kg'),
-        q: 'A survivor on a light 40 kg cart braces a pole against a 200 kg ore cart and shoves. There\'s a force gauge on each cart.\n\nWhile they push apart, which cart feels the **bigger force**?',
-        choices: [
-          { t: 'The 40 kg cart. It\'s the one that goes flying.', why: 'It does go flying, but that\'s because it has less mass, not because it felt more force. Look at the gauges.' },
-          { t: 'The 200 kg ore cart. It has more to resist with.', why: 'More mass means a smaller acceleration from the same force. The gauges read the same.' },
-          { t: 'Neither. The two forces are equal.', correct: true, why: 'The gauges match exactly. Each cart pushes on the other just as hard as the other pushes back.' }
-        ],
-        run: function (ctx) {
-          // 200 N for 0.4 s: Δv_A = 200 × 0.4 / 40 = 2.00 m/s, Δv_B = 200 × 0.4 / 200 = 0.400 m/s
-          var s = ctx.scene;
-          var peak = { A: 0, B: 0 };
-          var timer = setInterval(function () { peak.A = Math.max(peak.A, s.body('A').gauge); peak.B = Math.max(peak.B, s.body('B').gauge); }, 30);
-          return s.run({ springs: [{ a: 'A', b: 'B', F: 200, duration: 0.4 }], duration: 3, settle: false }).then(function (r) {
-            clearInterval(timer);
-            var vA = velAt(s, 'A', r.detail.time), vB = velAt(s, 'B', r.detail.time);
-            return 'Gauges: **' + f3(peak.A || 200) + ' N** on the survivor cart, **' + f3(peak.B || 200) + ' N** on the ore cart. Speeds afterwards: **' + Math.abs(vA).toFixed(2) + ' m/s** (left) and **' + Math.abs(vB).toFixed(2) + ' m/s** (right). Accelerations during the shove: ' + (Math.abs(vA) / 0.4).toFixed(2) + ' and ' + (Math.abs(vB) / 0.4).toFixed(2) + ' m/s².';
-          });
-        },
-        reveal: 'Same force, different masses, so different accelerations. The second law explains the difference; the third law says the forces themselves are a matched pair.'
+        type: 'watch', who: 'hask',
+        yard: { design: pair('40 kg', '200 kg', 'survivor cart', 'ore cart'), camera: PAIR_CAM, goal: G.after(2), readouts: ['kick.onA', 'kick.onB', 'A.speed', 'B.speed'] },
+        text: 'A survivor on a light **40 kg** cart has wedged a spring pack against a **200 kg** ore cart. The pack fires for **0.4 s** and then falls clear. It has a force gauge on each end.\n\nBefore you run it, decide which cart you think will feel the **bigger push**. Then press **▶ Run** (try **¼×** speed) and watch both gauges.',
+        goalText: 'Fire the spring pack',
+        until: function (ctx, type) { return type === 'result' && !!ctx.result; },
+        after: function (ctx) {
+          var vA = endSpeed(ctx.result, 'A'), vB = endSpeed(ctx.result, 'B'), F = ctx.si('kick', 'force');
+          ctx.values.pair = { mA: ctx.si('A', 'mass'), mB: ctx.si('B', 'mass'), vA: vA, vB: vB, F: F, t: ctx.si('kick', 'time') };
+          return 'Both gauges read **' + f3(F) + ' N** the whole time the pack fired. But the survivor cart left at **' + f3(Math.abs(vA)) + ' m/s** to the left and the ore cart at **' + f3(Math.abs(vB)) + ' m/s** to the right.';
+        }
       },
       {
-        type: 'reveal', kicker: 'Newton\'s third law', title: 'Forces come in pairs',
-        eq: 'F_{A \\t{ on } B} = -F_{B \\t{ on } A}',
-        text: 'When two particles push or pull on each other, the two forces are **equal** in size, point in **opposite** directions and lie on **one line** (collinear).\n\nThey act on **different bodies**. That is why they never cancel each other out: one is on the survivor\'s cart and the other is on the ore cart. To find what a single body does, count only the forces acting **on that body**.',
+        type: 'rule', title: 'Newton\'s third law',
+        law: 'F_{A \\t{ on } B} = -F_{B \\t{ on } A}',
+        eq: function (ctx) {
+          var p = ctx.values.pair;
+          if (!p) return null;
+          return ['a_A = \\frac{F}{m_A} = \\frac{' + f3(p.F) + '\\u{ N}}{' + f3(p.mA) + '\\u{ kg}} = ' + f3(p.F / p.mA) + '\\u{ m/s^2}',
+            'a_B = \\frac{F}{m_B} = \\frac{' + f3(p.F) + '\\u{ N}}{' + f3(p.mB) + '\\u{ kg}} = ' + f3(p.F / p.mB) + '\\u{ m/s^2}'];
+        },
+        text: 'When two bodies push or pull on each other, the two forces are **equal** in size, **opposite** in direction and **collinear** (on one line).\n\nThey act on **different bodies**: one on the survivor cart, one on the ore cart. That is why they never cancel. To find what one body does, count only the forces acting **on that body**, then use the second law on it alone. Same force, five times the mass, a fifth of the acceleration.',
         formula: 'ch01.newton3'
       },
       {
-        type: 'task', id: 'H4.reaction', who: 'hask',
-        title: 'Read the other cart',
-        scene: pairScene(R.mA, R.mB, 'A 60.0 kg', 'B 240 kg'),
-        text: 'Cart A (60.0 kg) and cart B (240 kg) spring apart on the rails. A tape on cart A shows it accelerated at **3.20 m/s²** during the shove. Friction is negligible.\n\nWhat was cart B\'s acceleration? (3 s.f.)',
-        inputs: [{
-          key: 'aB', label: 'Acceleration of B', placeholder: 'e.g. 1.25 m/s^2',
-          // F = 60.0 × 3.20 = 192 N on each cart; a_B = 192 / 240 = 0.800 m/s²
-          spec: { value: R.aB, unit: 'm/s^2', sf: 3, form: 'si-units', mistakes: [
-            { ratio: R.aA / R.aB, kind: 'concept', msg: 'Equal forces, not equal accelerations. B has four times the mass.' },
-            { ratio: (R.aA * R.mB / R.mA) / R.aB, kind: 'algebra', msg: 'The mass ratio went the wrong way. The heavier cart gets the smaller acceleration.' }
-          ] },
-          answer: '0.800 m/s^2',
-          wrong: [{ input: '3.20 m/s^2', kind: 'concept' }, { input: '12.8 m/s^2', kind: 'algebra' }, { input: '0.8 m/s^2', kind: 'sigfig' }, { input: '192 N', kind: 'unit' }]
-        }],
-        hints: [
-          'Start from what you know about cart A. Its mass and acceleration tell you the force on it.',
-          'By the third law, B feels a force of the same size. Then use the second law on B alone.',
-          'F = 60.0 × 3.20 = 192 N on each cart, so a_B = 192 N ÷ 240 kg = **0.800 m/s²**.'
-        ],
-        consequence: function (ctx, a) {
-          var aB = a.aB.si == null ? 0 : a.aB.si;
-          var s = ctx.setScene('track', pairScene(R.mA, R.mB, 'A 60.0 kg', 'B 240 kg').params);
-          ctx.hud(['Shove: **' + f3(R.F) + ' N** on each cart for ' + R.t + ' s', 'Your prediction for B: ' + f3(Math.abs(aB) * R.t) + ' m/s afterwards']);
-          return s.run({ springs: [{ a: 'A', b: 'B', F: R.F, duration: R.t }], duration: 3, settle: false }).then(function (r) {
-            var vA = Math.abs(velAt(s, 'A', r.detail.time)), vB = Math.abs(velAt(s, 'B', r.detail.time));
-            var meas = vB / R.t;
-            var msg = 'Gauges read **' + f3(R.F) + ' N** on both carts. A left at ' + vA.toFixed(2) + ' m/s (a = ' + (vA / R.t).toFixed(2) + ' m/s²), B at **' + vB.toFixed(3) + ' m/s** (a = **' + meas.toFixed(3) + ' m/s²**).';
-            if (Math.abs(Math.abs(aB) - meas) > 0.01 * meas) msg += ' You predicted ' + f3(Math.abs(aB)) + ' m/s², which would have B rolling at ' + f3(Math.abs(aB) * R.t) + ' m/s.';
-            return msg;
-          });
+        type: 'rule', title: 'The second law in momentum form',
+        kicker: 'Look again at your run',
+        law: 'F = \\frac{d(mv)}{dt} = m\\frac{dv}{dt} = ma \\quad (m \\t{ constant})',
+        eq: function (ctx) {
+          var p = ctx.values.pair;
+          if (!p) return null;
+          return ['m_A v_A = (' + f3(p.mA) + '\\u{ kg})(' + f3(Math.abs(p.vA)) + '\\u{ m/s}) = ' + f3(p.mA * Math.abs(p.vA)) + '\\u{ kg·m/s}',
+            'm_B v_B = (' + f3(p.mB) + '\\u{ kg})(' + f3(Math.abs(p.vB)) + '\\u{ m/s}) = ' + f3(p.mB * Math.abs(p.vB)) + '\\u{ kg·m/s}',
+            '\\frac{\\Delta(mv)}{\\Delta t} = \\frac{' + f3(p.mB * Math.abs(p.vB)) + '\\u{ kg·m/s}}{' + f3(p.t) + '\\u{ s}} = ' + f3(p.mB * Math.abs(p.vB) / p.t) + '\\u{ N}'];
         },
-        explain: 'Third law first (same 192 N on both), then the second law on each cart separately. Four times the mass, a quarter of the acceleration.'
+        text: 'Newton actually wrote the second law with **linear momentum**, mass times velocity: the unbalanced force on a particle is proportional to the **time rate of change of its momentum**. For a body whose mass doesn\'t change, the m comes straight out of the derivative and you are back at F = ma.\n\nYour two carts left with equal and opposite momenta, and the momentum each one gained, divided by the time the pack fired, is the gauge reading.'
       },
       {
-        type: 'sandbox',
-        scene: pairScene(40, 200, 'cart A', 'cart B'),
-        text: 'Two carts and a spring. The sliders change **cart A**. Fire the spring at different strengths and compare the two gauges, then the two speeds.',
-        controls: ['mass'],
-        actions: [100, 200, 400].map(function (F) {
-          return { label: '▶ Spring apart, ' + F + ' N', run: function (ctx) {
-            var s = ctx.scene;
-            return s.run({ springs: [{ a: 'A', b: 'B', F: F, duration: 0.4 }], duration: 1, settle: false }).then(function (r) {
-              var A = s.body('A'), B = s.body('B'), vA = Math.abs(velAt(s, 'A', 0.4)), vB = Math.abs(velAt(s, 'B', 0.4));
-              return F + ' N on each cart for 0.4 s. A (' + f3(A.m) + ' kg): ' + vA.toFixed(2) + ' m/s. B (' + f3(B.m) + ' kg): ' + vB.toFixed(2) + ' m/s. Momenta: ' + f3(A.m * vA) + ' and ' + f3(B.m * vB) + ' kg·m/s, in opposite directions.';
-            });
-          } };
-        }),
-        prompts: ['Make cart A as heavy as cart B. What happens to the two speeds?', 'Compare the two momenta after each shove. Why do they always match?']
-      },
-
-      // ------------------------------------------------- momentum form
-      {
-        type: 'derive', who: 'hask', title: 'The second law as momentum',
-        intro: 'Newton actually stated the second law in terms of **linear momentum**, mass times velocity. For a body whose mass doesn\'t change, it\'s the same law.',
-        lines: [
-          { eq: 'p = mv', why: 'Linear momentum: how much motion a body carries.' },
-          {
-            eq: 'F = \\frac{dp}{dt} = \\frac{d(mv)}{dt}',
-            why: 'The unbalanced force equals the rate at which momentum changes.',
-            ask: { q: 'If the sled\'s mass is fixed, what is d(mv)/dt?', choices: [
-              { t: 'm dv/dt', correct: true, why: 'A constant comes straight out of the derivative.' },
-              { t: 'v dm/dt', why: 'That term is zero when m doesn\'t change.' },
-              { t: 'mv / t', why: 'That\'s an average over a whole interval, and only if it started from rest. The law is about the rate at each instant.' }
-            ] }
-          },
-          {
-            eq: 'F = m\\frac{dv}{dt} = ma',
-            why: 'dv/dt is the acceleration, so we are back at Eq. 1–1.',
-            tag: '1–1'
-          }
+        type: 'job', id: 'H4.reaction', who: 'hask',
+        yard: { design: couplerDesign(), camera: PAIR_CAM, goal: COUPLE_GOAL, bin: [], readouts: ['kick.onA', 'A.speed', 'B.speed'] },
+        text: 'Ore cart B has to roll into the **coupler** at **0.400 m/s**: the latch only catches between 0.39 and 0.41 m/s.\n\nThe spring pack\'s dial is hidden and its gauge only reads on **cart A\'s side**. Its tag says it gives a **60.0 kg** cart an acceleration of **3.20 m/s²** for **0.500 s**. Cart A is 60.0 kg.\n\nYou can\'t change the pack. You can load ore into **cart B**: set its **mass** so it leaves at exactly 0.400 m/s.',
+        goalText: 'Cart B latches into the coupler',
+        goal: COUPLE_GOAL,
+        timeout: 25,
+        hints: [
+          'Start from what you know about cart A. Its mass and acceleration tell you the force the pack puts on it.',
+          'By the third law, the pack pushes on B just as hard as on A. Then use the second law on B alone: v = F t / m.',
+          'F = 60.0 kg × 3.20 m/s² = 192 N on each cart. B needs v = 0.400 m/s after 0.500 s, so m = F t / v = 192 × 0.500 / 0.400 = **240 kg**.'
         ],
-        outro: 'So the second law also reads: the unbalanced force on a particle is proportional to the **time rate of change of its linear momentum**. For a constant mass that is exactly F = ma.'
+        onFail: function (ctx) {
+          var m = ctx.si('B', 'mass');
+          return isFinite(m) ? 'With B at **' + f3(m) + ' kg**, the pack gave it ' + f3(R.F * R.t / m) + ' m/s. Count the force on B, then a = F / m.' : '';
+        },
+        success: 'Latched. The pack pushed A and B equally hard (third law) and each cart answered on its own mass (second law). Four times the mass, a quarter of the acceleration: 0.800 m/s² against A\'s 3.20.'
       },
       {
-        type: 'deeper', title: 'The leaking sand sled',
-        teaser: 'A sled loses sand through a hole in its floor. Does F = d(mv)/dt mean it speeds up just by leaking?',
+        type: 'deeper', title: 'The leaking sand cart',
+        teaser: 'A cart leaks sand through a hole in its floor. Does F = d(mv)/dt mean it speeds up just by leaking?',
         steps: [
-          {
-            type: 'predict', who: 'hask',
-            scene: leakScene(2),
-            q: 'This sled carries 60 kg of sand that leaks out of a hole in the floor at 4 kg/s. It\'s sliding at 2 m/s on ice and **nothing pulls it**.\n\nThe momentum mv is falling as the sand drains. What does the sled\'s speed do?',
-            choices: [
-              { t: 'It speeds up, because mv must stay constant with no force.', why: 'The momentum of the **sled** isn\'t conserved on its own: the sand carries momentum away with it. Watch the readout.' },
-              { t: 'It stays at 2 m/s.', correct: true, why: 'Right. Each grain leaves straight down relative to the sled, so it leaves at the sled\'s own speed and takes its own share of momentum along. Nothing pushes the sled forward or back.' },
-              { t: 'It slows down, because it\'s losing momentum.', why: 'It loses momentum only because it loses mass. Its velocity has no reason to change.' }
-            ],
-            run: function (ctx) {
-              var s = ctx.scene;
-              return s.run({ duration: 6, settle: false }).then(function (r) {
-                return 'After ' + r.detail.time.toFixed(1) + ' s: mass **' + f3(P.massAt(LEAK.m0, LEAK.leak, LEAK.mDry, r.detail.time)) + ' kg** (from 120 kg), speed **' + r.detail.v.toFixed(2) + ' m/s**. A trail of sand piles behind it.';
-              });
-            },
-            reveal: 'Applying F = d(mv)/dt to the sled alone would be wrong here: the lost sand is part of the system, and it leaves with the sled\'s velocity. The careful form for a body that sheds mass is F = m dv/dt + (v − u) dm/dt, with u the velocity of the escaping mass. Here u = v, so the second term vanishes.'
-          },
-          {
-            type: 'predict', who: 'hask',
-            scene: leakScene(0),
-            q: 'Same sled, from rest, now with the winch holding a steady **60 N** for 8 s. Without the leak it would reach 60 × 8 ÷ 120 = **4.00 m/s**. With the leak?',
-            choices: [
-              { t: 'Faster than 4.00 m/s', correct: true, why: 'The same force on a shrinking mass gives a growing acceleration: a = F / m(t), with m(t) the current mass.' },
-              { t: 'Exactly 4.00 m/s', why: 'That would only be true if the mass stayed 120 kg the whole time.' },
-              { t: 'Slower than 4.00 m/s', why: 'Losing mass makes the sled easier to accelerate, not harder.' }
-            ],
-            run: function (ctx) {
-              var s = ctx.scene;
-              return s.run({ forces: { sand: LEAK.F }, duration: LEAK.t, settle: false }).then(function (r) {
-                return 'Measured **' + r.detail.v.toFixed(2) + ' m/s** after ' + r.detail.time.toFixed(1) + ' s. Integrating a = F / m(t) gives v = (F / leak) ln(m₀ / m) = ' + LEAK.vTrue.toFixed(2) + ' m/s, against ' + LEAK.vNaive.toFixed(2) + ' m/s for a sled that kept all its sand.';
-              });
-            }
-          }
+          { type: 'say', who: 'hask', text: 'Picture a cart carrying 60 kg of sand that pours out of a hole in its floor at 4 kg/s while it rolls at 2 m/s with nothing pulling it. Its momentum mv falls as the sand drains. Does it speed up to keep mv constant?\n\nNo. Each grain leaves straight down relative to the cart, so it leaves with the cart\'s own speed and carries its share of momentum away. Nothing pushes the cart forward or back, so its velocity stays at 2 m/s. You can\'t apply F = d(mv)/dt to the cart alone here: the sand that left is part of the system.' },
+          { type: 'say', who: 'hask', text: 'Now put a steady 60 N on it from rest for 8 s. Keeping all 120 kg, it would reach 60 × 8 ÷ 120 = 4.00 m/s. Leaking, its mass is m(t) = 120 − 4t, so the same force gives a growing acceleration a = F / m(t). Add that up over the 8 s and v = (F / 4) ln(120 / 88) = 4.65 m/s. Same force, more speed, because there is less of it to push by the end.' }
         ]
       },
-
-      // ------------------------------------------------ reference frames
       {
         type: 'deeper', title: 'When the laws seem to fail: riding in the braking truck',
         teaser: 'From a braking truck, a loose drum slides forward with nothing pushing it. Is the first law broken?',
         steps: [
-          {
-            type: 'predict', who: 'hask',
-            scene: yard([cart('truck', 900, 5, 'truck (braking)', { v: 5, mu: 0.5, muS: 0.6 }), { id: 'drum', m: 30, x: 7.4, v: 5, mu: 0, label: 'drum', kind: 'crate' }], { surface: 'concrete', target: 'truck' }),
-            q: 'The truck is doing 5 m/s with a fuel drum loose on its icy bed (drawn here on the ground line, just ahead of the cab). The driver brakes. From the driver\'s seat the drum **slides forward** and away.\n\nWhat pushed the drum forward?',
-            choices: [
-              { t: 'Nothing. The drum kept its 5 m/s; the truck slowed down under it.', correct: true, why: 'Seen from the ground (a non-accelerating frame) the drum does exactly what the first law says: it keeps its velocity. The truck is what changed.' },
-              { t: 'An inertia force pushing it forward', why: 'Nobody and nothing applies that force. It only "appears" because the driver is measuring from a frame that is itself decelerating.' },
-              { t: 'Friction from the truck bed', why: 'The bed is icy, and friction from a slowing truck would drag the drum back, not forward.' }
-            ],
-            run: function (ctx) {
-              var s = ctx.scene;
-              return s.run({ duration: 2.5, settle: false }).then(function (r) {
-                var vT = velAt(s, 'truck', 0.6), vD = velAt(s, 'drum', r.detail.time);
-                return 'Ground frame, 0.6 s after braking: truck **' + vT.toFixed(2) + ' m/s** (braking at ' + (0.5 * 9.81).toFixed(2) + ' m/s²), drum still **' + vD.toFixed(2) + ' m/s**, a = 0. From the cab the drum appears to accelerate forward at ' + (0.5 * 9.81).toFixed(2) + ' m/s² with no force on it.';
-              });
-            },
-            reveal: 'That is why the laws are stated for a **non-accelerating reference frame**. In an accelerating frame you either switch back to the ground frame or add fictitious "inertial" forces to make the books balance. Dynamics courses cover how.'
-          }
+          { type: 'say', who: 'hask', text: 'A truck brakes with a fuel drum loose on its icy bed. From the driver\'s seat the drum **slides forward**, and nothing pushed it.\n\nThe first law isn\'t broken. The driver is measuring from an **accelerating** frame. Seen from the road, the drum just carries on at the speed it had, because nothing acts on it along the bed. It\'s the truck that slows down underneath it. That\'s why Newton\'s laws come with the small print: measure from a frame that isn\'t accelerating.' }
         ]
       },
-
-      // ------------------------------------------------------ recall
       {
-        type: 'classify', id: 'H4.which-law',
-        text: 'Newton\'s three laws are worth knowing by heart. Which law is each yard observation about?',
-        bins: ['First law', 'Second law', 'Third law'],
-        items: [
-          { t: 'A drum coasts across the frozen yard at a steady 1.2 m/s with nothing touching it', bin: 'First law', why: 'No unbalanced force, constant velocity.' },
-          { t: 'Doubling the winch pull doubles the sled\'s acceleration', bin: 'Second law', why: 'a is proportional to F.' },
-          { t: 'The rope pulls the winch toward the sled exactly as hard as it pulls the sled toward the winch', bin: 'Third law', why: 'Equal, opposite, collinear, on different bodies.' },
-          { t: 'A parked cart stays put until someone pushes harder than friction can hold', bin: 'First law', why: 'Balanced forces, so it remains at rest.' },
-          { t: 'A 250 kg sled needs five times the pull of a 50 kg one to reach the same acceleration', bin: 'Second law', why: 'F = ma with a fixed.' },
-          { t: 'A survivor shoves an ore cart and rolls backwards off their own cart', bin: 'Third law', why: 'The cart pushes back on her with an equal and opposite force.' }
+        type: 'free', who: 'hask',
+        yard: {
+          design: { parts: rail(null).parts.concat(pair('40 kg', '200 kg', 'cart A', 'cart B').parts) },
+          camera: { fit: { lo: { x: -1, y: -1 }, hi: { x: 28, y: 4 } } },
+          bin: [{ type: 'winch', count: 2, dials: { pull: '200 N', speed: '12 m/s' } }, { type: 'h04-kicker', count: 2 }, { type: 'push', count: 2 }, { type: 'cart', count: 2 }, { type: 'speedo', count: 3 }],
+          goal: null, poke: true
+        },
+        text: 'The rail is yours: winches, spring packs, pushes and spare carts. While it runs you can **drag a cart** with the mouse.',
+        prompts: [
+          'Pull backwards on a cart that is rolling forwards. Which way does the acceleration point?',
+          'Make carts A and B the same mass and fire the pack. What happens to the two speeds?',
+          'Winch cart A while the spring pack fires. Do the two gauges on the pack still agree?'
         ]
       },
       {
@@ -475,10 +483,10 @@
           'Newton\'s laws hold for a particle measured from a **non-accelerating reference frame**. Learn all three by heart.',
           '**First law**: with no unbalanced force, a particle at rest stays at rest, and a moving particle keeps a constant velocity.',
           '**Second law**: **F = ma** (Eq. 1–1). The acceleration points along the unbalanced force and is proportional to it. Defining the newton as 1 kg·m/s² makes the constant equal to 1.',
-          'Stated with momentum: the unbalanced force is the time rate of change of linear momentum. For a constant mass this is F = ma.',
+          'With momentum: the unbalanced force is the time rate of change of linear momentum. For a constant mass this is F = ma.',
           '**Third law**: action and reaction are **equal, opposite and collinear**, and they act on **different bodies**, so they never cancel on one body.'
         ]
       }
-    ])
+    ]
   });
 })(globalThis.SE);
