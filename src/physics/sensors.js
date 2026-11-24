@@ -22,10 +22,8 @@
  * the centroid of the normal forces (exact for parallel forces, all ≥ 0) and
  * a single friction force at the same point. perPoint: true lists each point.
  *
- * Applied forces: body.applyForce is cleared at the end of every step, so
- * this file records each call (vector and point) stamped with the step it
- * acts in. The recording wraps Body.prototype.applyForce / applyTorque and
- * calls the original unchanged.
+ * Applied forces come from body.lastApplied: every applyForce / applyTorque
+ * call that acted during the last step, with its point of application.
  *
  * Joints report through their reaction(): { force on body B, torque }.
  * Body A gets the opposite. A joint whose two sides aren't equal and opposite
@@ -50,42 +48,13 @@
   var M = SE.pmath, P = SE.phys;
 
   /* ------------------------------------------------------------ helpers */
-  // Step length. world.dt when the world records it, else the mean step so far.
+  // Length of the last step (before the first step there are no forces yet).
   function stepDt(world, opts) {
-    if (opts && opts.dt) return opts.dt;
-    if (world.dt) return world.dt;
-    return world.stepCount ? world.time / world.stepCount : 1 / 60;
+    return (opts && opts.dt) || world.dt || 1 / 60;
   }
   function invSubstep(world, opts) { return world.substeps / stepDt(world, opts); }
   function pick(vec, component) { return component === 'x' ? vec.x : component === 'y' ? vec.y : M.len(vec); }
   function isSpring(j) { return j.type === 'distance' && !j.rope && (j.stiffness > 0 || j.hertz > 0); }
-
-  /* ---------------------------------------- recording of applied forces */
-  // Forces applied between steps n-1 and n act during step n (stepCount = n
-  // while it runs). After the step, stepCount is n + 1, so freeBody reads
-  // the entries stamped stepCount - 1.
-  var Body = P.Body;
-  if (Body && !Body.prototype.applyForce.recorded) {
-    var applyForce = Body.prototype.applyForce, applyTorque = Body.prototype.applyTorque;
-    var record = function (body, entry) {
-      if (body.type !== 'dynamic') return;
-      var stamp = body.world ? body.world.stepCount : 0;
-      if (body.appliedStamp !== stamp) { body.applied = []; body.appliedStamp = stamp; }
-      body.applied.push(entry);
-    };
-    Body.prototype.applyForce = function (F, worldPoint) {
-      record(this, { vector: M.v(F.x, F.y), point: worldPoint ? M.v(worldPoint.x, worldPoint.y) : null, torque: 0 });
-      return applyForce.apply(this, arguments);
-    };
-    Body.prototype.applyTorque = function (T) {
-      record(this, { vector: null, point: null, torque: T });
-      return applyTorque.apply(this, arguments);
-    };
-    Body.prototype.applyForce.recorded = true;
-  }
-  function appliedLastStep(world, body) {
-    return body.applied && body.appliedStamp === world.stepCount - 1 ? body.applied : [];
-  }
 
   /* --------------------------------------------------- joint reactions */
   // { force on `body`, torque on `body`, point } for one joint, or null.
@@ -164,9 +133,9 @@
     });
 
     // applied loads recorded during the last step
-    appliedLastStep(world, body).forEach(function (e) {
-      if (e.vector) add('applied', null, e.point || M.v(body.c.x, body.c.y), e.vector, 'P');
-      else add('applied', null, M.v(body.c.x, body.c.y), M.v(0, 0), 'T', e.torque);
+    (body.lastApplied || []).forEach(function (e) {
+      var at = e.point ? M.v(e.point.x, e.point.y) : M.v(body.c.x, body.c.y);
+      add('applied', null, at, M.v(e.vector.x, e.vector.y), e.torque ? 'T' : 'P', e.torque);
     });
 
     // linear and angular damping act like drag: -m c v and -I c ω
