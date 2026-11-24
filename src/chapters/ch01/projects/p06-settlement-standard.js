@@ -520,36 +520,4 @@
       ctx.restore();
     }
   });
-
-  // Stand-in winch until the rigging parts land (same type name, dials and
-  // readouts as the parts contract). Skipped when a real winch is defined.
-  if (!Y.partDef('winch')) Y.definePart({
-    type: 'winch', name: 'Winch', category: 'Rigging',
-    blurb: 'A motor drum. It reels in at its speed, pulling up to its rated pull; the line snaps above its breaking load.',
-    size: { w: 0.8, h: 0.6 },
-    connector: true,
-    dials: [
-      { key: 'pull', label: 'Max pull', q: 'force', def: '5 kN', min: 0 },
-      { key: 'speed', label: 'Reel speed', q: 'speed', def: '0.3 m/s' },
-      { key: 'rating', label: 'Line breaks at', q: 'force', def: '20 kN', min: 1 },
-      { key: 'brake', label: 'Brake', choice: ['on', 'off'], def: 'on' },
-      { key: 'stop', label: 'Stop at line out', q: 'length', def: '', optional: true, min: 0 }
-    ],
-    build: function (b) {
-      var A = b.end('a'), B = b.end('b');
-      var j = b.joint(new b.P.WinchJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
-        reelSpeed: b.si('speed'), maxPull: b.si('pull'), brake: b.si('brake') === 'on', breakForce: b.si('rating'),
-        minLength: b.si('stop') || 0, collideConnected: true, label: b.inst.label || 'winch' }));
-      return { joint: j };
-    },
-    readouts: function (built) {
-      var j = built.joint;
-      return [
-        { key: 'tension', label: 'tension', q: 'force', read: function () { return j.broken ? 0 : j.lineTension(); } },
-        { key: 'lineOut', label: 'line out', q: 'length', read: function () { return j.lineOut(); } },
-        { key: 'speed', label: 'reel speed', q: 'speed', read: function () { return j.speed; } }
-      ];
-    },
-    plate: function (inst) { return ['Max pull ' + inst.dials.pull, 'Line breaks at ' + inst.dials.rating]; }
-  });
 })(globalThis.SE);
