@@ -154,7 +154,7 @@
       var fac = u.f * U.pow10(pf);
       if (fac === 1 && !f.prefix && !u.p10) return;
       var frac = '\\frac{' + String(+fac.toPrecision(6)) + '\\u{' + siUnit + '}}{1\\u{' + f.prefix + f.sym + '}}';
-      parts.push(SE.eq.html('\\left(' + frac + '\\right)' + (Math.abs(f.exp) !== 1 ? '^{' + Math.abs(f.exp) + '}' : '')).replace(/\\left|\\right/g, ''));
+      parts.push(SE.eq.html('(' + frac + ')' + (Math.abs(f.exp) !== 1 ? '^{' + Math.abs(f.exp) + '}' : '')));
     });
     if (t.factor !== 1) parts.push(SE.eq.html('\\frac{1\\u{' + t.pretty + '}}{' + String(+t.factor.toPrecision(6)) + '\\u{' + (SE.units.dimsToSI(t.dims) || '1') + '}}'));
     return parts.join(' <span class="eq-op">×</span> ');
