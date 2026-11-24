@@ -52,7 +52,8 @@
       maxPushVelocity: def.maxPushVelocity || 3,
       restitutionThreshold: def.restitutionThreshold || 1,
       maxLinearSpeed: def.maxLinearSpeed || 400,
-      enableSleep: def.enableSleep !== false
+      enableSleep: def.enableSleep !== false,
+      breakHysteresis: def.breakHysteresis || 1
     };
     this.bodies = [];
     this.joints = [];
