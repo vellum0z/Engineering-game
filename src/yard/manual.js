@@ -150,7 +150,7 @@
     }
     var score = Y.jobScore(j, { pass: true, state: r.state, hintTier: js.hintTier, failedRuns: js.wrong });
     if (j.grade) {
-      var inst = this.yard.inst(j.grade.part);
+      var inst = this.yard.gradePart(j.grade.part);
       var res = SE.checker.check(inst ? inst.dials[j.grade.key] : '', j.grade.spec);
       score = Math.round((score + SE.scoring.taskScore({ result: res, spec: j.grade.spec, hintTier: js.hintTier, wrongAttempts: js.wrong })) / 2);
     }

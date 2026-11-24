@@ -105,7 +105,7 @@
     ctx.inst = function (id) { return y.inst(id); };
     ctx.find = function (type) { return y.design.parts.filter(function (p) { return p.type === type; })[0] || null; };
     ctx.all = function (type) { return y.design.parts.filter(function (p) { return p.type === type; }); };
-    ctx.text = function (id, key) { var i = y.inst(id); return i ? i.dials[key] : null; };
+    ctx.text = function (id, key) { var i = y.gradePart(id); return i ? i.dials[key] : null; };
     ctx.si = function (id, key) {
       var i = typeof id === 'string' ? y.inst(id) : id; if (!i) return NaN;
       var dl = Y.partDef(i.type).dials.filter(function (d) { return d.key === key; })[0];

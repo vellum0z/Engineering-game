@@ -66,6 +66,8 @@
     return this.built;
   };
   Yard.prototype.inst = function (id) { return (this.design.parts || []).filter(function (p) { return p.id === id; })[0] || null; };
+  // A job's grade names a part by id, or by type when the player adds it (auto ids like p12).
+  Yard.prototype.gradePart = function (key) { var parts = this.design.parts || []; return this.inst(key) || parts.filter(function (p) { return p.type === key; })[0] || null; };
   Yard.prototype.ready = function () { return !this.built.errors.length; };
 
   // bin entries: [{ type, count, dials, label }]; count undefined = unlimited
