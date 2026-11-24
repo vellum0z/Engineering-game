@@ -8,8 +8,17 @@ The game follows the topic order of R.C. Hibbeler's *Engineering Mechanics: Stat
 
 ## Play
 
-- **In the browser:** the GitHub Pages link will go here once the first act is published.
-- **Offline:** download or clone this repository and open `index.html` in a desktop browser (Chrome, Firefox, Edge or Safari). No install, no build step and no internet connection are needed.
+### ▶ [Play online](https://vellum0z.github.io/Engineering-game/)
+
+Opens in any desktop browser (Chrome, Firefox, Edge or Safari). Nothing to install.
+
+### ⬇ [Download to play offline](https://github.com/vellum0z/Engineering-game/releases/latest/download/salvage-engineer.zip)
+
+1. Download the zip file.
+2. Unzip it.
+3. Open `index.html` in the unzipped folder by double-clicking it.
+
+That's it. The game runs from the files on your computer with no internet connection. Older versions are on the [Releases](https://github.com/vellum0z/Engineering-game/releases) page.
 
 Keyboard: `F` formula sheet · `C` calculator · `U` unit converter · `D` dimension checker · `G` sig-fig gauge · `N` notebook · `M` sound on/off · `Esc` closes a window.
 
