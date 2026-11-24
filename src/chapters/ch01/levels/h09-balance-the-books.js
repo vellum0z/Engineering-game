@@ -92,7 +92,7 @@
   }
 
   Y.definePart({
-    type: 'h09-controller', name: 'Brake controller', category: 'Controls',
+    type: 'h09-controller', name: 'Brake controller', category: 'Controls', library: false,
     blurb: 'Clip it onto a cart. As the run starts it reads the speed v, works out a from its formula, and drives the brake ram to give exactly that acceleration (negative brakes, positive drives). It plugs the numbers in as typed, units or no units.',
     size: { w: 0.6, h: 0.4 },
     connector: true, attach: true,
