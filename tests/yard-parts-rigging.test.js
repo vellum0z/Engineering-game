@@ -67,14 +67,14 @@ suite('yard parts: winch', () => {
 suite('yard parts: sheave, jib and tackle', () => {
   const crane = (dials, m) => [
     part('jib', { id: 'jib', x: 0, y: 0, dials: { height: '8 m', reach: '5 m' } }),
-    crate('c', 5, 1, m || '400 kg'),
+    crate('c', 5.2, 1, m || '400 kg'),   // under the tip wheel's outer rim (r = 0.2 m)
     part('winch', { id: 'w', a: { part: 'jib', anchor: 'base' }, b: { part: 'c', anchor: 'top' }, dials: Object.assign({ route: 'over sheave', speed: '0.3 m/s' }, dials) })
   ];
   test('a winch run over the jib tip lifts the load straight up; tension = weight', () => {
     const r = run(crane({}), 4);
     ok(!r.state.breaks.length, r.reason);
     near(r.state.vel('c').y, 0.3, 0.01);
-    near(r.state.pos('c').x, 5, 0.02);
+    near(r.state.pos('c').x, 5.2, 0.002);
     near(r.state.read('w.tension'), 400 * g, 0.02);
   });
   test('two falls to the hook halve the line tension and halve the hook speed', () => {
@@ -86,7 +86,7 @@ suite('yard parts: sheave, jib and tackle', () => {
   test('so a winch too weak for a direct lift manages it with a tackle', () => {
     const W = 800 * g;   // 7.8 kN on a 5 kN winch
     const one = run(crane({ pull: '5 kN' }, '800 kg'), 2);
-    ok(one.state.vel('c').y < 0, 'one fall should stall, vy = ' + one.state.vel('c').y);
+    ok(one.state.pos('c').y < 1 && one.state.vel('c').y <= 1e-6, 'one fall should stall, y = ' + one.state.pos('c').y);
     const two = run(crane({ pull: '5 kN', parts: '2' }, '800 kg'), 2);
     ok(two.state.vel('c').y > 0.1); near(two.state.read('w.tension'), W / 2, 0.02);
   });
@@ -103,10 +103,33 @@ suite('yard parts: sheave, jib and tackle', () => {
     near(r.state.read('k.tension'), 150 * g, 0.02);
     near(r.state.pos('c').y, 4, 0.01);
   });
+  test('an Atwood rig: loads under opposite rims hang straight and accelerate at (m1 - m2) g / (m1 + m2)', () => {
+    // 0.6 m wheel: the falls leave at x = -0.3 and x = +0.3
+    const r = run([part('sheave', { id: 's', x: 0, y: 9, dials: { size: '0.6 m' } }), crate('c1', -0.3, 4, '60 kg'), part('counterweight', { id: 'c2', x: 0.3, y: 2, dials: { mass: '40 kg' } }),
+      part('cable', { id: 'k', a: { part: 'c1', anchor: 'top' }, b: { part: 'c2', anchor: 'top' }, dials: { route: 'over sheave', rating: '5 kN' } })], 1);
+    near(r.state.pos('c1').x, -0.3, 0.001); near(r.state.pos('c2').x, 0.3, 0.001);
+    near(r.state.vel('c1').y, -(60 - 40) * g / 100 * 1, 0.01);
+    near(r.state.read('k.tension'), 2 * 60 * 40 * g / 100, 0.01);
+  });
+  test('a line leaves the wheel at the tangent on the outside of the bend', () => {
+    const b = Y.build({ parts: [part('sheave', { id: 's', x: 0, y: 8, dials: { size: '1 m' } }), hook('h', -6, 9), crate('c', 0.5, 3, '10 kg'),
+      part('cable', { id: 'k', a: { part: 'h', anchor: 'eye' }, b: { part: 'c', anchor: 'top' }, dials: { route: 'over sheave' } })] });
+    const j = b.parts.k.joint;
+    near(j.groundAnchorB.x, 0.5, 1e-9); near(j.groundAnchorB.y, 8, 1e-9);         // straight above the crate: the right rim
+    // from the hook, up and off to the left, the line comes over the top of the wheel
+    const A = j.groundAnchorA;
+    ok(A.y > 8 && Math.abs(Math.hypot(A.x, A.y - 8) - 0.5) < 1e-9, JSON.stringify(A));
+    near((A.x + 6) * A.x + (A.y - 9) * (A.y - 8), 0, 1e-9);   // tangent: radius ⟂ line
+  });
   test('a named via wins over the nearest sheave', () => {
     const b = Y.build({ parts: [part('sheave', { id: 's1', x: 0, y: 8 }), part('sheave', { id: 's2', x: 6, y: 8 }), hook('h', 3, 0.5), crate('c', 0, 4, '10 kg'),
       part('cable', { id: 'k', a: { part: 'h', anchor: 'eye' }, b: { part: 'c', anchor: 'top' }, via: { part: 's2' } })] });
     ok(!b.errors.length); eq(b.parts.k.over.part, 's2');
+  });
+  test('the yard snaps to the jib tip and base where they really are', () => {
+    const a = Y.anchorsOf({ parts: [part('jib', { id: 'j', x: 1, y: 0, dials: { height: '9 m', reach: '6 m' } })] });
+    const tip = a.filter(x => x.anchor === 'tip')[0];
+    near(tip.x, 7, 1e-9); near(tip.y, 9 - 0.35, 1e-9);
   });
   test('the jib tip anchor follows its reach and height', () => {
     const b = Y.build({ parts: [part('jib', { id: 'j', x: 2, y: 0, dials: { height: '10 m', reach: '7 m', facing: 'left' } })] });
