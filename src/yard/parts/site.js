@@ -168,7 +168,9 @@
   // the same anchors that only acts at the ends of travel: the as-built
   // length is the closed ram, and it can extend by `stroke` and no more.
   // When end a sits on a tank's port, the tank sets the force (p·πd²/4) and
-  // the ram's own force dial is ignored.
+  // the ram's own force dial is ignored. `retract` lets a load push the rod
+  // back in below the as-built length by up to that much (default 0: it
+  // stops there like a strut).
   function tankFor(b) {
     var ref = b.inst.a;
     if (!ref || !ref.part || ref.part === 'ground') return null;
@@ -183,7 +185,8 @@
     dials: [
       { key: 'force', label: 'Force', q: 'force', def: '1 kN', min: -1e8, max: 1e8 },
       { key: 'stroke', label: 'Stroke', q: 'length', def: '1 m', min: 0.01, max: 20 },
-      { key: 'start', label: 'Starting at', q: 'time', def: '0 s', min: 0, max: 600 }
+      { key: 'start', label: 'Starting at', q: 'time', def: '0 s', min: 0, max: 600 },
+      { key: 'retract', label: 'Can retract', q: 'length', def: '', optional: true, min: 0, max: 20 }
     ],
     build: function (b) {
       var P = b.P, A = b.end('a'), B = b.end('b');
@@ -191,7 +194,7 @@
       if (L0 < 0.05) throw new Error('the ram needs its two ends apart');
       var tank = tankFor(b), F = tank ? tank.force : b.si('force'), t0 = b.si('start') || 0, world = b.world, eps = 1e-9;
       var stop = b.joint(new P.DistanceJoint({ bodyA: A.body, bodyB: B.body, localAnchorA: A.local, localAnchorB: B.local,
-        length: L0, minLength: L0, maxLength: L0 + b.si('stroke'), collideConnected: true, label: b.inst.label || 'ram' }));
+        length: L0, minLength: Math.max(0.05, L0 - (b.si('retract') || 0)), maxLength: L0 + b.si('stroke'), collideConnected: true, label: b.inst.label || 'ram' }));
       function ends() { return { pa: A.body.worldPoint(A.local), pb: B.body.worldPoint(B.local) }; }
       function active() { return world.time >= t0 - eps && !stop.broken; }
       // forces act for the next step, like a push

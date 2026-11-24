@@ -102,6 +102,15 @@ suite('yard parts: ram and tank', () => {
     const r = Y.judge({ design: d, goal: G.after(3), timeout: 4 });
     near(r.state.read('r.extension'), 0.8, 2e-3); near(r.state.read('r.force'), 200 * 9.81, 1e-3);
   });
+  test('a weak ram with retract travel is pushed back in by a bigger load; without it, it holds like a strut', () => {
+    const mk = retract => ({ parts: [part('cart', { id: 'c', x: 2, y: 0.25, dials: { mass: '100 kg' } }),
+      part('ram', { id: 'r', a: { part: 'ground', at: { x: 0.2, y: 0.25 } }, b: { part: 'c', anchor: 'left' }, dials: { force: '100 N', stroke: '1 m', retract } }),
+      part('push', { a: { part: 'c' }, dials: { force: '300 N', angle: '180 deg', time: '5 s' } })] });
+    const back = Y.judge({ design: mk('0.5 m'), goal: G.after(0.5), timeout: 1 });
+    near(back.state.vel('c').x, -1, 1e-3); ok(back.state.read('r.extension') < -0.2);
+    const strut = Y.judge({ design: mk(''), goal: G.after(1), timeout: 2 });
+    ok(Math.abs(strut.state.read('r.extension')) < 2e-3); near(strut.state.read('r.force'), 300, 1e-3);
+  });
   test('tank piston force is p·πd²/4 (1000 psi on a 2 in bore)', () => {
     const b = Y.build({ parts: [part('tank', { id: 't', x: 0, y: 0.5, dials: { pressure: '1000 psi', bore: '2 in' } })] });
     const F = Y.dial.parse('1000 psi', 'pressure').si * Math.PI * 0.0508 * 0.0508 / 4;
