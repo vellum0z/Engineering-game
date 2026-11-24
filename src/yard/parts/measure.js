@@ -208,17 +208,25 @@
         world.contacts.forEach(function (ct) { if (ct.points && ct.points.length) { touching.add(ct.fa.body); touching.add(ct.fb.body); } });
       }
       var w = { t0: null, t1: null, who: null, prevMoving: false };
-      function begin() { if (w.t0 == null) w.t0 = world.time; }
+      function begin(t) { if (w.t0 == null) w.t0 = t != null ? t : world.time; }
       function end() { if (w.t0 != null && w.t1 == null) w.t1 = world.time; }
       if (start === 'run') begin();
       world.on('impact', function (e) { if (stop === 'impact' && w.t0 != null && world.time > w.t0 + 1e-9 && counts(e)) end(); });
-      world.on('step', function () {
+      world.on('step', function (e) {
         noteContacts();
         if (w.t0 == null) {
           if (start === 'release') {
+            // A latch builds after the stopwatch (it is a connector), so its own step
+            // listener lets go after this one runs: read its release time directly.
             var latches = out.readouts.filter(function (r) { return r.key === 'released' && out.parts[r.part] && out.parts[r.part].def.type === 'latch'; });
-            if (latches.length ? latches.some(function (r) { return !!r.read(world); })
-              : world.bodies.some(function (bd) { return bd.type === 'dynamic' && Math.hypot(bd.v.x, bd.v.y) > 0.02; })) begin();
+            if (latches.length) {
+              if (latches.some(function (r) {
+                var L = out.parts[r.part];
+                return !!r.read(world) || (L.joint && !L.joint.broken && L.values && L.values.release != null && world.time >= L.values.release - 1e-9);
+              })) begin();
+            } else if (world.bodies.some(function (bd) { return bd.type === 'dynamic' && Math.hypot(bd.v.x, bd.v.y) > 0.01; })) {
+              begin(world.time - e.dt);   // it started moving during this step
+            }
           } else if (start === 'zone') {
             var zb = zoneBox(out, startZone), inside = zb ? bodiesIn(world, zb) : [];
             if (inside.length) { w.who = inside[0]; begin(); }

@@ -87,7 +87,16 @@ suite('yard parts: measure', () => {
       part('push', { a: { part: 'cart' }, dials: { force: '100 N', time: '1 s', start: '1 s' } }),
       part('stopwatch', { id: 'sw', x: 0, y: 3, dials: { start: 'release', stop: 'time', limit: '5 s' } })];
     const r = run(parts, 3);
-    near(r.state.read('sw.t'), 2, 0.03);
+    near(r.state.read('sw.t'), 2, 0.005);
+  });
+  test('start on release starts the step a latch lets go: a latched drop reads √(2h/g)', () => {
+    [9.81, 1.62].forEach(g => {
+      const parts = [part('crate', { id: 'c', x: 0, y: 20.5, dials: { mass: '10 kg' } }),
+        part('stopwatch', { id: 'sw', x: 3, y: 2, dials: { start: 'release', stop: 'impact' } }),
+        part('latch', { id: 'L', a: { part: 'c' }, dials: { release: '0.5 s' } })];
+      const r = run(parts, 7, { g });
+      near(r.state.read('sw.t'), Math.sqrt(2 * 20 / g), 0.003, 'g ' + g);
+    });
   });
 
   // tape
