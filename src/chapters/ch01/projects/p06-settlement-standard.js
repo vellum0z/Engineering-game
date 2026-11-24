@@ -280,7 +280,7 @@
           // Proof hover: the governor takes the tank just off the slab and
           // Hask watches a chalk mark for a six-second count. It passes if the
           // tank stays within 2 cm, which needs |T - W| below about 1.4 N.
-          var s = ctx.setScene('hoist', { mass: MT, g: G, label: 'TANK 1.23 Mg', mode: 'lift', hookHeight: 3, height: 9, governor: a.si, zombies: 2 });
+          var s = ctx.setScene('hoist', { mass: MT, g: G, label: 'TANK 1.23 Mg', mode: 'lift', hookHeight: 3, height: 9, governor: a.si, zombies: 2, hideKey: true });
           return s.run(a.si, { duration: 6 }).then(function (r) {
             var acc = (a.si - W) / MT;
             var rise = r.detail && r.detail.y != null ? r.detail.y : 0;
@@ -317,7 +317,7 @@
         ],
         consequence: function (ctx, a) {
           var pick = SE.physics.haul.pick(RACK, a.si == null ? 0 : a.si) || RACK[0];
-          var s = ctx.setScene('hoist', { mass: MT, g: G, label: 'TANK 1.23 Mg', mode: 'lift', hookHeight: 4, height: 12, rating: pick.rating, zombies: 3 });
+          var s = ctx.setScene('hoist', { mass: MT, g: G, label: 'TANK 1.23 Mg', mode: 'lift', hookHeight: 4, height: 12, rating: pick.rating, zombies: 3, hideKey: true });
           return s.run(T_LIFT, { duration: 4 }).then(function (r) {
             var use = Math.round(T_LIFT / pick.rating * 100);
             if (r.outcome === 'snapped') return 'The crew rigs the **' + pick.name + '**' + tag(pick) + '. At lift-off the cable sees ' + lb(T_LIFT) + ', ' + use + ' % of its rating, and **it parts**. The tank comes down on the tower footing.';
