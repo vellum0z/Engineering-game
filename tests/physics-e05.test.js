@@ -278,3 +278,44 @@ suite('physics e05: rigging in free-body diagrams and saved scenes', () => {
     ok(load.c.y === y1 && wj.lineOut() === L1, 'replay differs');
   });
 });
+
+suite('physics e05: line blocks (winch line, hook block and sling solved together)', () => {
+  // H11's lift: an 18.3 t load (179.4 kN) on a sling under a hook block, the
+  // line run from a drum at the jib foot over a sheave at the tip, 185 kN max pull.
+  function jibLift(hookMass, maxPull) {
+    const w = world();
+    w.add(new P.Body({ type: 'static', position: { x: 0, y: -0.5 }, shapes: [P.box(30, 0.5)] }));
+    const jib = w.add(new P.Body({ type: 'static', position: { x: -8, y: 0 }, shapes: [P.box(0.3, 0.3)] }));
+    const tank = w.add(new P.Body({ position: { x: 0.2, y: 0.5 }, shapes: [P.box(1.5, 0.5)], mass: 179.4e3 / g, material: 'steel' }));
+    const hook = w.add(new P.Body({ position: { x: 0.2, y: 2.5 }, shapes: [P.box(0.2, 0.2)], mass: hookMass, material: 'steel' }));
+    const line = w.addJoint(new P.WinchJoint({ bodyA: jib, bodyB: hook, localAnchorB: { x: 0, y: 0.2 }, via: { body: jib, local: { x: 8.2, y: 17.35 } },
+      reelSpeed: 0.5, maxPull: maxPull || 185e3, brake: true }));
+    const sling = w.addJoint(new P.DistanceJoint({ bodyA: hook, localAnchorA: { x: 0, y: -0.2 }, bodyB: tank, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
+    return { w, tank, hook, line, sling };
+  }
+  [5, 10, 40, 200].forEach(m => test(m + ' kg hook block: 185 kN lifts the 18.3 t load at the reel speed; line − sling = hook weight (within 1%)', () => {
+    // (185 − 179.4 − hook) kN on 18.3 t accelerates it to 0.5 m/s within
+    // about 2 s; then it rises at 0.5 m/s: about 4 m in 10 s
+    const { w, tank, hook, line, sling } = jibLift(m);
+    w.run(10);
+    ok(tank.c.y - 0.5 > 3.5, 'rose ' + (tank.c.y - 0.5).toFixed(3) + ' m');
+    near(tank.v.y, 0.5, 0.01, 'speed');
+    near(sling.tension(), 179.4e3, 0.01, 'sling = load weight');
+    near(line.lineTension() - sling.tension(), m * g, 0.01, 'line − sling');
+    ok(Math.abs(hook.angle) < 1e-6, 'hook block stays square: ' + hook.angle);
+    ok(line.path.update() - line.lineOut() < 1e-3, 'line not stretched');
+  }));
+  test('a hook block too heavy to add to the load stalls the same winch', () => {
+    const { w, tank, line } = jibLift(2000);   // 199 kN > 185 kN
+    w.run(3);
+    ok(tank.c.y - 0.5 < 0.01, 'lifted'); ok(line.stalled(), 'should stall');
+  });
+  test('a snatch (drum at speed at once, 1.8 MN pull) is what breakage sees (lastForce): the step\'s peak, not the settled pull', () => {
+    // the load goes from rest to 0.5 m/s in one substep: m·Δv/h ≈ 9 kN·s / (1/240 s), capped at 1.81 MN
+    const { w, sling } = jibLift(200, 1810e3);
+    w.step(1 / 60);
+    ok(sling.lastForce > 1e6, 'peak ' + sling.lastForce.toFixed(0));
+    w.step(1 / 60);
+    ok(sling.lastForce < 250e3, 'settled ' + sling.lastForce.toFixed(0));
+  });
+});
