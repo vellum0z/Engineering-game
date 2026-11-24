@@ -120,3 +120,11 @@ suite('yard: surface size follows its length dial', () => {
     near(a.right.x, 2); near(a.left.x, -2); near(Yd.sizeOf(inst).w, 4);
   });
 });
+
+suite('yard: area dials', () => {
+  test('an area dial takes mm^2 and in^2 and refuses a mass', () => {
+    const D = globalThis.SE.yard.dial;
+    near(D.parse('120 mm^2', 'area').si, 120e-6, 1e-12); near(D.parse('2 in^2', 'area').si, 2 * 0.0254 * 0.0254, 1e-12);
+    ok(!D.parse('3 kg', 'area').ok);
+  });
+});

@@ -34,6 +34,7 @@
     accel:     { dims: d(1, 0, -2),   si: 'm/s^2', name: 'acceleration',  examples: 'm/s^2, ft/s^2' },
     angle:     { dims: d(0, 0, 0, 1), si: 'deg',   name: 'angle',         examples: 'deg, rad' },
     stiffness: { dims: d(0, 1, -2),   si: 'N/m',   name: 'stiffness',     examples: 'N/m, kN/m, lb/in' },
+    area:      { dims: d(2, 0, 0),    si: 'm^2',   name: 'area',          examples: 'mm^2, m^2, in^2' },
     pressure:  { dims: d(-1, 1, -2),  si: 'Pa',    name: 'pressure',      examples: 'Pa, kPa, MPa, psi' },
     moment:    { dims: d(2, 1, -2),   si: 'N·m',   name: 'moment',        examples: 'N·m, kN·m, lb·ft' },
     energy:    { dims: d(2, 1, -2),   si: 'J',     name: 'energy',        examples: 'J, kJ' },
