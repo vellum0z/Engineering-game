@@ -228,6 +228,11 @@ suite('checker: error kinds', () => {
     const t = C.check('120 N', { value: 100, unit: 'N', mistakes: [{ test: x => x > 1.1 && x < 1.3, msg: 'custom test' }] });
     eq(t.errors[0].msg, 'custom test');
   });
+  test('a negative custom ratio matches only the reversed sign', () => {
+    const spec = { value: -2, unit: 'm/s^2', mistakes: [{ ratio: -4.6, kind: 'algebra', msg: 'slip' }] };
+    eq(C.check('9.20 m/s^2', spec).errors[0].msg, 'slip');
+    ok(C.check('-9.20 m/s^2', spec).errors.every(e => e.msg !== 'slip'));
+  });
   test('expected zero', () => {
     ok(C.check('0 N', { value: 0, unit: 'N', sf: null }).parts.value);
     ok(!C.check('1 N', { value: 0, unit: 'N', sf: null }).parts.value);

@@ -19,7 +19,8 @@
  *   tol       relative tolerance for "value correct" (default 0.5 %)
  *   exactRounding  true: digits must equal the course rounding exactly
  *   mistakes  extra diagnoses: [{ ratio, kind, msg }] matched against
- *             player/expected
+ *             player/expected (a positive ratio ignores the sign, a negative
+ *             ratio must match it), or [{ test(r), kind, msg }]
  */
 (function (SE) {
   'use strict';
@@ -51,7 +52,7 @@
     var ar = Math.abs(r);
     var custom = (spec.mistakes || []).filter(function (m) {
       if (typeof m.test === 'function') return m.test(r);
-      return approx(ar, m.ratio, m.tol || 0.004);
+      return m.ratio < 0 ? approx(r, m.ratio, m.tol || 0.004) : approx(ar, m.ratio, m.tol || 0.004);   // a negative ratio also checks the sign
     })[0];
     if (custom) return { kind: custom.kind || 'concept', msg: custom.msg };
     if (r < 0) return { kind: 'sign', msg: 'The sign is reversed. Check the direction or the subtraction.' };

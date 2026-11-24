@@ -523,7 +523,12 @@
           box.insertBefore(el('div', { class: 'feedback-head', text: isProve ? 'Missed. The full lesson will cover this.' : 'Not yet. Here is what went wrong.' }), box.firstChild);
           feedback.appendChild(box);
           SE.audio && SE.audio.play('fail');
-          if (isProve) { setTimeout(function () { done({ firstTry: false }); }, 1400); solved = true; }
+          if (isProve) {
+            solved = true;
+            fields.forEach(function (f) { f.field.input.disabled = true; });
+            submitBtn.disabled = true; if (hintBtn) hintBtn.disabled = true;
+            setTimeout(function () { done({ firstTry: false }); }, 1400);
+          }
         }
       }).catch(function (e) { console.error(e); busy = false; submitBtn.disabled = false; });
     }
