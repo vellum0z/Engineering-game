@@ -14,8 +14,8 @@
  * yard's Reset and the job judge's "try again" use. Listeners are not part
  * of the state and stay attached.
  *
- * The copy is generic: own fields of each body, fixture, joint and of the
- * world are cloned (plain objects, arrays and Maps deep, numbers as-is),
+ * The copy is generic: own fields of each body, fixture, joint, structure
+ * (beams, trusses, their loads and members) and of the world are cloned (plain objects, arrays and Maps deep, numbers as-is),
  * while references to bodies, joints, fixtures, shapes and materials stay
  * references. So a joint module that adds a new runtime field gets it
  * snapshotted without touching this file. Fields that appeared after the
@@ -28,8 +28,16 @@
  * material by name, mass override, damping, label, userData when it is plain
  * JSON) and joints (type, bodies by index, local anchors, every definition
  * field), plus gravity, substeps and the solver settings. Runtime impulses
- * are not saved; a scene loads as a fresh world. Format:
- *   { version: 1, gravity, substeps, cfg, bodies: [...], joints: [...] }
+ * are not saved; a scene loads as a fresh world. Format (version 2):
+ *   { version: 2, gravity, substeps, cfg, bodies: [...], joints: [...],
+ *     structures: [{ kind: 'beam' | 'truss', def, ground, loads }] }
+ * Beams and trusses (structures.js) are stored as their build definition
+ * `def`, rebuilt with SE.phys.structures[kind]. Their bodies and joints
+ * appear in the lists as placeholders { structure: k } so everything comes
+ * back in the original order; `ground` is the index of the support body
+ * when the level supplied one (left out when the structure made its own)
+ * and `loads` are the standing loads ({ x | node, F }). Version 1 scenes
+ * (no structures) still load.
  *
  * Joint types are handled through a registry so joint modules can add
  * themselves:
@@ -47,7 +55,7 @@
 (function (SE) {
   'use strict';
   var P = SE.phys;
-  var SCENE_VERSION = 1;
+  var SCENE_VERSION = 2;
 
   /* ------------------------------------------------------------ cloning */
   function isPlain(v) {
@@ -56,85 +64,91 @@
   }
 
   // Deep copy of plain data; anything in `refs`, and any class instance
-  // (Body, Joint, World...), is kept as the same reference.
-  function clone(v, refs) {
+  // (Body, Joint, World...), is kept as the same reference. `memo` keeps
+  // shared sub-objects shared (a structure solver and its links hold the
+  // same row objects, for example).
+  function clone(v, refs, memo) {
     if (v === null || typeof v !== 'object') return v;
     if (refs.has(v)) return v;
+    var seen = memo.get(v);
+    if (seen) return seen;
     if (Array.isArray(v)) {
       var a = new Array(v.length);
-      for (var i = 0; i < v.length; i++) a[i] = clone(v[i], refs);
+      memo.set(v, a);
+      for (var i = 0; i < v.length; i++) a[i] = clone(v[i], refs, memo);
       return a;
     }
     if (v instanceof Map) {
       var m = new Map();
-      v.forEach(function (val, k) { m.set(k, clone(val, refs)); });
+      memo.set(v, m);
+      v.forEach(function (val, k) { m.set(k, clone(val, refs, memo)); });
       return m;
     }
-    if (ArrayBuffer.isView(v)) return v.slice();
+    if (ArrayBuffer.isView(v)) { var t = v.slice(); memo.set(v, t); return t; }
     if (!isPlain(v)) return v;
     var o = {};
-    for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = clone(v[k], refs);
+    memo.set(v, o);
+    for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = clone(v[k], refs, memo);
     return o;
   }
 
-  function captureFields(obj, skip, refs) {
+  function captureFields(obj, skip, refs, memo) {
     var out = {};
-    Object.keys(obj).forEach(function (k) { if (!skip[k]) out[k] = clone(obj[k], refs); });
+    Object.keys(obj).forEach(function (k) { if (!skip[k]) out[k] = clone(obj[k], refs, memo); });
     return out;
   }
 
-  function restoreFields(obj, saved, skip, refs) {
+  function restoreFields(obj, saved, skip, refs, memo) {
     Object.keys(obj).forEach(function (k) {
       if (!skip[k] && !Object.prototype.hasOwnProperty.call(saved, k)) delete obj[k];
     });
-    Object.keys(saved).forEach(function (k) { obj[k] = clone(saved[k], refs); });
+    Object.keys(saved).forEach(function (k) { obj[k] = clone(saved[k], refs, memo); });
   }
 
+  var SKIP_NONE = {};
   var SKIP_WORLD = { listeners: true };
   var SKIP_BODY = { world: true, fixtures: true, userData: true };
   var SKIP_FIXTURE = { body: true, shape: true, material: true };
   var SKIP_JOINT = { bodyA: true, bodyB: true, userData: true };
 
-  function refSet(bodies, joints) {
-    var refs = new Set();
-    bodies.forEach(function (b) {
-      refs.add(b);
+  // Everything whose identity matters and whose fields are state: these are
+  // restored in place, so outside references to them (a beam handle, a load
+  // handle the level keeps to change F) stay valid.
+  function tracked(world) {
+    var list = [{ obj: world, skip: SKIP_WORLD }], refs = new Set([world]);
+    var add = function (obj, skip) { if (obj && !refs.has(obj)) { refs.add(obj); list.push({ obj: obj, skip: skip }); } };
+    world.bodies.forEach(function (b) {
+      add(b, SKIP_BODY);
       if (b.userData && typeof b.userData === 'object') refs.add(b.userData);
-      b.fixtures.forEach(function (f) { refs.add(f); refs.add(f.shape); refs.add(f.material); });
+      b.fixtures.forEach(function (f) { add(f, SKIP_FIXTURE); refs.add(f.shape); refs.add(f.material); });
     });
-    joints.forEach(function (j) {
-      refs.add(j);
+    world.joints.forEach(function (j) {
+      add(j, SKIP_JOINT);
       if (j.userData && typeof j.userData === 'object') refs.add(j.userData);
     });
-    return refs;
+    // beams and trusses: the structure object, its loads and truss members
+    (world.structures || []).forEach(function (st) {
+      add(st, SKIP_NONE);
+      (st.loads || []).forEach(function (ld) { add(ld, SKIP_NONE); });
+      (st.members || []).forEach(function (m) { add(m, SKIP_NONE); });
+      if (st.material) refs.add(st.material);
+    });
+    return { list: list, refs: refs };
   }
 
   /* ---------------------------------------------------------- snapshots */
   function snapshot(world) {
-    var bodies = world.bodies.slice(), joints = world.joints.slice();
-    var refs = refSet(bodies, joints);
+    var t = tracked(world), memo = new Map();
     return {
-      world: captureFields(world, SKIP_WORLD, refs),
-      bodies: bodies.map(function (b) {
-        return {
-          body: b, state: captureFields(b, SKIP_BODY, refs),
-          fixtures: b.fixtures.map(function (f) { return captureFields(f, SKIP_FIXTURE, refs); })
-        };
-      }),
-      joints: joints.map(function (j) { return { joint: j, state: captureFields(j, SKIP_JOINT, refs) }; }),
-      refs: refs
+      entries: t.list.map(function (e) { return { obj: e.obj, skip: e.skip, state: captureFields(e.obj, e.skip, t.refs, memo) }; }),
+      refs: t.refs
     };
   }
 
   function restore(world, snap) {
-    var refs = snap.refs;
-    restoreFields(world, snap.world, SKIP_WORLD, refs);
-    snap.bodies.forEach(function (e) {
-      restoreFields(e.body, e.state, SKIP_BODY, refs);
-      e.body.world = world;
-      e.body.fixtures.forEach(function (f, i) { restoreFields(f, e.fixtures[i], SKIP_FIXTURE, refs); });
-    });
-    snap.joints.forEach(function (e) { restoreFields(e.joint, e.state, SKIP_JOINT, refs); });
+    var memo = new Map();
+    snap.entries.forEach(function (e) { restoreFields(e.obj, e.state, e.skip, snap.refs, memo); });
+    world.bodies.forEach(function (b) { b.world = world; });
     return world;
   }
 
@@ -268,6 +282,46 @@
     return c;
   }
 
+  /* ---------------------------------------------------------- structures */
+  // Beams and trusses are saved as the call that built them, not as the
+  // dozens of bodies and links they made. In the body and joint lists a
+  // structure's parts are a placeholder { structure: k } at each place they
+  // occupy, so after rebuilding, the lists come back in the same order (the
+  // solver's results depend on that order).
+  function structureOf(world) {
+    var bodyOwner = new Map(), jointOwner = new Map();
+    (world.structures || []).forEach(function (st, k) {
+      var mine = function (b) { return b && b.userData && b.userData.structure === st; };
+      world.bodies.forEach(function (b) { if (mine(b) || (st.ownsGround && b === st.ground)) bodyOwner.set(b, k); });
+      world.joints.forEach(function (j) { if (j === st.solver || (j.part && j.part.structure === st)) jointOwner.set(j, k); });
+    });
+    return { body: bodyOwner, joint: jointOwner };
+  }
+
+  function structureToJSON(st, indexOf) {
+    var o = { kind: st.kind, def: jsonOrUndefined(st.def) };
+    if (st.ground && !st.ownsGround) o.ground = indexOf(st.ground);
+    if (st.loads && st.loads.length) {
+      o.loads = st.loads.map(function (ld) {
+        return st.kind === 'truss' ? { node: ld.node, F: vec(ld.F) } : { x: ld.x, F: vec(ld.F) };
+      });
+    }
+    return o;
+  }
+
+  function buildStructure(world, o, ground) {
+    var make = P.structures && P.structures[o.kind];
+    if (!make) throw new Error('cannot rebuild structure kind "' + o.kind + '": no SE.phys.structures.' + o.kind);
+    var def = Object.assign({}, o.def);
+    if (ground) def.ground = ground;
+    var st = make(world, def);
+    (o.loads || []).forEach(function (ld) {
+      if (st.kind === 'truss') st.load(ld.node, ld.F); else st.load(ld.x, ld.F);
+    });
+    return st;
+  }
+
+  /* --------------------------------------------------------------- scenes */
   function toScene(world) {
     var index = new Map();
     world.bodies.forEach(function (b, i) { index.set(b, i); });
@@ -275,24 +329,87 @@
       if (!index.has(b)) throw new Error('joint refers to a body that is not in the world');
       return index.get(b);
     };
+    var owner = structureOf(world), placed = new Set();
+    var joints = [];
+    world.joints.forEach(function (j) {
+      if (owner.joint.has(j)) {
+        var k = owner.joint.get(j);
+        if (!placed.has(k)) { placed.add(k); joints.push({ structure: k }); }
+        return;
+      }
+      joints.push(codec(j.type).toJSON(j, indexOf));
+    });
     return {
       version: SCENE_VERSION,
       gravity: vec(world.gravity),
       substeps: world.substeps,
       cfg: jsonOrUndefined(world.cfg),
-      bodies: world.bodies.map(bodyToJSON),
-      joints: world.joints.map(function (j) { return codec(j.type).toJSON(j, indexOf); })
+      bodies: world.bodies.map(function (b) {
+        return owner.body.has(b) ? { structure: owner.body.get(b) } : bodyToJSON(b);
+      }),
+      joints: joints,
+      structures: (world.structures || []).map(function (st) { return structureToJSON(st, indexOf); })
     };
   }
 
   function fromScene(scene) {
     if (typeof scene === 'string') scene = JSON.parse(scene);
     if (!scene || typeof scene !== 'object') throw new Error('scene must be an object or JSON string');
-    if (scene.version !== SCENE_VERSION) throw new Error('unsupported scene version ' + scene.version + ' (expected ' + SCENE_VERSION + ')');
+    if (scene.version !== 1 && scene.version !== SCENE_VERSION) {
+      throw new Error('unsupported scene version ' + scene.version + ' (this build reads 1 to ' + SCENE_VERSION + ')');
+    }
     var def = Object.assign({}, scene.cfg || {}, { gravity: scene.gravity, substeps: scene.substeps });
     var world = new P.World(def);
-    var bodies = (scene.bodies || []).map(function (o) { return world.add(bodyFromJSON(o)); });
-    (scene.joints || []).forEach(function (o) { world.addJoint(codec(o.type).fromJSON(o, bodies)); });
+    var list = scene.bodies || [], sdefs = scene.structures || [];
+    var bodies = new Array(list.length), built = [];
+    // where each structure's bodies go, in creation order
+    var slotsOf = sdefs.map(function () { return []; });
+    list.forEach(function (o, i) {
+      if (o && o.structure != null) {
+        if (!slotsOf[o.structure]) throw new Error('scene body ' + i + ' refers to missing structure ' + o.structure);
+        slotsOf[o.structure].push(i);
+      }
+    });
+    var plainBody = function (i) {
+      if (!bodies[i]) bodies[i] = world.add(bodyFromJSON(list[i]));
+      return bodies[i];
+    };
+    var structure = function (k) {
+      if (built[k]) return built[k];
+      var o = sdefs[k], ground = null;
+      if (o.ground != null) {
+        if (!list[o.ground] || list[o.ground].structure != null) throw new Error('structure ' + k + ' ground must be a plain body');
+        ground = plainBody(o.ground);
+      }
+      var before = world.bodies.length;
+      var st = built[k] = buildStructure(world, o, ground);
+      var made = world.bodies.slice(before), slots = slotsOf[k];
+      if (made.length !== slots.length) {
+        throw new Error(o.kind + ' ' + k + ' rebuilt with ' + made.length + ' bodies, scene has ' + slots.length);
+      }
+      slots.forEach(function (i, n) { bodies[i] = made[n]; });
+      return st;
+    };
+    list.forEach(function (o, i) { if (o && o.structure != null) structure(o.structure); else plainBody(i); });
+    sdefs.forEach(function (o, k) { structure(k); });   // structures with no bodies listed
+    world.bodies = bodies.concat(world.bodies.filter(function (b) { return bodies.indexOf(b) < 0; }));
+
+    // joints, with each structure's links and solver at its placeholder
+    var jointsOf = built.map(function (st) {
+      return world.joints.filter(function (j) { return j === st.solver || (j.part && j.part.structure === st); });
+    });
+    var order = [], used = new Set();
+    (scene.joints || []).forEach(function (o) {
+      if (o && o.structure != null) {
+        if (!jointsOf[o.structure]) throw new Error('scene joint refers to missing structure ' + o.structure);
+        jointsOf[o.structure].forEach(function (j) { order.push(j); });
+        used.add(o.structure);
+      } else {
+        order.push(codec(o.type).fromJSON(o, bodies));
+      }
+    });
+    jointsOf.forEach(function (js, k) { if (!used.has(k)) js.forEach(function (j) { order.push(j); }); });
+    world.joints = order;
     return world;
   }
 
