@@ -1,16 +1,179 @@
 /*
  * Islands and sleeping.
  *
- *   P.islands.update(world, dt)
- * runs after each step. It may set body.awake = false on bodies that have
- * been still long enough; the world skips sleeping bodies when it integrates
- * and skips contacts and joints whose bodies are all asleep.
- * body.wake() (or applyForce / applyImpulse) wakes a body.
+ *   P.islands.update(world, dt)       after each step: sleep still islands
+ *   P.islands.beforeStep(world)       called by the broadphase before the
+ *                                     solver: wake islands that were reached
+ *   P.islands.wakeIsland(world, body) wake a body and everything in its island
+ *   P.islands.islandOf(world, body)   the bodies sharing body's island (array)
  *
- * This placeholder keeps every body awake.
+ * An island is a set of dynamic bodies linked by touching contacts or by
+ * joints, found with union-find each step. Static bodies never join an
+ * island (a floor would otherwise glue the whole level into one island), and
+ * neither do kinematic ones; a kinematic body that is moving keeps every
+ * island it touches awake.
+ *
+ * A body is "still" while |v| < SLEEP_LINEAR (0.05 m/s) and
+ * |w| < SLEEP_ANGULAR (2°/s). body.sleepTime counts how long it has been
+ * still. When every body in an island has been still for TIME_TO_SLEEP
+ * (0.5 s), the whole island sleeps: awake = false, v = w = 0. The world then
+ * skips those bodies, and skips contacts and joints whose bodies are all
+ * asleep or static, so a settled stack costs nothing. The contact impulses
+ * are kept, so the stack warm-starts when it wakes.
+ *
+ * An island wakes when any body in it is woken (applyForce, applyImpulse,
+ * applyTorque, setTransform or wake()), when a sleeping body is given a
+ * velocity directly, when an awake body (or a moving kinematic one) reaches
+ * it through a contact or a joint, when a joint on it is added or removed,
+ * and when a joint on it breaks.
+ *
+ * world.cfg.enableSleep = false keeps everything awake. A body made with
+ * allowSleep: false never sleeps and keeps its island awake.
  */
 (function (SE) {
   'use strict';
   var P = SE.phys;
-  P.islands = { update: function () {} };
+
+  var SLEEP_LINEAR = 0.05;                     // m/s
+  var SLEEP_ANGULAR = 2 * Math.PI / 180;       // rad/s
+  var TIME_TO_SLEEP = 0.5;                     // s
+
+  function enabled(world) { return !world.cfg || world.cfg.enableSleep !== false; }
+  function moving(b) { return b.v.x !== 0 || b.v.y !== 0 || b.w !== 0; }
+
+  function find(b) {
+    while (b._ufParent !== b) { b._ufParent = b._ufParent._ufParent; b = b._ufParent; }
+    return b;
+  }
+  function union(a, b) {
+    var ra = find(a), rb = find(b);
+    if (ra === rb) return;
+    if (ra._ufRank < rb._ufRank) { var t = ra; ra = rb; rb = t; }
+    rb._ufParent = ra;
+    if (ra._ufRank === rb._ufRank) ra._ufRank++;
+  }
+
+  function islandOf(world, body) {
+    var map = world._islands;
+    var isl = map && body._island != null ? map.get(body._island) : null;
+    return isl && isl.indexOf(body) >= 0 ? isl : [body];
+  }
+
+  function wakeIsland(world, body) {
+    var isl = islandOf(world, body), woke = false;
+    for (var i = 0; i < isl.length; i++) {
+      var b = isl[i];
+      if (b.type === 'static') continue;
+      if (b.awake === false) { woke = true; }
+      if (b.awake === false || b === body) { b.awake = true; b.sleepTime = 0; }
+    }
+    return woke;
+  }
+
+  // Wake rules that must hold before the solver runs.
+  function beforeStep(world) {
+    var bodies = world.bodies, i, b;
+    if (!enabled(world)) {
+      for (i = 0; i < bodies.length; i++) if (bodies[i].awake === false) bodies[i].wake();
+      return;
+    }
+    // a velocity set by hand on a sleeping body, or a kinematic body set moving
+    for (i = 0; i < bodies.length; i++) {
+      b = bodies[i];
+      if (b.type !== 'static' && b.awake === false && moving(b)) wakeIsland(world, b);
+    }
+    // an island with any awake member is awake as a whole
+    if (world._islands) world._islands.forEach(function (isl) {
+      var anyAwake = false, anyAsleep = false;
+      for (var k = 0; k < isl.length; k++) { if (isl[k].awake === false) anyAsleep = true; else anyAwake = true; }
+      if (anyAwake && anyAsleep) for (k = 0; k < isl.length; k++) if (isl[k].awake === false) { isl[k].awake = true; isl[k].sleepTime = 0; }
+    });
+    // an awake body reaching a sleeping one through a contact or joint wakes
+    // it; repeat because the newly woken island may reach another
+    function reach(A, B) {
+      var aOn = A.type !== 'static' && A.awake !== false, bOn = B.type !== 'static' && B.awake !== false;
+      if (aOn && !bOn && B.type === 'dynamic') return wakeIsland(world, B);
+      if (bOn && !aOn && A.type === 'dynamic') return wakeIsland(world, A);
+      return false;
+    }
+    for (var pass = 0; pass < 8; pass++) {
+      var changed = false;
+      world.contacts.forEach(function (ct) { if (reach(ct.fa.body, ct.fb.body)) changed = true; });
+      world.joints.forEach(function (j) { if (j.bodyA && j.bodyB && reach(j.bodyA, j.bodyB)) changed = true; });
+      if (!changed) break;
+    }
+  }
+
+  function update(world, dt) {
+    var bodies = world.bodies, i, b;
+    // a joint that broke this step (or was removed) wakes its bodies
+    if (P.broadphase && P.broadphase.syncJoints) P.broadphase.syncJoints(world);
+    if (!enabled(world)) {
+      for (i = 0; i < bodies.length; i++) { bodies[i].awake = true; bodies[i].sleepTime = 0; }
+      world._islands = null;
+      return;
+    }
+    // union-find over dynamic bodies
+    for (i = 0; i < bodies.length; i++) {
+      b = bodies[i];
+      b._ufParent = b; b._ufRank = 0; b._keepAwake = false;
+      if (b.sleepTime == null) b.sleepTime = 0;
+    }
+    function link(A, B, touching) {
+      var dA = A.type === 'dynamic', dB = B.type === 'dynamic';
+      if (dA && dB) { if (touching) union(A, B); return; }
+      // a moving kinematic body keeps whatever it touches awake
+      if (dA && B.type === 'kinematic' && moving(B)) A._keepAwake = true;
+      if (dB && A.type === 'kinematic' && moving(A)) B._keepAwake = true;
+    }
+    world.contacts.forEach(function (ct) { if (ct.touching) link(ct.fa.body, ct.fb.body, true); });
+    world.joints.forEach(function (j) { if (j.bodyA && j.bodyB) link(j.bodyA, j.bodyB, true); });
+
+    // still-time per awake body
+    var groups = new Map();
+    for (i = 0; i < bodies.length; i++) {
+      b = bodies[i];
+      if (b.type === 'static') continue;
+      if (b.type === 'kinematic') {
+        // a kinematic body at rest sleeps so it doesn't keep contacts alive
+        b.awake = moving(b); b.sleepTime = 0; b._island = null;
+        continue;
+      }
+      if (b.awake !== false) {
+        var still = b.allowSleep !== false && !b._keepAwake &&
+          b.v.x * b.v.x + b.v.y * b.v.y < SLEEP_LINEAR * SLEEP_LINEAR && Math.abs(b.w) < SLEEP_ANGULAR;
+        b.sleepTime = still ? b.sleepTime + dt : 0;
+      }
+      var root = find(b);
+      var g = groups.get(root.id);
+      if (!g) groups.set(root.id, g = []);
+      g.push(b);
+      b._island = root.id;
+    }
+
+    // sleep islands whose every body has been still long enough
+    groups.forEach(function (isl) {
+      var minSleep = Infinity, anyAwake = false, k;
+      for (k = 0; k < isl.length; k++) {
+        if (isl[k].awake === false) continue;
+        anyAwake = true;
+        if (isl[k].sleepTime < minSleep) minSleep = isl[k].sleepTime;
+      }
+      if (!anyAwake) return;
+      if (minSleep >= TIME_TO_SLEEP) {
+        for (k = 0; k < isl.length; k++) {
+          var s = isl[k];
+          s.awake = false; s.v = { x: 0, y: 0 }; s.w = 0;
+        }
+      } else {
+        for (k = 0; k < isl.length; k++) if (isl[k].awake === false) { isl[k].awake = true; isl[k].sleepTime = 0; }
+      }
+    });
+    world._islands = groups;
+  }
+
+  P.SLEEP_LINEAR = SLEEP_LINEAR;
+  P.SLEEP_ANGULAR = SLEEP_ANGULAR;
+  P.TIME_TO_SLEEP = TIME_TO_SLEEP;
+  P.islands = { update: update, beforeStep: beforeStep, wakeIsland: wakeIsland, islandOf: islandOf };
 })(globalThis.SE);
