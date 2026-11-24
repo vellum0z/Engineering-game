@@ -162,3 +162,25 @@ suite('physics: ropes, springs and pins', () => {
     near(pin.force(), 30 * g, 0.01);
   });
 });
+
+suite('physics: welds', () => {
+  test('a welded cantilever holds its weight and carries the root moment', () => {
+    const w = world();
+    const wall = w.add(new P.Body({ type: 'static', position: { x: 0, y: 5 }, shapes: [P.box(0.1, 1)] }));
+    const arm = w.add(new P.Body({ position: { x: 1.1, y: 5 }, shapes: [P.box(1, 0.05)], mass: 20 }));
+    const weld = w.addJoint(new P.WeldJoint({ bodyA: wall, bodyB: arm, worldAnchor: { x: 0.1, y: 5 } }));
+    w.run(2);
+    ok(Math.abs(arm.angle) < 0.01, 'arm drooped by ' + arm.angle);
+    near(weld.force(), 20 * g, 0.01);
+    near(Math.abs(weld.torque()), 20 * g * 1.0, 0.02);  // weight acts 1 m from the weld
+  });
+  test('a weld rated below the root moment snaps on torque', () => {
+    const w = world();
+    const wall = w.add(new P.Body({ type: 'static', position: { x: 0, y: 5 }, shapes: [P.box(0.1, 1)] }));
+    const arm = w.add(new P.Body({ position: { x: 1.1, y: 5 }, shapes: [P.box(1, 0.05)], mass: 20 }));
+    w.addJoint(new P.WeldJoint({ bodyA: wall, bodyB: arm, worldAnchor: { x: 0.1, y: 5 }, breakTorque: 150 }));
+    let e = null; w.on('break', x => { e = x; });
+    w.run(1);
+    ok(e && e.reason === 'torque', 'expected a torque break');
+  });
+});

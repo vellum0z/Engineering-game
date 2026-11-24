@@ -3,8 +3,9 @@
  *
  *   P.breakage.check(world, dt)
  * runs once per step, after the solver. For each joint it records
- * lastForce and peakForce (N); a joint whose force() passes breakForce is
- * removed and a 'break' event { joint, force } is fired. The simulation
+ * lastForce / peakForce (N) and, for joints with torque(), lastTorque /
+ * peakTorque (N·m). A joint past breakForce or breakTorque is removed and a
+ * 'break' event { joint, force, torque, reason: 'force' | 'torque' } fires. The simulation
  * decides when a cable snaps or a pin shears, not a script.
  */
 (function (SE) {
@@ -16,10 +17,14 @@
       var F = j.force();
       j.lastForce = F;
       j.peakForce = Math.max(j.peakForce || 0, F);
-      if (F > j.breakForce) {
+      var T = j.torque ? Math.abs(j.torque()) : 0;
+      j.lastTorque = T;
+      j.peakTorque = Math.max(j.peakTorque || 0, T);
+      var why = F > j.breakForce ? 'force' : (j.breakTorque != null && T > j.breakTorque ? 'torque' : null);
+      if (why) {
         j.broken = true;
         world.removeJoint(j);
-        world.emit('break', { joint: j, force: F });
+        world.emit('break', { joint: j, force: F, torque: T, reason: why });
       }
     });
   }

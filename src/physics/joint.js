@@ -23,7 +23,8 @@
  * Each joint type lives in its own file and registers on SE.phys:
  *   distance.js  DistanceJoint (rod, spring, rope)
  *   revolute.js  RevoluteJoint (pin)
- * Planned: weld.js, prismatic.js, mouse.js, pulley.js, winch.js.
+ *   weld.js     WeldJoint (rigid or torsion-spring weld)
+ * Planned: prismatic.js, mouse.js, pulley.js, winch.js.
  */
 (function (SE) {
   'use strict';
