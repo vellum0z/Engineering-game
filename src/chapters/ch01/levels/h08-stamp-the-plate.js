@@ -1,154 +1,117 @@
 /*
- * H8 · Stamp the Plate: SI prefixes (Table 1–3) and the rules for using
- * them. Course section 1.4 (prefixes, rules for use) and the worked example
- * on prefixed products and quotients.
+ * H8 · Stamp the Plate: SI prefixes and the rules for using them.
+ * Course section 1.4 (prefixes, rules for use, prefixed products).
  *
- * The device: the depot's salvaged port-crane controller reads the label on
- * a plate literally. It parses prefix and unit exactly as stamped, converts
- * to base units and drives the winch governor with that number. In strict
- * mode its firmware also refuses any label that breaks the SI rules, and a
- * refused label means the winch never starts.
+ * Played in the build yard. The depot's salvaged crane controller drives a
+ * governed hoist: it reads the plates stamped on the hoist letter for letter
+ * and pulls exactly the line tension the hold plate says. A prefix slip is a
+ * factor of 1000 in the pull, and the physics shows it: the line snaps or the
+ * load drops. In strict mode the firmware also refuses any plate that breaks
+ * the SI rules, so the motor never engages and the worn brake lets the load
+ * slide down.
+ *
+ * Level part (bottom of this file): `h08-governor`, the governed hoist.
+ * Until the rigging parts land, a stand-in `jib` with the contract's dials
+ * and anchors is registered here only if no `jib` exists yet.
  */
 (function (SE) {
   'use strict';
-  var U = SE.units, S = SE.sigfig;
+  var Y = SE.yard, G = Y.goals, U = SE.units;
 
-  var G = 9.81;
-  // The generator on the hook. Its weight is the number on its plate, so the
-  // governor holds it exactly when the controller reads 2.45 kN.
-  var GEN_W = 2450;                    // N
-  var RATING = 12000;                  // N, the gantry cable
-  var GEN = { mass: GEN_W / G, g: G, label: 'generator', rating: RATING, mode: 'hover', hookHeight: 4, height: 9, zombies: 4 };
-  function HOIST(extra) { return { type: 'hoist', params: Object.assign({}, GEN, extra || {}) }; }
+  var g = 9.81;
+  var GEN_W = 2450;                    // N, the generator's plate weight
+  var PALLET_W = 6359;                 // N, Juno's pallet (kept to every digit)
+  var RATING = '12 kN';                // the hoist line
+  var WORN_BRAKE = 1500;               // N, the drum brake that holds when the motor is off
+  var HANG_Y = 4;                      // m, centre of a hanging load
+  var CREW = 2.5;                      // s, the crew's bolting time before lowering may start
 
-  function sig(x, n) { return S.roundSig(x, n || 3).text; }
-  function kN(N) { return Math.abs(N) >= 1e6 ? sig(N / 1e6) + ' MN' : Math.abs(N) >= 1e3 ? sig(N / 1e3) + ' kN' : Math.abs(N) >= 1 ? sig(N) + ' N' : sig(N * 1e3) + ' mN'; }
+  // Mass typed to every digit so the plate weight is exact at g = 9.81.
+  function massFor(W) { return String(W / g) + ' kg'; }
+  var f3 = function (x) { return Y.dial.fmtNum(x, 3); };
+  var f4 = function (x) { return Y.dial.fmtNum(x, 4); };
+  function kN(N) { var a = Math.abs(N); return a >= 1e6 ? f3(N / 1e6) + ' MN' : a >= 1e3 ? f3(N / 1e3) + ' kN' : a >= 1 ? f3(N) + ' N' : f3(N * 1e3) + ' mN'; }
 
-  // How the controller reads a label: "2.45 kN" -> 2.45 kN = 2450 N.
-  function echo(q) {
-    var s = q.number.mantissa + (q.number.hasExp ? '(10' + S.supNum(q.number.exp10) + ')' : '') + ' ' + U.formatFactors(q.unit.factors);
-    var si = U.dimsEqual(q.dims, U.unitInfo('N').dims) ? 'N' : U.dimsToSI(q.dims);
-    return '`' + s + '`' + (si ? ' = ' + sig(q.value, 4) + ' ' + si : '');
+  /* ------------------------------------------------------------ the rig */
+
+  var JIB = { id: 'jib', type: 'jib', x: 0, y: 0, dials: { height: '7 m', reach: '3 m' }, locked: true, label: 'port crane' };
+  function load(id, W, label, extra) {
+    return Object.assign({ id: id, type: 'crate', x: 3, y: HANG_Y, dials: { mass: massFor(W) }, locked: true, hide: ['mass'], label: label, plate: ['Weight ' + kN(W)] }, extra || {});
+  }
+  function governor(dials, open, extra) {
+    return Object.assign({ id: 'gov', type: 'h08-governor', a: { part: 'jib', anchor: 'tip' }, b: { part: 'gen', anchor: 'top' },
+      dials: Object.assign({ hold: '2.45 kN', rating: RATING, firmware: 'service' }, dials || {}),
+      locked: true, open: open || ['hold'], label: 'governed hoist' }, extra || {});
   }
 
-  // Read one plate the way the controller does. In strict mode the firmware
-  // applies the SI rules (one prefix, none in a denominator, powers of 1000,
-  // number between 0.1 and 1000) and halts on the first one broken.
-  function readPlate(text, strict, wantDims) {
-    var q = U.parseQuantity(text);
-    if (!q.ok) return { ok: false, halt: 'could not parse the label (' + q.error + ')' };
-    if (wantDims && !U.dimsEqual(q.dims, wantDims)) return { ok: false, q: q, halt: 'the label is not a force (' + (U.dimsName(q.dims) || U.dimsToSI(q.dims)) + ')' };
-    var issues = strict ? U.checkSIForm(q) : [];
-    return { ok: !issues.length, q: q, si: q.value, halt: issues.length ? issues[0].msg : null };
+  var CAMERA = { fit: { lo: { x: -2.5, y: -0.5 }, hi: { x: 7.5, y: 8 } } };
+  var SITE = { g: g, floor: 'concrete' };
+  var READOUTS = ['gov.tension', 'gov.height'];
+
+  var BARE = { parts: [JIB, load('gen', GEN_W, 'generator')] };
+  var RIGGED = { parts: [JIB, load('gen', GEN_W, 'generator'), governor()] };
+  var STRICT = { parts: [JIB, load('gen', GEN_W, 'generator'), governor({ hold: '2450 N', firmware: 'strict' })] };
+  var PALLET = { parts: [JIB, load('gen', PALLET_W, 'pallet'), governor({ hold: '6.359 MN' })] };
+  var TRAILER = { id: 'trailer', type: 'block', x: 3, y: 0.6, dials: { width: '2.4 m', height: '1.2 m' }, locked: true, label: 'trailer bed' };
+  var LOWER = { parts: [JIB, load('gen', GEN_W, 'generator'), TRAILER,
+    governor({ hold: '2450 N', dwell: '3000 ms', lower: '0.25 mm/ms', firmware: 'strict' }, ['hold', 'dwell', 'lower'])] };
+
+  /* ------------------------------------------------------------ goals */
+
+  // The built governed hoist in a run (a player-rigged one has its own id).
+  function govOf(s) {
+    var ps = s.built.parts;
+    for (var k in ps) if (ps[k].def.type === 'h08-governor') return ps[k];
+    return null;
   }
 
-  /* ------------------------------------------------------------ the crane */
+  // Height of the load's centre against where it started.
+  function dy(s) { var p = s.pos('gen'); return p ? p.y - HANG_Y : 0; }
 
-  // Hang the generator with governor tension T and describe what the
-  // physics did.
-  function hold(ctx, T, note) {
-    var s = ctx.setScene('hoist', Object.assign({}, GEN));
-    var run = s.run(T, { duration: 5 });
-    // The generator is already hanging on the cable, so the governor steps
-    // straight from the weight to the new set point. The scene's 0.3 s
-    // take-up ramp starts from zero tension, which would let a correctly
-    // set load sag for a moment; starting the clock past the ramp skips it.
-    s.time = 0.3;
-    return run.then(function (r) {
-      var d = r.detail, pre = note ? note + ' ' : '';
-      var hit = function (v) { return Math.abs(v) > 100 ? 'over 100 m/s' : Math.abs(v).toFixed(1) + ' m/s'; };
-      if (r.outcome === 'snapped') return pre + 'The governor pulled **' + kN(T) + '** on a cable rated ' + kN(RATING) + '. It parted at the drum and the generator fell 4 m, hitting the slab at **' + hit(d.impact) + '**.';
-      if (r.outcome === 'slammed') return pre + 'Line pull **' + kN(T) + '** against a weight of ' + kN(GEN_W) + ': net ' + kN(T - GEN_W) + ' upward. The generator shot up and hit the gantry head at **' + hit(d.impact) + '**.';
-      if (r.outcome === 'dropped') return pre + 'Line pull **' + kN(T) + '** against a weight of ' + kN(GEN_W) + '. That cannot carry the weight, so it came down and hit the slab at **' + hit(d.impact) + '**.';
-      if (r.outcome === 'held' || Math.abs(d.v) < 0.02) return pre + 'Line pull ' + kN(T) + ' equals the weight, so a = 0: the generator **hangs still at 4 m** for the crew.';
-      return pre + 'Line pull ' + kN(T) + ': the generator is creeping at ' + d.v.toFixed(2) + ' m/s.';
-    });
+  var halted = G.never(function (s) { var gv = govOf(s); return gv && gv.halt ? 'Firmware halt on the ' + gv.halt.label.toLowerCase() + ' plate (' + gv.halt.text + '): ' + gv.halt.msg + ' The motor never engaged, and the worn brake let the load slide.' : null; });
+  var snapped = G.never(function (s) { var b = s.breaks[0]; return b ? 'The line snapped: the motor pulled ' + kN(b.force) + ' on a line rated ' + RATING + '.' : null; });
+  var band = G.never(function (s) {
+    var d = dy(s);
+    if (d < -0.3) return 'The load sank ' + f3(-d) + ' m. The line pulled less than its weight.';
+    if (d > 0.3) return 'The load shot up ' + f3(d) + ' m. The line pulled more than its weight.';
+    return null;
+  });
+  // Hanging still at the start height for `secs`.
+  function hangStill(secs) {
+    return G.all(halted, snapped, band,
+      G.holdFor('still', function (s) { return Math.abs(dy(s)) < 0.05 && s.speed('gen') < 0.02; }, secs));
   }
+  var HOLD = hangStill(3);
+  var HOLD_JOB = hangStill(4);
 
-  // Strict firmware refused a label: the winch never takes up the cable.
-  // Run it with zero tension and report how far the dead walked meanwhile.
-  function halt(ctx, why, label) {
-    var s = ctx.setScene('hoist', Object.assign({}, GEN, { mode: 'lift', zombies: 5 }));
-    return s.run(0, { duration: 3 }).then(function () {
-      var near = Math.max.apply(null, s.zombieX);
-      var walked = 0.12 * s.time;               // the scene's shuffle speed, m/s
-      var gap = 7.5 - Math.min(near, 1.5);
-      return '**FIRMWARE HALT** on `' + label + '`: ' + why + ' The winch never started. The generator sat on the slab for ' + s.time.toFixed(1) + ' s while the nearest of the dead shuffled ' + walked.toFixed(2) + ' m closer, now ' + gap.toFixed(1) + ' m from the gantry.';
-    });
+  // Strict job: still while the crew bolts, then lowered gently onto the trailer.
+  var LOWER_JOB = G.all(halted, snapped,
+    G.never(function (s) { return s.t < CREW && Math.abs(dy(s)) > 0.05 ? 'The generator moved at t = ' + f3(s.t) + ' s, before the crew had the frame bolted (they need ' + CREW + ' s).' : null; }),
+    G.never(function (s) { return dy(s) > 0.3 ? 'The generator shot up into the jib. The line pulled more than its weight.' : null; }),
+    G.never(function (s) {
+      var hit = s.impacts.filter(function (i) { return (i.a === 'gen' || i.b === 'gen') && i.speed > 0.5; })[0];
+      return hit ? 'The generator hit the ' + (hit.a === 'trailer' || hit.b === 'trailer' ? 'trailer' : 'ground') + ' at ' + f3(hit.speed) + ' m/s. The crew wants it set down below 0.5 m/s.' : null;
+    }),
+    G.restIn('gen', { x0: 2, x1: 4, y0: 1.6, y1: 1.9 }, { maxSpeed: 0.02, hold: 1 }));
+
+  /* ------------------------------------------------------- level helpers */
+
+  function gov(ctx) { return ctx.find('h08-governor'); }
+  function rigged(ctx) {
+    var gv = ctx.find('h08-governor');
+    if (!gv) return false;
+    var a = gv.a || {}, b = gv.b || {};
+    if (a.part === 'jib' && b.part === 'gen') return true;
+    if (a.part === 'gen' && b.part === 'jib') return 'Run it **from the jib tip to the generator**, in that order: the drum end goes on the jib.';
+    return 'One end on the **jib tip**, the other on the **top of the generator**.';
   }
-
-  /*
-   * Shared consequence for plate tasks. Each item is { key, trueSI }. The
-   * controller builds its governor set point from every plate, so a plate's
-   * read-to-true ratio scales the line pull by the same factor.
-   *   a label the firmware refuses -> halt (the winch stalls);
-   *   a misread value -> the hoist runs with W times the worst ratio;
-   *   all good -> the generator hangs at 4 m.
-   */
-  function controller(ctx, a, items) {
-    var refused = null, worst = null;
-    items.forEach(function (it) {
-      var ans = a[it.key], r = ans.result;
-      var label = (r.input || '').trim() || '(blank)';
-      if (refused) return;
-      if (!r.parsed || !r.parsed.ok) { refused = { why: 'it could not parse that label.', label: label }; return; }
-      if (!r.parts.units) { refused = { why: 'the units are the wrong kind of quantity (' + (U.dimsName(r.parsed.dims) || U.dimsToSI(r.parsed.dims)) + ').', label: label }; return; }
-      var bad = r.errors.filter(function (e) { return e.kind === 'form'; })[0];
-      if (bad) { refused = { why: bad.msg, label: label }; return; }
-      if (!r.parts.value) {
-        var ratio = ans.si / it.trueSI;
-        if (!worst || Math.abs(Math.log(Math.abs(ratio))) > Math.abs(Math.log(Math.abs(worst.ratio)))) worst = { ratio: ratio, label: label, read: echo(r.parsed) };
-      }
-    });
-    if (refused) return halt(ctx, refused.why, refused.label);
-    if (worst) return hold(ctx, GEN_W * Math.abs(worst.ratio), 'The controller read ' + worst.read + ', which is **×' + sig(Math.abs(worst.ratio)) + '** the intended value, and that factor went straight into the line pull.');
-    return hold(ctx, GEN_W, 'Every plate read as intended and the firmware accepted them all.');
-  }
-
-  // One lenient-mode plate on the generator's governor (the try step).
-  function stampAndRun(ctx, label, noCount) {
-    var p = readPlate(label, false, U.unitInfo('N').dims);
-    if (!noCount) ctx.runner._h8plates = (ctx.runner._h8plates || 0) + 1;
-    if (!p.ok) return halt(ctx, p.halt + '.', label);
-    var msg = 'Plate `' + label + '` reads as ' + echo(p.q) + '.';
-    return hold(ctx, p.si, msg).then(function (m) {
-      if (Math.abs(p.si - GEN_W) < 1e-6 * GEN_W) ctx.runner._h8held = true;
-      return m;
-    });
-  }
-
-  // Same, with the strict firmware on (the sandbox).
-  function stampStrict(ctx, label) {
-    var p = readPlate(label, true, U.unitInfo('N').dims);
-    if (!p.ok) return halt(ctx, /\.$/.test(p.halt) ? p.halt : p.halt + '.', label);
-    return hold(ctx, p.si, 'Plate `' + label + '` reads as ' + echo(p.q) + ' and passes the firmware.');
-  }
-
-  /* ----------------------------------------------------- the answer keys */
-
-  // H8.keep-digits: restamp the crate plates, keeping every digit.
-  var KD_TIME = 7246e-3;   // 7246 ms = 7.246 s (4 s.f.)
-  var KD_LOAD = 6359;      // 6359 N = 6.359 kN (4 s.f.)
-  var KD_HOOK = 0.712;     // 0.712 kg = 712 g (3 s.f.)
-
-  // H8.combos: unit combinations, each written as "1 <unit>" so the value is
-  // fixed and only the form is in play.
-  var C_RAMP = 1e6 / 1e3;           // 1 MN/ks = 10^3 N/s = 1 kN/s
-  var C_GAIN = 1e-3 / (1 * 1e-9);   // 1 mN/(kg·ns) = 10^6 N/(kg·s) = 1 MN/(kg·s)
-  var C_STIFF = 1e3 / 1e-3;         // 1 kN/mm = 10^6 N/m = 1 MN/m
-  var C_ARM = 1e6 * 1e-6;           // 1 Mm·mg = 10^6 m · 10^-6 kg = 1 m·kg
-  var C_GAP = 1e-9 * 1e3;           // 1 nkm = 10^-9 · 10^3 m = 10^-6 m = 1 μm
-
-  // H8.prefix-range: one prefix, number between 0.1 and 1000.
-  var R_BOLLARD = 38470e3;          // 38 470 kN = 38.47 MN -> 38.5 MN
-  var R_RUN = 734e4 * 1e-3;         // 734(10^4) mm = 7.34(10^3) m = 7.34 km
-  var R_DRIFT = 0.00872e-6;         // 0.008 72 mg = 8.72(10^-9) kg = 8.72 μg
-  var R_SHIM = 0.000276;            // 0.000 276 kg = 0.276 g (or 276 mg)
-
-  // H8.ex13: prefixed products and quotients (3 s.f.).
-  var EX_A = (45e-3) * (7e9);               // (45 mN)(7 GN) = 315(10^6) N^2 = 315 kN^2
-  var EX_B = (250e-3) * Math.pow(0.4e6, 2); // (250 mm)(0.4 MN)^2 = 0.25 m · 0.16(10^12) N^2 = 40.0(10^9) m·N^2 = 40.0 Gm·N^2
-  var EX_C = 48 * 1e18 / (750e9 * 1e-3);    // 48 MN^3 / 750 Gg = 48(10^18) N^3 / 750(10^6) kg = 64.0(10^9) N^3/kg = 64.0 kN^3/kg
+  function ran(ctx, type) { return type === 'result' && !!ctx.result; }
+  function tensionAt(ctx) { var r = ctx.result; return r && r.state ? r.state.peakOf('T') : NaN; }
+  function forms(ctx) { return (ctx.values.h8forms = ctx.values.h8forms || []); }
+  function readAs(text) { var q = U.parseQuantity(text || ''); return q.ok ? q.value : NaN; }
+  // Track the peak line tension on every run, for the after-texts.
+  var TRACK = function (s) { var gv = govOf(s); if (gv) s.peak('T', gv.tension()); };
+  function withTrack(goal) { var f = function (s) { TRACK(s); return goal(s); }; return f; }
 
   SE.content.registerLevel('ch01', {
     id: 'H8', order: 8, title: 'Stamp the Plate',
@@ -156,301 +119,320 @@
     sections: ['1.4'],
     minutes: 25,
     intro: [
-      'The crew dragged a crane controller out of a drowned container port. It still works, and it is very literal: it reads the label stamped on a plate, letter for letter, converts it to base units and drives the winch with that number.',
-      'Hask taps the plate on the generator. "This box doesn\'t guess what you meant. It reads what you **wrote**. So we\'re going to learn to write it properly."'
+      'The crew dragged a crane controller out of a drowned container port. It still works, and it is very literal: it reads the plates stamped on the hoist, letter for letter, converts them to base units and drives the line with that number.',
+      'Hask taps the hold plate. "This box doesn\'t guess what you meant. It pulls what you **wrote**. So we\'re going to learn to write it properly."'
     ].join('\n\n'),
     goals: [
       'Know the sizes of G, M, k, m, μ and n, and move a decimal point three places per prefix',
       'Apply the SI rules: dots between units, exponents on prefixed units, no prefix in a denominator (kg excepted)',
-      'Work a calculation in base units and powers of 10, then re-express it with one prefix and a number between 0.1 and 1000'
+      'Work in base units and powers of 10, then re-express a value with one prefix and a number between 0.1 and 1000'
     ],
-    scene: HOIST(),
-    proveIt: [
-      {
-        id: 'H8.prove-range', text: 'Restamp each with one SI prefix and a number between 0.1 and 1000: **0.006 18 km** and **42.1(10³) N**.',
-        inputs: [
-          // 0.006 18 km = 0.006 18(10^3) m = 6.18 m
-          { key: 'L', label: '0.006 18 km', placeholder: 'e.g. 6.18 m', spec: { value: 0.00618e3, unit: 'm', sf: 3, form: 'si' }, answer: '6.18 m', wrong: [{ input: '6.18 km', kind: 'prefix' }] },
-          // 42.1(10^3) N = 42.1 kN
-          { key: 'F', label: '42.1(10³) N', placeholder: 'e.g. 42.1 kN', spec: { value: 42.1e3, unit: 'N', sf: 3, form: 'si' }, answer: '42.1 kN' }
-        ]
-      },
-      {
-        id: 'H8.prove-combo', text: 'Rewrite each in correct SI form (the number stays 1): **1 MN·nm** and **1 Gg/km**.',
-        inputs: [
-          // 1 MN·nm = 10^6 N · 10^-9 m = 10^-3 N·m = 1 mN·m
-          { key: 'M', label: '1 MN·nm', placeholder: 'e.g. 1 mN·m', spec: { value: 1e-3, unit: 'N·m', sf: null, form: 'si' }, answer: '1 mN·m', wrong: [{ input: '1 MN·nm', kind: 'form' }] },
-          // 1 Gg/km = 10^6 kg / 10^3 m = 10^3 kg/m = 1 Mg/m
-          { key: 'D', label: '1 Gg/km', placeholder: 'e.g. 1 Mg/m', spec: { value: 1e3, unit: 'kg/m', sf: null, form: 'si' }, answer: '1 Mg/m', wrong: [{ input: '1 Gg/km', kind: 'form' }] }
-        ]
-      },
-      {
-        id: 'H8.prove-ex', text: 'Evaluate **(45 mN)(7 GN)** and write it with one prefix, to 3 s.f.',
-        inputs: [{ key: 'P', label: '(45 mN)(7 GN)', placeholder: 'e.g. 315 kN^2', spec: { value: EX_A, unit: 'N^2', sf: 3, form: 'si' }, answer: '315 kN^2' }]
-      }
-    ],
+    yard: { site: SITE, camera: CAMERA, readouts: READOUTS, poke: false, design: RIGGED },
+    // Reference builds for the scored jobs (checked by tests/yard.test.js).
+    solutions: {
+      'H8.pallet': [
+        { set: { gov: { hold: '6.359 kN' } } },
+        { set: { gov: { hold: '6359 N' } } },                   // right force, ugly form: passes, graded down
+        { pass: false },                                         // as stamped: 6.359 MN snaps the line
+        { pass: false, set: { gov: { hold: '6.359 N' } } },
+        { pass: false, set: { gov: { hold: '6.359 kN', firmware: 'strict', dwell: '3000 ms' } } }
+      ],
+      'H8.lower': [
+        { set: { gov: { hold: '2.45 kN', dwell: '3 s', lower: '0.25 m/s' } } },
+        { set: { gov: { hold: '2.45 kN', dwell: '3.00 s', lower: '250 mm/s' } } },
+        { pass: false, set: { gov: { hold: '2.45 kN', dwell: '3 s' } } },            // 0.25 mm/ms: halt
+        { pass: false, set: { gov: { hold: '2.45 kN', dwell: '3 ms', lower: '0.25 m/s' } } },
+        { pass: false, set: { gov: { hold: '2.45 kN', dwell: '3 s', lower: '0.25 km/s' } } },
+        { pass: false, set: { gov: { hold: '2.45 kN', dwell: '3 s', lower: '0.25 mm/s' } } },
+        { pass: false, set: { gov: { hold: '2.45 MN', dwell: '3 s', lower: '0.25 m/s' } } }
+      ]
+    },
     steps: [
       /* ------------------------------------------------ prefixes */
       {
-        type: 'predict', who: 'hask',
-        q: 'The generator weighs **2.45 kN**, and the governor holds whatever tension the plate says. Somebody tired stamped the plate **2.45 MN**.\n\nThe cable is rated 12 kN. What happens when the controller hangs the generator?',
-        choices: [
-          { t: 'It hangs still. 2.45 is 2.45.', why: 'The controller reads the M as mega: 2.45(10⁶) N, a thousand times the weight. Watch the cable.' },
-          { t: 'It sinks slowly to the slab.', why: 'That would need a tension below the weight. The M made it a thousand times above.' },
-          { t: 'The winch rips it straight up into the gantry.', correct: true, why: 'Right. One letter is a factor of 1000: 2.45 MN = 2 450 000 N of line pull on a 2450 N generator. The 12 kN cable would part too, if the load didn\'t hit the gantry head first.' }
-        ],
-        run: function (ctx) { return stampAndRun(ctx, '2.45 MN', true); },
-        reveal: 'A prefix is a multiplier, and the controller applies it faithfully. **M** is 10⁶ and **k** is 10³, so swapping one for the other is a factor of a thousand in the line pull.'
+        type: 'build', who: 'hask',
+        yard: { design: BARE, readouts: null, bin: [{ type: 'h08-governor', count: 1, dials: { hold: '2.45 kN', rating: RATING } }] },
+        text: 'The generator is hanging off the old crane on its worn drum brake. Take the **governed hoist** from the bin and rig it: click the **jib tip** first (that is the drum end), then the **top of the generator**.\n\nSelect the hoist to see its plates. The **hold** plate is the line tension the controller will pull. It reads **2.45 kN**, the same as the weight stamped on the generator.',
+        goalText: 'Hoist rigged from the jib tip to the generator',
+        until: rigged
+      },
+      {
+        type: 'watch', who: 'hask',
+        yard: { keep: true, readouts: null, goal: withTrack(G.after(4)) },
+        text: 'Press **▶ Run** and watch the **tension** gauge.',
+        goalText: 'Run it',
+        until: ran,
+        after: function (ctx) { return 'The line pulled **' + kN(tensionAt(ctx)) + '** against a weight of 2.45 kN. The forces balance, so the generator **hangs still**.'; }
+      },
+      {
+        type: 'watch', who: 'hask',
+        yard: { keep: true, readouts: null, goal: withTrack(G.after(3)) },
+        text: 'Somebody tired once stamped this plate **2.45 MN**. One letter. Restamp the **hold** plate as **2.45 MN**, Reset, and run it.',
+        goalText: 'Run it with the hold plate at 2.45 MN',
+        until: function (ctx, type) {
+          var gv = ctx.find('h08-governor');
+          if (!gv || !ran(ctx, type)) return false;
+          return Math.abs(readAs(gv.dials.hold) - 2.45e6) < 1 ? true : 'Stamp **2.45 MN** on the hold plate.';
+        },
+        after: 'The controller read the M as **mega**, 10⁶: 2 450 000 N of pull on a 2450 N generator, a thousand times its weight. The 12 kN line snapped the instant the drum bit, and the generator fell.'
+      },
+      {
+        type: 'watch', who: 'hask',
+        yard: { keep: true, readouts: null, goal: withTrack(G.after(3)) },
+        text: 'Now the other way. Stamp it **2.45 N**, a thousand times too small, and run it.',
+        goalText: 'Run it with the hold plate at 2.45 N',
+        until: function (ctx, type) {
+          var gv = ctx.find('h08-governor');
+          if (!gv || !ran(ctx, type)) return false;
+          return Math.abs(readAs(gv.dials.hold) - 2.45) < 1e-6 ? true : 'Stamp **2.45 N** on the hold plate.';
+        },
+        after: 'A line pulling 2.45 N can\'t carry a 2450 N load. The motor let the drum run out and the generator dropped to the slab.'
       },
       {
         type: 'reveal', kicker: 'Table 1–3', title: 'SI prefixes',
         eq: '4\\ 000\\ 000\\ \\u{N} = 4000\\ \\u{kN} = 4\\ \\u{MN}',
         table: { head: ['Multiple', 'Exponential', 'Prefix', 'Symbol'], rows: [['1 000 000 000', '10⁹', 'giga', 'G'], ['1 000 000', '10⁶', 'mega', 'M'], ['1 000', '10³', 'kilo', 'k'], ['0.001', '10⁻³', 'milli', 'm'], ['0.000 001', '10⁻⁶', 'micro', 'μ'], ['0.000 000 001', '10⁻⁹', 'nano', 'n']] },
-        text: 'When a number gets very large or very small, a **prefix** on the unit carries the size instead. Each step in the table is a factor of 1000, so each one moves the decimal point **three places**: 7 000 000 N = 7000 kN = 7 MN, and 0.003 m = 3 mm.\n\nThe metric system also has **deca** (10) and **centi** (0.01), but SI practice in engineering avoids them, apart from a few area and volume measurements (you will still see cm² on old drawings).\n\nOne oddity: the **kilogram** is the only base unit whose name already carries a prefix. The gram is the thing the prefixes attach to, so 1000 kg is a **megagram**, Mg, not a "kilo-kilogram".',
+        text: 'When a number gets very large or very small, a **prefix** on the unit carries the size instead. Each step in the table is a factor of 1000, so each one moves the decimal point **three places**: 7 000 000 N = 7000 kN = 7 MN, and 0.003 m = 3 mm.\n\nThe controller applies the prefix faithfully. Swap **k** for **M** and the pull goes up a thousandfold; swap it for nothing and it drops a thousandfold. You just watched both.\n\nThe metric system also has **deca** (10) and **centi** (0.01), but SI practice in engineering avoids them, apart from a few area and volume units.',
         formula: 'ch01.table-prefix'
       },
       {
-        type: 'try', who: 'hask',
-        scene: HOIST(),
-        text: 'The firmware is in its lenient service mode for now: it reads any label. Stamp a few plates for the 2.45 kN generator and watch what the governor does with each one. Find at least one that holds it, and try ones that don\'t.',
-        controls: [],
-        goalText: 'Run three plates, at least one of which holds the generator still',
-        goal: function (ctx) { return (ctx.runner._h8plates || 0) >= 3 && !!ctx.runner._h8held; },
-        actions: [
-          { label: 'Stamp 2.45 kN', run: function (ctx) { return stampAndRun(ctx, '2.45 kN'); } },
-          { label: 'Stamp 2450 N', run: function (ctx) { return stampAndRun(ctx, '2450 N'); } },
-          { label: 'Stamp 2.45 N', run: function (ctx) { return stampAndRun(ctx, '2.45 N'); } },
-          { label: 'Stamp 2 450 000 mN', run: function (ctx) { return stampAndRun(ctx, '2 450 000 mN'); } },
-          { label: 'Stamp 0.002 45 MN', run: function (ctx) { return stampAndRun(ctx, '0.002 45 MN'); } }
-        ],
-        after: 'Four of those labels are the **same force** written four ways: 2.45 kN, 2450 N, 2 450 000 mN and 0.002 45 MN all hold the generator. Only the one with the wrong size dropped it. Some of those labels are still ugly, though, and the firmware has opinions about that. More soon.'
-      },
-      {
-        type: 'classify', id: 'H8.prefix-size',
-        text: 'Each salvaged plate has a prefix. What power of ten does the prefix stand for?',
-        bins: ['10⁹', '10⁶', '10³', '10⁻³', '10⁻⁶', '10⁻⁹'],
-        items: [
-          { t: 'Dock winch rated pull: 0.8 **M**N', bin: '10⁶', why: 'mega, M = 10⁶. So 0.8 MN = 800 000 N.' },
-          { t: 'Drum brake force: 3.2 **k**N', bin: '10³', why: 'kilo, k = 10³. So 3.2 kN = 3200 N.' },
-          { t: 'Old port gantry design load: 1.2 **G**N', bin: '10⁹', why: 'giga, G = 10⁹.' },
-          { t: 'Brake dwell: 250 **m**s', bin: '10⁻³', why: 'milli, m = 10⁻³. So 250 ms = 0.250 s.' },
-          { t: 'Strain gauge drift: 40 **μ**m', bin: '10⁻⁶', why: 'micro, μ = 10⁻⁶.' },
-          { t: 'Coating thickness on the drum: 90 **n**m', bin: '10⁻⁹', why: 'nano, n = 10⁻⁹.' }
-        ]
-      },
-      {
-        type: 'task', id: 'H8.keep-digits', who: 'juno',
-        title: 'Restamp the crate plates',
-        text: 'Juno\'s crew is moving three crates and wants the plates in sensible units. Restamp each with a prefix that moves the decimal point three places, **keeping every digit** that was measured.\n\n- Brake dwell: **7246 ms**, restamp in seconds\n- Load on the pallet: **6359 N**, restamp in kilonewtons\n- Hook block: **0.712 kg**, restamp in grams\n\nThe crew reads the load plate to pick their lifting kit.',
-        inputs: [
-          // 7246 ms = 7246(10^-3) s = 7.246 s, 4 s.f. as measured
-          { key: 't', label: 'Brake dwell (s)', placeholder: 'e.g. 7.246 s', spec: { value: KD_TIME, unit: 's', sf: 4, form: 'si', expressIn: 's' }, answer: '7.246 s', wrong: [{ input: '7.25 s', kind: 'sigfig' }, { input: '7.246 ks', kind: 'prefix' }] },
-          // 6359 N = 6359(10^-3) kN = 6.359 kN
-          { key: 'F', label: 'Load (kN)', placeholder: 'e.g. 6.359 kN', spec: { value: KD_LOAD, unit: 'N', sf: 4, form: 'si', expressIn: 'kN' }, answer: '6.359 kN', wrong: [{ input: '6.359 MN', kind: 'prefix' }, { input: '6.36 kN', kind: 'sigfig' }] },
-          // 0.712 kg = 0.712(10^3) g = 712 g, 3 s.f.
-          { key: 'm', label: 'Hook block (g)', placeholder: 'e.g. 712 g', spec: { value: KD_HOOK, unit: 'kg', sf: 3, form: 'si', expressIn: 'g' }, answer: '712 g', wrong: [{ input: '712 kg', kind: 'prefix' }] }
-        ],
-        hints: [
-          'Each prefix step is three decimal places. Going from a smaller unit to a bigger one, the number gets smaller.',
-          'ms to s: divide by 1000. N to kN: divide by 1000. kg to g: multiply by 1000. Write every digit you started with.',
-          '7246 ms = 7.246 s. 6359 N = 6.359 kN. 0.712 kg = 712 g.'
-        ],
-        consequence: function (ctx, a) {
-          var claimed = a.F.si;
-          var s = ctx.setScene('haul', { mode: 'lift', quantity: 'force', trueValue: KD_LOAD, claimed: claimed == null ? NaN : claimed, label: 'pallet' });
-          return s.run({ claimed: claimed == null ? NaN : claimed, trueValue: KD_LOAD }).then(function (r) {
-            var d = r.detail, kit = d.chosen ? d.chosen.name : 'nothing';
-            var plate = a.F.result.parsed && a.F.result.parsed.ok ? 'The crew read your plate as ' + echo(a.F.result.parsed) + ' and took the **' + kit + '**.' : 'The crew could not read the plate and grabbed the **' + kit + '**.';
-            if (r.outcome === 'overloaded') return plate + ' The real load is 6.36 kN, ' + Math.round(d.utilization * 100) + '% of its rating. It buckled under the pallet.';
-            if (r.outcome === 'oversized') return plate + ' It lifted the 6.36 kN pallet easily, but the crew ' + d.cost + '.';
-            return plate + ' The 6.36 kN pallet sits at ' + Math.round(d.utilization * 100) + '% of its rating. Lifted clean.';
-          });
+        type: 'build', who: 'hask',
+        yard: { keep: true, readouts: null, goal: withTrack(HOLD) },
+        text: 'The prefix is part of the number. The same force can be stamped many ways: move the decimal point three places and change the prefix to match.\n\nStamp the hold plate **three different ways** that all mean the generator\'s weight, and run each one. At least one should use a prefix other than k. (Mega and milli both work, with enough zeros.)',
+        goalText: 'Three different plates that each hold the generator still',
+        onEnter: function (ctx) { ctx.values.h8forms = []; },
+        until: function (ctx, type) {
+          var gv = ctx.find('h08-governor'), list = forms(ctx);
+          if (!gv || !ran(ctx, type)) return false;
+          var t = String(gv.dials.hold).replace(/\s+/g, ' ').trim();
+          if (!ctx.result.pass) return Math.abs(readAs(t) - GEN_W) > 1e-6 * GEN_W ? '`' + t + '` reads as **' + kN(readAs(t)) + '**, not 2.45 kN. Count the places again.' : false;
+          if (list.indexOf(t) < 0) list.push(t);
+          var other = list.some(function (x) { return !/(^|[\d\s])kN$/.test(x); });
+          if (list.length >= 3 && other) return true;
+          return 'Held with `' + list.join('`, `') + '`. ' + (list.length < 3 ? 'Try another.' : 'Now one without the k.');
         },
-        explain: 'Changing the prefix moves the decimal point, nothing else. The digits that were measured stay, so 7246 ms keeps all four of them as 7.246 s.'
+        after: function (ctx) { return 'All of these are one force: `' + forms(ctx).join('`, `') + '`. The controller converted each to **2450 N** and pulled exactly that. Some of those plates are still ugly, though, and the strict firmware has opinions about that.'; }
       },
       {
-        type: 'sandbox', scene: { type: 'haul', params: { mode: 'lift', quantity: 'force', trueValue: KD_LOAD, claimed: KD_LOAD, label: 'pallet' } },
-        text: 'The crew picks kit from whatever figure is on the plate. Slide **your figure** to 1000× too small, or 1000× too big, and watch what a slipped prefix costs. Then change the true load.',
-        controls: ['claimed', 'trueValue', 'safety'],
-        prompts: ['Set your figure to 0.006 kN (a kN plate read as N). What does the crew take?', 'Set it to 6359 kN (an N plate read as kN). It works, but what does it cost?', 'Is there a figure that is wrong but harmless?']
+        type: 'job', id: 'H8.pallet', who: 'juno',
+        yard: { design: PALLET, bin: [], goal: null },
+        text: 'Juno\'s crew has a pallet of pump parts on the hook. Its weight was measured as **6359 N**, to four figures, and somebody stamped the hold plate **6.359 MN**.\n\nRestamp the hold plate in **kilonewtons**, keeping **every digit** that was measured, then run it. The pallet has to hang still for 4 s while the crew checks the slings.',
+        goalText: 'Pallet hanging still for 4 s, hold plate in kN to four figures',
+        goal: withTrack(HOLD_JOB),
+        timeout: 8,
+        grade: { part: 'gov', key: 'hold', spec: { value: PALLET_W, unit: 'N', sf: 4, form: 'si', expressIn: 'kN' } },
+        hints: [
+          'Going from newtons to kilonewtons, the number gets 1000 times smaller: move the decimal point three places left.',
+          'Changing the prefix moves the decimal point and nothing else. Keep all four measured digits.',
+          '6359 N = **6.359 kN**.'
+        ],
+        onFail: function (ctx) { var gv = gov(ctx); return gv ? 'The controller read your plate `' + gv.dials.hold + '` as **' + kN(readAs(gv.dials.hold)) + '**. The pallet weighs 6.359 kN.' : ''; },
+        success: function (ctx) { var t = gov(ctx).dials.hold; return 'Held. The controller read `' + t + '` as ' + f4(readAs(t)) + ' N. ' + (/^6\.359\s*kN$/.test(t.trim()) ? 'Every measured digit survived the restamp.' : 'It works, but look at the grade: the crew wanted it **in kN, to all four digits**.'); }
       },
 
       /* ------------------------------------------------ rules for use */
       {
-        type: 'predict', who: 'hask',
-        scene: HOIST(),
-        q: 'A plate on the drum brake reads **250 ms**. The stamper meant "metre-second", a unit some of the old drum calculations use. How does the controller read it?',
-        choices: [
-          { t: 'As 250 metre-seconds. It can tell from context.', why: 'It has no context. It sees an m stuck to an s, and that is the milli prefix.' },
-          { t: 'As 250 milliseconds, 0.250 s.', correct: true, why: 'Right. Two symbols run together are read as a prefix and a unit. To mean a product, separate them with a dot: m·s.' },
-          { t: 'It refuses the plate as ambiguous.', why: 'The label is perfectly legal. It just doesn\'t say what the stamper meant.' }
-        ],
-        reveal: 'Units that multiply are separated by a **dot**: **m·s** is a metre-second, **ms** is a millisecond. The same goes for N = kg·m/s² = kg·m·s⁻².'
-      },
-      {
-        type: 'predict', who: 'hask',
-        q: 'A design note gives a load-squared term as **3 mN²**. In base units, how big is that?',
-        choices: [
-          { t: '3(10⁻³) N², since milli is 10⁻³.', why: 'That would be milli applied to N² as a whole. The exponent applies to the prefixed unit: (mN)².' },
-          { t: '3(10⁻⁶) N², since it means 3 (mN)².', correct: true, why: 'Right. mN² = (mN)² = (10⁻³ N)² = 10⁻⁶ N². Likewise mm² = (mm)², so 1 mm² = 10⁻⁶ m².' }
-        ],
-        reveal: 'An exponent on a prefixed unit raises the **prefix too**: mN² = (mN)² = mN·mN, and mm² = (mm)².'
-      },
-      {
         type: 'reveal', kicker: 'Rules for use', title: 'Writing SI properly',
         eq: '(80\\ \\u{kN})(45\\ \\u{nm}) = 3.60\\ \\u{mN·m}',
-        text: '- **Dots** separate units that multiply: m·s (metre-second) vs ms (millisecond).\n- An **exponent** applies to the prefix and the unit together: mN² = (mN)², mm² = (mm)².\n- **No prefix in a denominator**, the kilogram excepted. Write kN/m, not N/mm. Write Mm/kg, not m/mg.\n- **Calculate in base units** with powers of 10, then re-express the result with **one** prefix, keeping the number **between 0.1 and 1000**.\n\nThe example above follows the last rule: write 80 kN as 80(10³) N and 45 nm as 45(10⁻⁹) m, multiply to get 3600(10⁻⁶) N·m, then pick the single prefix that brings 0.003 60 N·m into range.',
+        text: '- **Dots** separate units that multiply: **m·s** is a metre-second, **ms** is a millisecond. The controller sees an m stuck to an s and reads milli.\n- An **exponent** applies to the prefix and the unit together: mN² = (mN)² = 10⁻⁶ N², and mm² = (mm)².\n- **No prefix in a denominator**, the kilogram excepted. Write kN/m, not N/mm. Write Mm/kg, not m/mg.\n- **Calculate in base units** with powers of 10, then re-express the result with **one** prefix, keeping the number **between 0.1 and 1000**.\n\nThe port ran its controllers in **strict** mode, where the firmware refuses any plate that breaks these rules.',
         formula: 'ch01.si-rules'
       },
       {
-        type: 'predict', who: 'hask',
-        scene: HOIST(),
-        q: 'Hask flips the controller out of service mode and into **strict** mode, the way it ran at the port. You stamp **2450 N** on the generator, which is the right force.\n\nWhat happens now?',
-        choices: [
-          { t: 'It holds, like before. The value is right.', why: 'The value is right, but the firmware checks the form first. 2450 is outside 0.1 to 1000.' },
-          { t: 'The firmware halts and the winch never starts.', correct: true, why: 'Right. Strict firmware refuses a label that breaks the rules, even when the number is correct. 2.45 kN would pass.' }
-        ],
-        run: function (ctx) { return stampStrict(ctx, '2450 N'); },
-        reveal: 'A **value** error makes the crane do the wrong thing. A **form** error makes the strict firmware do nothing at all. Out here, nothing at all is also dangerous.'
+        type: 'build', who: 'hask',
+        yard: { design: STRICT, bin: [], goal: withTrack(HOLD) },
+        text: 'Hask flips the controller into **strict** mode. The hold plate reads **2450 N**, which is the right force. Run it.\n\nThen fix the plate so the firmware accepts it, and run it again.',
+        goalText: 'See the firmware halt, then hold the generator in strict mode',
+        onEnter: function (ctx) { ctx.values.h8halt = false; },
+        until: function (ctx, type) {
+          if (!ran(ctx, type)) return false;
+          var gv = ctx.result.state && govOf(ctx.result.state);
+          if (gv && gv.halt) { ctx.values.h8halt = true; return 'Firmware halt: **' + gv.halt.msg + '** Select the hoist: its plate says what the firmware read. Restamp it and run again.'; }
+          if (!ctx.values.h8halt) return 'Run it once as stamped first, to see what strict mode does.';
+          return ctx.result.pass ? true : false;
+        },
+        after: function (ctx) { return '`' + gov(ctx).dials.hold + '` passes the firmware and holds the generator. A **value** error makes the controller do the wrong thing. A **form** error makes the strict firmware do nothing at all, and with a worn brake, nothing at all also drops the load.'; }
       },
       {
-        type: 'classify', id: 'H8.legal-labels',
-        text: 'Strict firmware: will each label pass, or halt the crane?',
-        bins: ['Passes', 'Halts'],
-        items: [
-          { t: '1 Mm/s', bin: 'Passes', why: 'One prefix, in the numerator. (1 mm/ns written properly.)' },
-          { t: '1 mm/ns', bin: 'Halts', why: 'Prefix in the denominator. 10⁻³ m / 10⁻⁹ s = 10⁶ m/s = 1 Mm/s.' },
-          { t: '1 Gg/MN', bin: 'Halts', why: 'Two prefixes, one in the denominator. 10⁶ kg / 10⁶ N = 1 kg/N.' },
-          { t: '1 kg/N', bin: 'Passes', why: 'kg is the one prefixed unit allowed anywhere.' },
-          { t: '1 μN/ms', bin: 'Halts', why: 'Prefix in the denominator. 10⁻⁶ N / 10⁻³ s = 10⁻³ N/s = 1 mN/s.' },
-          { t: '1 ks/g', bin: 'Passes', why: 'One prefix, numerator. Equal to 1 s/mg = 10³ s/g, which you could also write 1 Ms/kg.' },
-          { t: '1 Mm·nN', bin: 'Halts', why: 'Two prefixes. 10⁶ m · 10⁻⁹ N = 10⁻³ m·N = 1 mm·N.' },
-          { t: '1 mN/s²', bin: 'Passes', why: 'One prefix, numerator. (1 kN/ks² = 10³ N / 10⁶ s² = 10⁻³ N/s².)' },
-          { t: '45 cm', bin: 'Halts', why: 'centi is not used in engineering. Write 450 mm or 0.450 m.' }
+        type: 'rule', kicker: 'Worked method', title: 'Prefixed products and quotients',
+        eq: ['(40\\ \\u{mN})(5\\ \\u{GN}) = 200(10^{6})\\ \\u{N^2}',
+          '200(10^{6})\\ \\u{N^2} = 200\\ \\u{kN^2}',
+          '\\frac{36\\ \\u{MN^3}}{600\\ \\u{Gg}} = \\frac{36(10^{18})\\ \\u{N^3}}{600(10^{6})\\ \\u{kg}}',
+          '= 60.0(10^{9})\\ \\u{N^3/kg} = 60.0\\ \\u{kN^3/kg}'],
+        text: 'Every calculation goes the same way: turn each prefix into its power of ten, compute, then put **one** prefix back on the answer.\n\nWatch the exponents. 10⁶ N² is (10³ N)², so the prefix is **k**, not M. In the quotient, 36 MN³ means 36 (10⁶ N)³ = 36(10¹⁸) N³: only the unit is cubed, not the 36. And 600 Gg is 600(10⁹) **grams**, which is 600(10⁶) kg. The kilogram stays below the line, the one prefixed unit allowed there.'
+      },
+      {
+        type: 'job', id: 'H8.lower', who: 'juno',
+        yard: { design: LOWER, bin: [], goal: null },
+        text: 'The generator goes on the trailer. The controller is in **strict** mode, and someone stamped the plates straight off an old port work order:\n\n- **Hold**: 2450 N (the line tension while it hangs)\n- **Dwell**: 3000 ms (how long it hangs before lowering; the crew needs at least ' + CREW + ' s to bolt the frame)\n- **Lower**: 0.25 mm/ms (the lowering speed)\n\nEvery value is right. Every plate breaks a rule. Restamp all three in correct SI form **without changing a value**, and set it down gently.',
+        goalText: 'Generator still for the crew, then set down on the trailer below 0.5 m/s',
+        goal: withTrack(LOWER_JOB),
+        timeout: 30,
+        grade: { part: 'gov', key: 'lower', spec: { value: 0.25, unit: 'm/s', sf: null, form: 'si' } },
+        hints: [
+          'Find each plate\'s value in base units first. Then pick the one prefix (or none) that leaves a number between 0.1 and 1000, with no prefix below the line.',
+          '2450 N is 2.45(10³) N. 3000 ms is 3 s. 0.25 mm/ms is 0.25(10⁻³) m / (10⁻³ s) = 0.25 m/s.',
+          'Hold **2.45 kN**, dwell **3 s**, lower **0.25 m/s** (or 250 mm/s).'
+        ],
+        onFail: function (ctx) {
+          var gv = gov(ctx); if (!gv) return '';
+          return 'The controller read: hold **' + kN(readAs(gv.dials.hold)) + '**, dwell **' + f3(readAs(gv.dials.dwell)) + ' s**, lower **' + f3(readAs(gv.dials.lower)) + ' m/s**.';
+        },
+        success: 'On the trailer. Same three values as the work order, written so the firmware could read them, and the crane did exactly what the plates said.'
+      },
+      {
+        type: 'free', who: 'hask',
+        yard: { design: { parts: [JIB, load('gen', GEN_W, 'generator', { hide: [], open: ['mass'], locked: false }), TRAILER, governor({ dwell: '3 s', lower: '0.25 m/s' }, ['hold', 'dwell', 'lower', 'firmware', 'rating'])] },
+          bin: [{ type: 'h08-governor', count: 1 }, { type: 'crate', count: 2 }], goal: null },
+        text: 'The crane is yours. Every plate on the hoist is open, including the firmware switch and the line rating. The generator\'s mass is unlocked too.',
+        prompts: [
+          'Find a hold plate with the right force that the strict firmware still refuses. Which rule does it break?',
+          'Stamp **2.45 kN·m** on the hold plate. Why won\'t the dial take it?',
+          'Stamp a lowering speed of **0.25 km/s**, then **0.25 mm/s**. Which one is the crew happier about?',
+          'How big can the hold plate get before the 12 kN line parts? Write it three ways.'
         ]
-      },
-      {
-        type: 'task', id: 'H8.combos', who: 'hask',
-        title: 'Rewrite the controller\'s setup plates',
-        text: 'The controller builds its line-pull set point from five setup plates. Each was stamped in a form the strict firmware refuses. Rewrite each one in correct SI form. The value is fixed by the conversion, so the number stays **1**.\n\nIf any label still breaks a rule, the firmware halts. If you change a value, that factor goes into the line pull.',
-        inputs: [
-          // 1 MN/ks = 10^6 N / 10^3 s = 10^3 N/s = 1 kN/s
-          { key: 'ramp', label: 'Tension ramp: 1 MN/ks', placeholder: 'e.g. 1 kN/s', spec: { value: C_RAMP, unit: 'N/s', sf: null, form: 'si' }, answer: '1 kN/s', wrong: [{ input: '1 MN/ks', kind: 'form' }, { input: '1 MN/s', kind: 'prefix' }] },
-          // 1 mN/(kg·ns) = 10^-3 N / (kg · 10^-9 s) = 10^6 N/(kg·s) = 1 MN/(kg·s)
-          { key: 'gain', label: 'Governor gain: 1 mN/(kg·ns)', placeholder: 'e.g. 1 MN/(kg·s)', spec: { value: C_GAIN, unit: 'N/(kg·s)', sf: null, form: 'si' }, answer: '1 MN/(kg·s)', wrong: [{ input: '1 GN/(kg·s)', kind: 'prefix' }] },
-          // 1 kN/mm = 10^3 N / 10^-3 m = 10^6 N/m = 1 MN/m
-          { key: 'stiff', label: 'Cable stiffness: 1 kN/mm', placeholder: 'e.g. 1 MN/m', spec: { value: C_STIFF, unit: 'N/m', sf: null, form: 'si' }, answer: '1 MN/m', wrong: [{ input: '1 kN/mm', kind: 'form' }, { input: '1 N/m', kind: 'prefix' }] },
-          // 1 Mm·mg = 10^6 m · 10^-6 kg = 1 m·kg
-          { key: 'arm', label: 'Counterweight moment arm: 1 Mm·mg', placeholder: 'e.g. 1 m·kg', spec: { value: C_ARM, unit: 'm·kg', sf: null, form: 'si' }, answer: '1 m·kg', wrong: [{ input: '1 Mm·mg', kind: 'form' }, { input: '1 m·g', kind: 'prefix' }] },
-          // 1 nkm = 10^-9 · 10^3 m = 10^-6 m = 1 μm (two stacked prefixes collapse to one)
-          { key: 'gap', label: 'Brake gap: 1 nkm', placeholder: 'e.g. 1 um', spec: { value: C_GAP, unit: 'm', sf: null, form: 'si' }, answer: '1 μm', wrong: [{ input: '1 nkm', kind: 'form' }, { input: '1 mm', kind: 'prefix' }] }
-        ],
-        hints: [
-          'Turn every prefix into its power of ten, combine them, then choose one prefix for the numerator. kg is the only prefix allowed below the line.',
-          'MN/ks: 10⁶ / 10³ = 10³, so kilo. kN/mm: 10³ / 10⁻³ = 10⁶ on the N. nkm: 10⁻⁹ · 10³ = 10⁻⁶ m. Mm·mg: 10⁶ m · 10⁻³ g = 10³ g·m, and 10³ g is a kg.',
-          '1 kN/s, 1 MN/(kg·s), 1 MN/m, 1 m·kg, 1 μm.'
-        ],
-        consequence: function (ctx, a) {
-          return controller(ctx, a, [{ key: 'ramp', trueSI: C_RAMP }, { key: 'gain', trueSI: C_GAIN }, { key: 'stiff', trueSI: C_STIFF }, { key: 'arm', trueSI: C_ARM }, { key: 'gap', trueSI: C_GAP }]);
-        },
-        explain: 'Collapse all the prefixes into one power of ten and give it to the numerator. The kilogram is the only exception: it can sit in a denominator (N/(kg·s)) and still counts as unprefixed.'
-      },
-      {
-        type: 'task', id: 'H8.prefix-range', who: 'juno',
-        title: 'Restamp the port inventory',
-        text: 'Juno wants four numbers off the port\'s inventory sheet fed to the controller. Restamp each with **one** prefix and a number **between 0.1 and 1000**, to 3 s.f.\n\n- Bollard rating: **38 470 kN**\n- Cable run: **734(10⁴) mm**\n- Load-cell drift: **0.008 72 mg**\n- Brass shim: **0.000 276 kg**',
-        inputs: [
-          // 38 470 kN = 38.47(10^3) kN = 38.47 MN -> 38.5 MN (first dropped digit 7 > 5, round up)
-          { key: 'bollard', label: 'Bollard rating', placeholder: 'e.g. 38.5 MN', spec: { value: R_BOLLARD, unit: 'N', sf: 3, form: 'si' }, answer: '38.5 MN', wrong: [{ input: '38.5 kN', kind: 'prefix' }, { input: '0.0385 GN', kind: 'form' }, { input: '38.47 MN', kind: 'sigfig' }] },
-          // 734(10^4) mm = 734(10^4)(10^-3) m = 7.34(10^3) m = 7.34 km
-          { key: 'run', label: 'Cable run', placeholder: 'e.g. 7.34 km', spec: { value: R_RUN, unit: 'm', sf: 3, form: 'si' }, answer: '7.34 km', wrong: [{ input: '7.34 Mm', kind: 'prefix' }] },
-          // 0.008 72 mg = 8.72(10^-3) mg = 8.72(10^-3)(10^-3) g = 8.72(10^-6) g = 8.72 μg
-          { key: 'drift', label: 'Load-cell drift', placeholder: 'e.g. 8.72 ug', spec: { value: R_DRIFT, unit: 'kg', sf: 3, form: 'si' }, answer: '8.72 μg', wrong: [{ input: '0.00872 mg', kind: 'form' }, { input: '8.72 ng', kind: 'prefix' }] },
-          // 0.000 276 kg = 0.276(10^-3) kg = 0.276 g (276 mg is equally legal)
-          { key: 'shim', label: 'Brass shim', placeholder: 'e.g. 0.276 g', spec: { value: R_SHIM, unit: 'kg', sf: 3, form: 'si' }, answer: '0.276 g', wrong: [{ input: '0.276 kg', kind: 'prefix' }, { input: '0.000276 kg', kind: 'form' }] }
-        ],
-        hints: [
-          'Get to base units first, as a number times a power of ten. Then pick the prefix whose power of ten leaves 0.1 to 1000 in front.',
-          '38 470 kN = 38.47(10⁶) N. 734(10⁴) mm = 7.34(10³) m. 0.008 72 mg = 8.72(10⁻⁶) g. 0.000 276 kg = 0.276 g.',
-          '38.5 MN, 7.34 km, 8.72 μg (type ug if you have no μ key), 0.276 g or 276 mg.'
-        ],
-        consequence: function (ctx, a) {
-          return controller(ctx, a, [{ key: 'bollard', trueSI: R_BOLLARD }, { key: 'run', trueSI: R_RUN }, { key: 'drift', trueSI: R_DRIFT }, { key: 'shim', trueSI: R_SHIM }]);
-        },
-        explain: 'Base units and powers of ten first, one prefix last. 0.276 g and 276 mg are both inside the range, so both pass.'
-      },
-      {
-        type: 'derive', title: 'Prefixed products and quotients',
-        intro: 'Hask works three on the chalkboard: **(a)** (40 mN)(5 GN), **(b)** (300 mm)(0.5 MN)², **(c)** 36 MN³ / 600 Gg. Every one goes the same way: prefixes to powers of ten, compute, one prefix back.',
-        lines: [
-          { eq: '(40\\ \\u{mN})(5\\ \\u{GN}) = 200(10^{6})\\ \\u{N^2}', why: '(a) Write 40 mN = 40(10⁻³) N and 5 GN = 5(10⁹) N. Multiply the numbers and add the exponents: −3 + 9 = 6.' },
-          { eq: '200(10^{6})\\ \\u{N^2} = 200\\ (10^{3}\\ \\u{N})^{2} = 200\\ \\u{kN^2}', why: 'A prefix on a squared unit is squared too, so 10⁶ N² is (10³ N)².', ask: { q: 'Which prefix turns 10⁶ N² into a single prefixed unit?', choices: [{ t: 'kN², because (10³)² = 10⁶', correct: true, why: 'Yes. kN² means (kN)².' }, { t: 'MN², because mega is 10⁶', why: 'MN² = (10⁶ N)² = 10¹² N². The exponent squares the prefix.' }] } },
-          { eq: '(300\\ \\u{mm})(0.5\\ \\u{MN})^{2} = [0.3\\ \\u{m}][0.25(10^{12})\\ \\u{N^2}]', why: '(b) 300 mm = 0.3 m. Square the whole bracket, number and power of ten alike: [0.5(10⁶) N]² = 0.25(10¹²) N².' },
-          { eq: '= 0.075(10^{12})\\ \\u{m·N^2} = 75.0\\ \\u{Gm·N^2}', why: 'Shift three places into the exponent, 75.0(10⁹), and put the single prefix on the first unit.', ask: { q: 'Why not stop at 0.075 m·MN²? That is the same value.', choices: [{ t: 'Because 0.075 is below 0.1', correct: true, why: 'Right. Keep the number between 0.1 and 1000, so shift three places and use giga on the metre.' }, { t: 'Because MN² is not a real unit', why: 'It is real: (MN)². The problem is the 0.075.' }] } },
-          { eq: '600\\ \\u{Gg} = 600(10^{9})\\ \\u{g} = 600(10^{6})\\ \\u{kg}', why: '(c) The denominator first. Giga sits on the gram, and a kilogram is 10³ g.', ask: { q: 'What is 600 Gg in kilograms?', choices: [{ t: '600(10⁶) kg', correct: true, why: 'Yes. Giga is 10⁹ on the gram, and a kg is 10³ g.' }, { t: '600(10⁹) kg', why: 'Gg is 10⁹ **grams**, not 10⁹ kilograms. Take off three places.' }] } },
-          { eq: '\\frac{36\\ \\u{MN^3}}{600\\ \\u{Gg}} = \\frac{36(10^{18})\\ \\u{N^3}}{600(10^{6})\\ \\u{kg}}', why: '36 MN³ means 36 (10⁶ N)³ = 36(10¹⁸) N³. Only the unit is cubed, not the 36.' },
-          { eq: '= 0.06(10^{12})\\ \\u{N^3/kg} = 60.0\\ \\u{kN^3/kg}', why: '0.06(10¹²) = 60(10⁹), and 10⁹ N³ is (10³ N)³, so kilo on the newton. The kg stays below the line, the one prefixed unit allowed there.' }
-        ],
-        outro: 'Three different units, one method. Never stack prefixes on top of the answer as you go: convert everything, compute, then re-express once.'
-      },
-      {
-        type: 'task', id: 'H8.ex13', who: 'hask',
-        title: 'Your turn on the chalkboard',
-        text: 'Evaluate each and write the result with **one** prefix, a number between 0.1 and 1000, to 3 s.f.\n\n- **(a)** (45 mN)(7 GN)\n- **(b)** (250 mm)(0.4 MN)²\n- **(c)** 48 MN³ / 750 Gg\n\nThe answers go onto the controller\'s calibration plates.',
-        inputs: [
-          // (45 mN)(7 GN) = 45(10^-3)(7)(10^9) N^2 = 315(10^6) N^2 = 315 kN^2
-          { key: 'a', label: '(a) (45 mN)(7 GN)', placeholder: 'e.g. 315 kN^2', spec: { value: EX_A, unit: 'N^2', sf: 3, form: 'si' }, answer: '315 kN^2', wrong: [{ input: '315 MN^2', kind: 'prefix' }, { input: '315 mN·GN', kind: 'form' }] },
-          // (250 mm)(0.4 MN)^2 = 0.25 m (0.16)(10^12) N^2 = 0.04(10^12) m·N^2 = 40.0(10^9) m·N^2 = 40.0 Gm·N^2
-          { key: 'b', label: '(b) (250 mm)(0.4 MN)²', placeholder: 'e.g. 40.0 Gm·N^2', spec: { value: EX_B, unit: 'm·N^2', sf: 3, form: 'si' }, answer: '40.0 Gm·N^2', wrong: [{ input: '0.0400 m·MN^2', kind: 'form' }, { input: '40.0 Mm·N^2', kind: 'prefix' }] },
-          // 48 MN^3 / 750 Gg = 48(10^18) N^3 / 750(10^6) kg = 0.064(10^12) N^3/kg = 64.0(10^9) N^3/kg = 64.0 kN^3/kg
-          { key: 'c', label: '(c) 48 MN³ / 750 Gg', placeholder: 'e.g. 64.0 kN^3/kg', spec: { value: EX_C, unit: 'N^3/kg', sf: 3, form: 'si' }, answer: '64.0 kN^3/kg', wrong: [{ input: '64.0 N^3/ug', kind: 'form' }, { input: '64.0 MN^3/kg', kind: 'prefix' }] }
-        ],
-        hints: [
-          'Write each prefix as a power of ten, square or cube the whole bracket in (b), and remember the coefficient in 48 MN³ is not cubed.',
-          '(a) 315(10⁶) N². (b) 0.25 × 0.16(10¹²) = 0.04(10¹²) m·N². (c) 750 Gg = 750(10⁶) kg, and 48(10¹⁸)/750(10⁶) = 0.064(10¹²) N³/kg.',
-          '(a) 10⁶ N² = kN²: 315 kN². (b) 40.0(10⁹) m·N² = 40.0 Gm·N². (c) 64.0(10⁹) N³/kg = 64.0 kN³/kg.'
-        ],
-        consequence: function (ctx, a) {
-          return controller(ctx, a, [{ key: 'a', trueSI: EX_A }, { key: 'b', trueSI: EX_B }, { key: 'c', trueSI: EX_C }]);
-        },
-        explain: 'Powers of ten first, one prefix last, and remember a prefix on a squared or cubed unit is squared or cubed with it: kN² is 10⁶ N², kN³ is 10⁹ N³.'
-      },
-      {
-        type: 'sandbox', scene: HOIST(), controls: [],
-        text: 'Strict firmware is on. Stamp plates for the 2.45 kN generator and see which ones the controller accepts, which ones it reads differently from what you meant, and which ones halt it.',
-        actions: [
-          { label: '2.45 kN', run: function (ctx) { return stampStrict(ctx, '2.45 kN'); } },
-          { label: '2450 N', run: function (ctx) { return stampStrict(ctx, '2450 N'); } },
-          { label: '0.002 45 MN', run: function (ctx) { return stampStrict(ctx, '0.002 45 MN'); } },
-          { label: '245 daN', run: function (ctx) { return stampStrict(ctx, '245 daN'); } },
-          { label: '2.45 MN', run: function (ctx) { return stampStrict(ctx, '2.45 MN'); } },
-          { label: '2.45 kN·m', run: function (ctx) { return stampStrict(ctx, '2.45 kN·m'); } }
-        ],
-        prompts: ['Which labels hold the generator, and which halt the winch?', 'Find a label with the right force that the firmware still refuses. Which rule does it break?', 'Why does 2.45 kN·m halt it, even though the digits are right?']
       },
       {
         type: 'deeper', title: 'Powers of a thousand, and a kilogram with a prefix',
         teaser: 'Why steps of 1000, how far the table really goes, and why the kilogram is the odd one out.',
         steps: [
           { type: 'say', who: 'hask', text: 'Steps of 1000 line up with how numbers are written in groups of three digits, 7 000 000, so a prefix change is always "move the gap". It also means engineering notation needs only exponents that are multiples of 3, and the number in front always lands between 1 and 1000. Hecto, deca, deci and centi break that pattern, which is why engineers leave them alone.' },
-          { type: 'say', who: 'hask', text: 'The full SI list runs much further than Table 1–3: tera (10¹²), peta (10¹⁵), exa (10¹⁸), zetta (10²¹), yotta (10²⁴) up top, and pico, femto, atto, zepto, yocto below. In 2022 the General Conference on Weights and Measures added **ronna** (R, 10²⁷) and **quetta** (Q, 10³⁰), with **ronto** (r) and **quecto** (q) for the small end, mostly because data storage and the mass of planets were running off the end of the list.' },
-          { type: 'predict', who: 'hask', q: 'The kilogram is the only base unit with a prefix in its name. Why?', choices: [
-            { t: 'Because the gram was defined first, and the practical standard that got built was a 1 kg block.', correct: true, why: 'Yes. The 1790s metric system started from the gram (a cubic centimetre of water), but a gram is too small to make a good physical standard, so the platinum reference was a kilogram. When the base units were chosen, the kilogram was the one with a real artefact, so it became the base unit and kept its prefix. Since 2019 it is defined by the Planck constant instead.' },
-            { t: 'Because the gram is not an SI unit.', why: 'The gram is a perfectly good SI unit (it takes all the prefixes). The kilogram is the base unit for historical reasons.' }
-          ] }
+          { type: 'say', who: 'hask', text: 'The full SI list runs much further than Table 1–3: tera (10¹²), peta (10¹⁵), exa (10¹⁸), zetta (10²¹), yotta (10²⁴) up top, and pico, femto, atto, zepto, yocto below. In 2022 the General Conference on Weights and Measures added **ronna** (R, 10²⁷) and **quetta** (Q, 10³⁰), with **ronto** (r) and **quecto** (q) for the small end.' },
+          { type: 'say', who: 'hask', text: 'The **kilogram** is the only base unit with a prefix in its name. The metric system of the 1790s started from the gram, but a gram is too small to make a good physical standard, so the platinum reference that got built was a kilogram. When the base units were chosen, the kilogram was the one with a real artefact behind it, and it kept its prefix. That is why 1000 kg is written 1 Mg, not 1 kkg.' }
         ]
       },
       {
         type: 'summary',
         points: [
           'Prefixes G, M, k, m, μ, n are 10⁹, 10⁶, 10³, 10⁻³, 10⁻⁶, 10⁻⁹. Each step moves the decimal point three places: 4 000 000 N = 4000 kN = 4 MN.',
+          'A prefix is part of the value. One wrong letter is a factor of 1000, and a literal machine applies it.',
           'No deca or centi in engineering. The **kilogram** is the only base unit defined with a prefix, so 1000 kg is 1 Mg.',
           'A **dot** separates multiplied units (m·s vs ms). An **exponent** applies to the prefix too (mm² = (mm)²).',
           '**No prefix in a denominator**, except kg: kN/m, not N/mm.',
-          'Calculate in base units and powers of ten, then re-express with **one** prefix and a number between **0.1 and 1000**.',
-          'A wrong value makes a literal machine do the wrong thing. A wrong form makes a strict one do nothing.'
+          'Calculate in base units and powers of ten, then re-express with **one** prefix and a number between **0.1 and 1000**.'
         ]
       }
     ]
   });
+
+  /* ------------------------------------------------------------ parts */
+
+  // The governed hoist the controller drives. Connector: a = drum (jib tip),
+  // b = load. The motor pulls the line with exactly the tension on the hold
+  // plate (it reels in hard and slips at that pull), so the load's motion
+  // follows from hold − weight. After `dwell` it pays out at `lower`. In
+  // strict mode a plate that breaks the SI rules halts the firmware: the
+  // motor never engages and only the worn drum brake holds the line.
+  var PLATES = [['hold', 'Hold'], ['dwell', 'Dwell'], ['lower', 'Lower']];
+  function firmwareHalt(inst) {
+    if (inst.dials.firmware !== 'strict') return null;
+    for (var i = 0; i < PLATES.length; i++) {
+      var k = PLATES[i][0], text = inst.dials[k];
+      if (text == null || String(text).trim() === '') continue;
+      var q = U.parseQuantity(String(text));
+      if (!q.ok) continue;                            // the dial itself refuses it
+      var issues = U.checkSIForm(q);
+      if (issues.length) return { key: k, label: PLATES[i][1], text: String(text).trim(), msg: issues[0].msg };
+    }
+    return null;
+  }
+
+  Y.definePart({
+    type: 'h08-governor', name: 'Governed hoist', category: 'Rigging', library: false,
+    blurb: 'A winch run by the port controller. It pulls the line with exactly the tension on its hold plate, then after the dwell time lowers at the set speed. Strict firmware refuses plates that break the SI rules.',
+    size: { w: 0.1, h: 2 },
+    connector: true,
+    dials: [
+      { key: 'hold', label: 'Hold plate (line pull)', q: 'force', def: '2.45 kN', min: 0 },
+      { key: 'dwell', label: 'Dwell plate (then lower)', q: 'time', def: '', optional: true, min: 0 },
+      { key: 'lower', label: 'Lower plate (speed)', q: 'speed', def: '', optional: true, min: 0 },
+      { key: 'rating', label: 'Line breaking load', q: 'force', def: RATING, min: 1 },
+      { key: 'firmware', label: 'Firmware', choice: ['service', 'strict'], def: 'service' }
+    ],
+    build: function (b) {
+      var A = b.end('a'), B = b.end('b');
+      var L = Math.hypot(B.world.x - A.world.x, B.world.y - A.world.y);
+      var halt = firmwareHalt(b.inst);
+      var hold = b.si('hold'), dwell = b.si('dwell'), lower = b.si('lower') || 0, rating = b.si('rating');
+      // While holding, the line itself is slack-following (it pays out freely
+      // and carries nothing); the motor's pull is applied along it below.
+      // Halted, only the worn brake holds. Lowering, the drum pays out at the
+      // lower plate's speed and the line carries the load.
+      var j = b.joint(new b.P.WinchJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
+        length: L, reelSpeed: 0, maxPull: 0, brake: !!halt, brakeForce: WORN_BRAKE,
+        minLength: 0.6, breakForce: rating, label: b.inst.label || 'hoist' }));
+      var world = b.world, st = { mode: halt ? 'halt' : 'hold', pull: 0 };
+      function drumAt() { return A.body.worldPoint(A.local); }
+      function hookAt() { return B.body.worldPoint(B.local); }
+      function grip(len) { j.length = len; j.reelSpeed = 0; j.speed = 0; j.brake = true; j.brakeForce = Infinity; j.maxPull = rating; }
+      function apply() {
+        if (j.broken || st.mode === 'gone') { st.pull = 0; return; }
+        if (st.mode === 'hold' && dwell != null && world.time >= dwell - 1e-9) {
+          st.mode = 'lower'; st.pull = 0;
+          j.length = j.path.update(); j.speed = 0; j.reelSpeed = -lower; j.maxPull = rating; j.brake = false;
+          if (lower === 0) grip(j.length);
+        }
+        if (st.mode !== 'hold') { st.pull = 0; return; }
+        var d = drumAt(), h = hookAt(), dx = d.x - h.x, dy = d.y - h.y, r = Math.hypot(dx, dy);
+        // the motor pulls the hold tension; a line can't carry more than its rating
+        if (hold > rating) {
+          if (world.time === 0) return;        // snaps on the first step, so the judge sees it
+          st.mode = 'gone'; st.pull = 0; j.broken = true; world.removeJoint(j);
+          world.emit('break', { joint: j, force: hold, torque: 0, reason: 'force', part: null });
+          return;
+        }
+        if (r <= 0.6) { st.mode = 'stop'; st.pull = 0; grip(r); return; }   // hook block at the drum stop
+        st.pull = hold;
+        if (B.body.type === 'dynamic' && hold > 0) { B.body.wake && B.body.wake(); B.body.applyForce({ x: hold * dx / r, y: hold * dy / r }, h); }
+      }
+      if (!halt) { apply(); b.on('step', apply); }
+      return { joint: j, halt: halt, state: st, hook: B, tension: function () { return j.broken ? 0 : st.mode === 'hold' ? st.pull : Math.max(0, j.lineTension()); } };
+    },
+    plate: function (inst) {
+      var lines = ['Firmware: ' + (inst.dials.firmware || 'service')];
+      PLATES.forEach(function (p) {
+        var t = inst.dials[p[0]];
+        if (t == null || String(t).trim() === '') return;
+        var q = U.parseQuantity(String(t));
+        if (q.ok) lines.push(p[1] + ' "' + String(t).trim() + '" reads ' + Y.dial.fmtNum(q.value, 4) + ' ' + (p[0] === 'hold' ? 'N' : p[0] === 'dwell' ? 's' : 'm/s'));
+      });
+      var h = firmwareHalt(inst);
+      if (h) lines.push('HALT on ' + h.label.toLowerCase() + ': ' + h.msg);
+      return lines;
+    },
+    readouts: function (built) {
+      var j = built.joint, B = built.hook;
+      return [
+        { key: 'tension', label: 'line tension', q: 'force', read: function () { return built.tension(); } },
+        { key: 'height', label: 'hook height', q: 'length', read: function () { return B.body.worldPoint(B.local).y; } }
+      ];
+    },
+    draw: function (ctx, cam, built) {
+      if (!built.halt) return;
+      var a = cam.worldToScreen(built.joint.bodyA.worldPoint(built.joint.localAnchorA));
+      ctx.save(); ctx.fillStyle = '#ff6b5a'; ctx.font = 'bold 13px "IBM Plex Mono", monospace';
+      ctx.fillText('FIRMWARE HALT', a.x + 10, a.y - 8); ctx.restore();
+    }
+  });
+
+  // Stand-in crane jib with the rigging contract's dials and anchors, used
+  // only until the rigging parts define the real one. x, y is the mast foot;
+  // the tip is `reach` out from the mast at `height`.
+  if (!Y.partDef('jib')) {
+    Y.definePart({
+      type: 'jib', name: 'Crane jib', category: 'Rigging',
+      blurb: 'A fixed mast and boom. Hoists hang from the tip.',
+      size: { w: 3, h: 7 },
+      dials: [
+        { key: 'height', label: 'Height', q: 'length', def: '7 m', min: 1, max: 40 },
+        { key: 'reach', label: 'Reach', q: 'length', def: '3 m', min: 0.5, max: 30 }
+      ],
+      anchors: { tip: { x: 3, y: 7 }, base: { x: 0, y: 0 } },
+      build: function (b) {
+        var H = b.si('height'), R = b.si('reach'), P = b.P;
+        var mast = b.body({ type: 'static', position: b.at({ x: 0, y: H / 2 }), label: 'mast', shapes: [{ shape: P.box(0.15, H / 2), material: 'steel' }] });
+        var boom = b.body({ type: 'static', position: b.at({ x: R / 2, y: H + 0.12 }), label: 'boom', shapes: [{ shape: P.box(R / 2 + 0.15, 0.12), material: 'steel' }] });
+        return { body: mast, bodies: [mast, boom], anchors: { tip: { body: boom, local: boom.localPoint(b.at({ x: R, y: H })) }, base: { body: mast, local: mast.localPoint(b.at({ x: 0, y: 0 })) } } };
+      }
+    });
+  }
 })(globalThis.SE);
