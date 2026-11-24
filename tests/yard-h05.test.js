@@ -13,8 +13,7 @@ suite('yard H5: the long fall', () => {
     const t = r.state.read('watch.t');
     return { t, g: 2 * 20 / (t * t), T: r.state.read('scale.tension'), site: r.state.read('site.g'), r };
   }
-  const GM = 66.73e-12 * 5.97e24, R = 6371e3;
-  test('the site sets g = G Me / r^2 (9.81 at sea level)', () => { near(drop().site, GM / (R * R), 1e-9); near(drop().site, 9.81, 0.01); });
+  test('the site sets sea-level g (about 9.81)', () => { near(drop().site, Y.site.g('Earth', 0, 0), 1e-9); near(drop().site, 9.81, 0.01); });
   test('the drop tower measures g within 1%', () => { const m = drop(); ok(Math.abs(m.g / m.site - 1) < 0.01, 'g from drop ' + m.g + ' vs ' + m.site); });
   test('the stopwatch started on Run includes the latch second', () => {
     const d = Y.cloneDesign(lv.yard.design);
@@ -23,6 +22,6 @@ suite('yard H5: the long fall', () => {
   });
   test('a heavier crate falls in the same time', () => { near(drop({ drop: { mass: '200 kg' } }).t, drop().t, 0.02); });
   test('the hook reads W = mg', () => { const m = drop(); near(m.T, 50 * m.site, 0.5); });
-  test('at r = 2R the hook reads a quarter', () => { const a = drop(), b = drop({ site: { altitude: '6371 km' } }); near(b.T / a.T, 0.25, 0.003); });
-  test('on the Moon g is about a sixth', () => { const m = drop({ site: { body: 'Moon' } }); near(m.site, 1.62, 0.01); ok(Math.abs(m.g / m.site - 1) < 0.01); });
+  test('at r = 2R the hook reads a quarter', () => { const a = drop(), b = drop({ site: { altitude: '6371 km' } }); near(b.T / a.T, 0.25, 0.003); near(b.site, Y.site.g('Earth', 6371e3, 0), 1e-9); });
+  test('on the Moon g is about a sixth', () => { const m = drop({ site: { body: 'Moon' } }); near(m.site, Y.site.g('Moon', 0, 0), 1e-9); near(m.site, 1.62, 0.01); ok(Math.abs(m.g / m.site - 1) < 0.01); });
 });

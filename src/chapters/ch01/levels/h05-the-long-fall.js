@@ -8,6 +8,7 @@
  * a weighing hook, and a site marker the player moves up a mountain, out
  * to two Earth radii and onto the Moon. The jobs are hover governors: an
  * upward thrust that has to equal the load's weight exactly.
+ * Parts: site, latch, stopwatch (site.js, measure.js), crate, hook, cable, push.
  */
 (function (SE) {
   'use strict';
@@ -18,7 +19,7 @@
   var G_STD = 9.81;                  // standard-location g used for hand work
   var ME = 5.97e24;                  // Earth's mass as given to the player, kg
   var RE = 6371e3;                   // mean Earth radius as given to the player, m
-  var GRAV = SE.physics && SE.physics.gravity;
+  var GRAV = SE.physics && SE.physics.gravity;   // latitude numbers for the deeper section
 
   // ------------------------------------------------------------ answer keys
   // H5.weights: three loads off the depot manifest.
@@ -69,7 +70,7 @@
     var r = ctx.result, s = r && r.state;
     if (!s) return null;
     var t = s.read('watch.t'), sw = s.part('watch');
-    return { t: t, stopped: !!(sw && sw.stopped()), g: 2 * TOWER_H / (t * t), T: s.read('scale.tension'), m: ctx.si('pack', 'mass') };
+    return { t: t, stopped: !!(sw && sw.watch && sw.watch.stopped()), g: 2 * TOWER_H / (t * t), T: s.read('scale.tension'), m: ctx.si('pack', 'mass') };
   }
   function siteG(ctx) { var r = ctx.result; return r && r.state ? r.state.read('site.g') : NaN; }
   function ran(ctx, type) { return type === 'result' && !!ctx.result; }
@@ -365,111 +366,4 @@
     ]
   });
 
-  /*
-   * Stand-ins for the site, latch and stopwatch parts, used only until the
-   * shared parts land (they are skipped once a part of that type exists).
-   * They follow the parts contract: same type names, dials and readouts.
-   */
-  if (!Y.partDef('site')) {
-    var BODY = {
-      Earth: { M: ME, R: RE },
-      Moon: { M: 7.342e22, R: 1.7374e6 },
-      Mars: { M: 6.4171e23, R: 3.3895e6 }
-    };
-    Y.definePart({
-      type: 'site', name: 'Job site', category: 'Site', onePerDesign: true,
-      blurb: 'Where the yard is. Sets g = G M / r², with r the body\'s radius plus the altitude (a still, uniform sphere).',
-      size: { w: 1.4, h: 1.0 },
-      dials: [
-        { key: 'body', label: 'Body', choice: ['Earth', 'Moon', 'Mars'], def: 'Earth' },
-        { key: 'altitude', label: 'Altitude', q: 'length', def: '0 m', min: 0, max: 4e7 }
-      ],
-      build: function (b) {
-        var B = BODY[b.si('body')] || BODY.Earth, r = B.R + (b.si('altitude') || 0), g = G * B.M / (r * r);
-        b.world.gravity = { x: 0, y: -g };
-        var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: '', shapes: [{ shape: b.P.box(0.7, 0.5), sensor: true }] });
-        return { body: body, g: g };
-      },
-      readouts: function (built) { return [{ key: 'g', label: 'g', q: 'accel', read: function () { return built.g; } }]; },
-      draw: function (ctx, cam, built) {
-        var i = built.inst, c = cam.worldToScreen({ x: i.x, y: i.y });
-        ctx.save(); ctx.fillStyle = 'rgba(40,46,52,.85)'; ctx.fillRect(c.x - 0.7 * cam.zoom, c.y - 0.5 * cam.zoom, 1.4 * cam.zoom, cam.zoom);
-        ctx.fillStyle = '#e6b422'; ctx.font = '12px "IBM Plex Mono", monospace';
-        ctx.fillText(i.dials.body + ' ' + i.dials.altitude, c.x - 0.65 * cam.zoom, c.y - 0.05 * cam.zoom);
-        ctx.restore();
-      }
-    });
-  }
-
-  if (!Y.partDef('latch')) {
-    Y.definePart({
-      type: 'latch', name: 'Latch', category: 'Rigging',
-      blurb: 'Holds a part fixed in place, then lets go at the time you set.',
-      size: { w: 0.4, h: 0.4 },
-      connector: true, attach: true,
-      dials: [{ key: 'release', label: 'Release at', q: 'time', def: '1 s', min: 0, max: 600 }],
-      build: function (b) {
-        var end = b.end('a'), body = end.body, world = b.world, T = b.si('release');
-        var out = { body: null, bodies: [], target: body, releasedAt: null, joint: null };
-        if (T <= 0) { out.releasedAt = 0; return out; }
-        out.joint = b.joint(new b.P.WeldJoint({ bodyA: b.ground, bodyB: body, worldAnchor: { x: body.c.x, y: body.c.y } }));
-        b.on('step', function () {
-          if (out.releasedAt != null || world.time < T - 1e-9) return;
-          world.removeJoint(out.joint); out.releasedAt = world.time;
-          if (body.wake) body.wake();
-        });
-        return out;
-      },
-      readouts: function (built) { return [{ key: 'released', label: 'released', q: 'number', read: function () { return built.releasedAt != null ? 1 : 0; } }]; },
-      draw: function (ctx, cam, built) {
-        if (built.releasedAt != null || !built.target) return;
-        var s = cam.worldToScreen(built.target.c);
-        ctx.save(); ctx.strokeStyle = '#e6b422'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, 7, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
-      }
-    });
-  }
-
-  if (!Y.partDef('stopwatch')) {
-    Y.definePart({
-      type: 'stopwatch', name: 'Stopwatch', category: 'Measure', onePerDesign: true,
-      blurb: 'Times a run. Start on Run or on a latch letting go; stop when the released part hits something.',
-      size: { w: 1.4, h: 0.7 },
-      dials: [
-        { key: 'start', label: 'Start', choice: ['run', 'release'], def: 'release' },
-        { key: 'stop', label: 'Stop', choice: ['impact'], def: 'impact' }
-      ],
-      build: function (b) {
-        var world = b.world, parts = b.out.parts, mode = b.si('start');
-        var out = { t0: mode === 'run' ? 0 : null, tStop: null, target: null };
-        function latch() {
-          var ids = Object.keys(parts);
-          for (var i = 0; i < ids.length; i++) if (parts[ids[i]].def.type === 'latch') return parts[ids[i]];
-          return null;
-        }
-        b.on('step', function () {
-          if (out.t0 != null && out.target) return;
-          var L = latch();
-          if (L && !out.target) out.target = L.target;
-          if (out.t0 == null && L && L.releasedAt != null) out.t0 = L.releasedAt;
-        });
-        b.on('impact', function (e) {
-          if (out.t0 == null || out.tStop != null) return;
-          if (out.target && e.a !== out.target && e.b !== out.target) return;
-          out.tStop = world.time;
-        });
-        out.stopped = function () { return out.tStop != null; };
-        out.time = function () { return out.t0 == null ? 0 : (out.tStop != null ? out.tStop : world.time) - out.t0; };
-        out.body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: '', shapes: [{ shape: b.P.box(0.7, 0.35), sensor: true }] });
-        return out;
-      },
-      readouts: function (built) { return [{ key: 't', label: 'time', q: 'time', read: function () { return built.time(); } }]; },
-      draw: function (ctx, cam, built) {
-        var i = built.inst, c = cam.worldToScreen({ x: i.x, y: i.y });
-        ctx.save(); ctx.fillStyle = 'rgba(20,24,28,.9)'; ctx.fillRect(c.x - 0.7 * cam.zoom, c.y - 0.35 * cam.zoom, 1.4 * cam.zoom, 0.7 * cam.zoom);
-        ctx.fillStyle = built.stopped() ? '#7fd07f' : '#e6b422'; ctx.font = 'bold ' + Math.max(12, Math.round(0.4 * cam.zoom)) + 'px "IBM Plex Mono", monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(built.time().toFixed(2) + ' s', c.x, c.y);
-        ctx.restore();
-      }
-    });
-  }
 })(globalThis.SE);
