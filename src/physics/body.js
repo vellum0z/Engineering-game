@@ -105,6 +105,8 @@
     if (worldPoint) this.w += this.invI * M.cross(M.sub(worldPoint, this.c), J);
   };
 
+  Body.prototype.wake = function () { this.awake = true; this.sleepTime = 0; };
+
   Body.prototype.kineticEnergy = function () {
     return 0.5 * this.m * M.lenSq(this.v) + 0.5 * this.I * this.w * this.w;
   };

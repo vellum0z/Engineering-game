@@ -13,7 +13,18 @@
  *   2. prepare contacts and joints for substep h = dt / substeps
  *   3. for each substep: integrate velocities, warm start, solve with soft
  *      position correction, integrate positions, relax (solve without it)
- *   4. restitution, then joint breakage and events
+ *   4. restitution, joint postStep hooks, breakage, sleeping, 'step' event
+ *
+ * Each stage lives in its own file and is called through SE.phys:
+ *   broadphase.js  P.broadphase.update(world)     pairs + manifolds -> world.contacts
+ *   contact.js     P.contactSolver.*              contact constraints
+ *   joint.js + one file per joint type            prepare / warmStart / solve / force
+ *   breakage.js    P.breakage.check(world, dt)    snapping and 'break' events
+ *   islands.js     P.islands.update(world, dt)    sleeping
+ * This file only orders the stages, so module work never needs to edit it.
+ *
+ * Events (world.on(type, fn)): 'impact' { a, b, speed, point },
+ * 'break' { joint, force }, 'step' { dt }. Every event also gets type and time.
  *
  * Defaults follow Box2D 3: contacts at 30 Hz stiffness with damping ratio 10
  * and a 3 m/s cap on push-out speed; joints at twice the contact stiffness.
@@ -21,6 +32,12 @@
 (function (SE) {
   'use strict';
   var M = SE.pmath, P = SE.phys, CS = null;
+
+  // Stage modules, looked up at step time so each file can be replaced or
+  // extended without touching this one.
+  function stages() {
+    return { bp: P.broadphase, cs: P.contactSolver, isl: P.islands, brk: P.breakage };
+  }
 
   function World(def) {
     def = def || {};
@@ -59,7 +76,8 @@
 
   World.prototype.on = function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); return this; };
   World.prototype.emit = function (type, e) {
-    e.type = type; e.time = this.time; this.events.push(e);
+    e.type = type; e.time = this.time;
+    if (type !== 'step') this.events.push(e);
     (this.listeners[type] || []).forEach(function (fn) { fn(e); });
   };
 
@@ -72,58 +90,20 @@
     return false;
   };
 
-  /* ------------------------------------------------------------ contacts */
-  World.prototype.updateContacts = function () {
-    var self = this, items = [];
-    this.bodies.forEach(function (b) {
-      var t = b.transform();
-      b.fixtures.forEach(function (f, i) {
-        var bb = P.aabb(f.shape, t);
-        items.push({ f: f, b: b, key: b.id + ':' + i, lo: M.v(bb.lo.x - P.SPECULATIVE, bb.lo.y - P.SPECULATIVE), hi: M.v(bb.hi.x + P.SPECULATIVE, bb.hi.y + P.SPECULATIVE), t: t });
-      });
-    });
-    items.sort(function (a, b) { return a.lo.x - b.lo.x; });
-    var next = new Map();
-    for (var i = 0; i < items.length; i++) {
-      var A = items[i];
-      for (var j = i + 1; j < items.length; j++) {
-        var B = items[j];
-        if (B.lo.x > A.hi.x) break;
-        if (B.lo.y > A.hi.y || B.hi.y < A.lo.y) continue;
-        if (A.b === B.b) continue;
-        if (A.b.type !== 'dynamic' && B.b.type !== 'dynamic') continue;
-        if (A.f.sensor || B.f.sensor) continue;
-        if (A.f.group && A.f.group === B.f.group) continue;
-        if (self.jointed(A.b, B.b)) continue;
-        // stable order so the normal always points the same way
-        var first = A.b.id < B.b.id ? A : B, second = first === A ? B : A;
-        var man = P.collide(first.f.shape, first.t, second.f.shape, second.t);
-        if (!man) continue;
-        var key = first.key + '|' + second.key;
-        var old = self.contacts.get(key);
-        var points = man.points.map(function (p) {
-          var cp = { point: p.point, separation: p.separation, id: p.id, normalImpulse: 0, tangentImpulse: 0 };
-          if (old) old.points.forEach(function (o) { if (o.id === p.id) { cp.normalImpulse = o.normalImpulse; cp.tangentImpulse = o.tangentImpulse; } });
-          return cp;
-        });
-        var ct = { key: key, fa: first.f, fb: second.f, manifold: man, points: points, touching: man.points.some(function (p) { return p.separation < P.LINEAR_SLOP; }) };
-        ct.isNew = !old || !old.touching;
-        next.set(key, ct);
-      }
-    }
-    this.contacts = next;
-  };
-
   /* ---------------------------------------------------------------- step */
   World.prototype.step = function (dt) {
-    var self = this, n = this.substeps, h = dt / n, invH = 1 / h, cfg = this.cfg;
-    this.updateContacts();
-    var contacts = Array.from(this.contacts.values());
-    var dyn = this.bodies.filter(function (b) { return b.type === 'dynamic'; });
-    var moving = this.bodies.filter(function (b) { return b.type !== 'static'; });
+    var self = this, n = this.substeps, h = dt / n, invH = 1 / h, cfg = this.cfg, S = stages();
+    CS = S.cs;
+    var awake = function (b) { return b.type !== 'static' && b.awake !== false; };
+    var active = function (A, B) { return awake(A) || awake(B); };
+    this.joints.forEach(function (j) { if (j.preStep) j.preStep(dt); });
+    S.bp.update(this);
+    var contacts = Array.from(this.contacts.values()).filter(function (ct) { return active(ct.fa.body, ct.fb.body); });
+    var joints = this.joints.filter(function (j) { return active(j.bodyA, j.bodyB); });
+    var dyn = this.bodies.filter(function (b) { return b.type === 'dynamic' && awake(b); });
+    var moving = this.bodies.filter(awake);
     this.bodies.forEach(function (b) { b.c0 = M.v(b.c.x, b.c.y); b.angle0 = b.angle; });
     contacts.forEach(function (ct) { CS.prepare(ct, h, cfg); });
-    var joints = this.joints;
     joints.forEach(function (j) { j.prepare(h, cfg); });
     // impact events for new contacts, with the approach speed
     contacts.forEach(function (ct) {
@@ -157,19 +137,12 @@
     }
     contacts.forEach(function (ct) { CS.restitute(ct, cfg); });
     dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; });
-    // breakage: the joint carried more than it is rated for
-    joints.slice().forEach(function (j) {
-      var F = j.force();
-      j.lastForce = F;
-      j.peakForce = Math.max(j.peakForce || 0, F);
-      if (F > j.breakForce) {
-        j.broken = true;
-        self.removeJoint(j);
-        self.emit('break', { joint: j, force: F });
-      }
-    });
+    this.joints.forEach(function (j) { if (j.postStep) j.postStep(dt); });
+    S.brk.check(this, dt);
+    S.isl.update(this, dt);
     this.time += dt;
     this.stepCount++;
+    this.emit('step', { dt: dt });
   };
 
   // Advance by `seconds` in fixed steps (used by tests and fast-forward).
