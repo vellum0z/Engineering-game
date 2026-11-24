@@ -1,0 +1,21 @@
+name: publish
+# GitHub Pages serves the gh-pages branch. Every push to main that passes the
+# tests moves gh-pages forward to the same commit, so the online game always
+# matches main.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node tests/run.js
+      - run: git push origin HEAD:refs/heads/gh-pages

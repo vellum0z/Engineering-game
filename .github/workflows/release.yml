@@ -1,0 +1,31 @@
+name: release
+# Pushing a version tag (v0.1.0, v0.2.0, ...) builds the offline download and
+# attaches it to a GitHub Release as salvage-engineer.zip.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node tests/run.js
+      - name: Build the zip
+        run: |
+          mkdir -p dist/salvage-engineer
+          cp -r index.html src styles assets LICENSE README.md CHANGELOG.md dist/salvage-engineer/
+          cd dist && zip -r -q salvage-engineer.zip salvage-engineer
+      - name: Release notes from the changelog
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
+          printf '\n**To play offline:** download salvage-engineer.zip below, unzip it, and open index.html.\n' >> notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/salvage-engineer.zip --title "Salvage Engineer $GITHUB_REF_NAME" --notes-file notes.md
