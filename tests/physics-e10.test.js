@@ -105,6 +105,8 @@ suite('physics E10: JSON scenes', () => {
     w.addJoint(new P.DistanceJoint({ bodyA: anchor, bodyB: c, localAnchorA: { x: 2, y: 0 }, localAnchorB: { x: 0, y: 0.25 }, rope: true, length: 2.2 }));
     w.addJoint(new P.RevoluteJoint({ bodyA: a, bodyB: b, worldAnchor: { x: -1, y: 4 }, collideConnected: true }));
     w.addJoint(new P.WeldJoint({ bodyA: c, bodyB: d, worldAnchor: { x: 2.5, y: 4 }, angularStiffness: 500, angularDamping: 5, breakTorque: 1e5 }));
+    w.addJoint(new P.PrismaticJoint({ bodyA: anchor, bodyB: d, worldAnchor: { x: 2.8, y: 4 }, worldAxis: { x: 0, y: 1 }, lowerTranslation: -1, upperTranslation: 0.5, motorSpeed: 0.5, maxMotorForce: 80 }));
+    w.addJoint(new P.MouseJoint({ body: b, target: { x: 0.5, y: 4.5 }, maxForce: 200 }));
     return w;
   }
 
