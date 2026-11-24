@@ -367,6 +367,7 @@
   }
   function finish(world, s, links, def) {
     s.def = plainDef(def);
+    s.ownsGround = !!s.ground && !def.ground;     // made by groundFor, so a scene rebuilds it
     links.forEach(function (l) { world.addJoint(l); });
     s.solver = world.addJoint(new StructureSolver(s, links, world));
     (world.structures = world.structures || []).push(s);
