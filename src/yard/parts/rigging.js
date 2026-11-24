@@ -18,8 +18,10 @@
  * A level can name the sheave instead with `via: { part: 'id' }` on the
  * instance, which wins over the dial. The winch's `parts` dial is the number
  * of falls from the sheave to the hook (a block and tackle): the hook gets
- * parts × line tension. Sheaves are frictionless points at their hub, so the
- * tension is the same all along the line.
+ * parts × line tension. Sheaves are frictionless, so the tension is the same
+ * all along the line. Each run leaves the wheel at its rim tangent point (on
+ * the outside of the bend, fixed when the run starts), so a load under one
+ * edge of the wheel hangs straight down from that edge.
  */
 (function (SE) {
   'use strict';
@@ -53,6 +55,35 @@
     var best = null, bd = Infinity;
     list.forEach(function (s) { var d = Math.hypot(s.world.x - hookWorld.x, s.world.y - hookWorld.y); if (d < bd) { bd = d; best = s; } });
     return best;
+  }
+  // Where the runs of a line A -> wheel -> B leave the wheel (centre C,
+  // radius r). The line bends round the wheel, so the wheel is on the inside
+  // of the turn: each leave point is the tangent point from its end with the
+  // centre on the turning side. An end inside the wheel leaves at the hub.
+  function cross(a, b) { return a.x * b.y - a.y * b.x; }
+  function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+  function tangentPoint(C, r, P, turn, Q) {
+    var dx = P.x - C.x, dy = P.y - C.y, d = Math.hypot(dx, dy);
+    if (!(r > 0) || d <= r * 1.0001) return { x: C.x, y: C.y };
+    var th = Math.atan2(dy, dx), al = Math.acos(r / d);
+    var t1 = { x: C.x + r * Math.cos(th + al), y: C.y + r * Math.sin(th + al) };
+    var t2 = { x: C.x + r * Math.cos(th - al), y: C.y + r * Math.sin(th - al) };
+    if (turn) return Math.sign(cross(sub(t1, P), sub(C, t1))) === turn ? t1 : t2;
+    // a straight line through the hub: the side away from the other end
+    return Math.hypot(t1.x - Q.x, t1.y - Q.y) >= Math.hypot(t2.x - Q.x, t2.y - Q.y) ? t1 : t2;
+  }
+  function wrap(s, A, B) {
+    var C = s.world, r = s.r || 0, turn = Math.sign(cross(sub(C, A), sub(B, C)));
+    return { a: tangentPoint(C, r, A, turn, B), b: tangentPoint(C, r, B, -turn, A) };
+  }
+  function drawWrap(ctx, cam, s, w, col) {
+    var C = cam.worldToScreen(s.world), R = (s.r || 0) * cam.zoom + 1.5;
+    if (R < 3) return;
+    var a0 = Math.atan2(-(w.a.y - s.world.y), w.a.x - s.world.x), a1 = Math.atan2(-(w.b.y - s.world.y), w.b.x - s.world.x);
+    // the short way round over the outside of the wheel
+    var da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+    ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(C.x, C.y, R, a0, a0 + da, da < 0); ctx.stroke(); ctx.restore();
   }
   var ROUTE = { key: 'route', label: 'Route', choice: ['direct', 'over sheave'], def: 'direct' };
 
@@ -108,10 +139,16 @@
         parts: Number(b.text('parts')) || 1,
         breakForce: b.si('rating'), label: b.inst.label || 'winch'
       };
-      if (s) def.via = { body: s.body, local: s.local };
+      var lead = null;
+      if (s) {
+        // the falls leave the wheel at the hook-side tangent (the drum run is
+        // drawn to its own tangent; its length barely differs)
+        lead = wrap(s, A.world, B.world);
+        def.via = { body: s.body, local: s.body.localPoint(lead.b) };
+      }
       if (stop != null) { if (speed >= 0) def.minLength = stop; else def.maxLength = stop; }
       var j = b.joint(new P.WinchJoint(def));
-      return { joint: j, sheave: null, over: s, drum: A, hook: B };
+      return { joint: j, sheave: null, over: s, lead: lead, drum: A, hook: B };
     },
     plate: function (inst) {
       return ['Pull ' + (inst.dials.pull || '?') + ' at ' + (inst.dials.speed || '?'), 'Line breaks at ' + (inst.dials.rating || '?')];
@@ -132,12 +169,13 @@
       // (set SE.phys.debugDrawsWinchVia once debugdraw.js draws it itself)
       var a = j.anchorA(), v = j.via.body ? j.via.body.worldPoint(j.via.local) : j.via.local, h = j.anchorB();
       var slack = j.isSlack(), col = '#c9a86a', dash = slack ? [7, 5] : null;
-      line(ctx, cam, [a, v], col, 2.5, dash);
+      wheel(ctx, cam, built.over.world, built.over.r || 0.2);
+      line(ctx, cam, [a, built.lead.a], col, 2.5, dash);
+      drawWrap(ctx, cam, built.over, built.lead, col);
       for (var k = 0; k < j.parts; k++) {
         var off = (k - (j.parts - 1) / 2) * 0.08;
         line(ctx, cam, [{ x: v.x + off, y: v.y }, { x: h.x + off, y: h.y }], col, 2, dash);
       }
-      wheel(ctx, cam, v, built.over.r || 0.2);
       if (j.stalled()) tag(ctx, cam, a, 'STALLED', -16);
     }
   });
@@ -274,6 +312,11 @@
       { key: 'facing', label: 'Boom points', choice: ['right', 'left'], def: 'right' }
     ],
     anchors: { tip: { x: 4, y: 5.65 }, base: { x: 0.4, y: 0.5 } },
+    anchorsFor: function (inst, v) {
+      var s = v.facing === 'left' ? -1 : 1;
+      return { tip: { x: s * v.reach, y: v.height - 0.35 }, base: { x: s * 0.4, y: 0.5 } };
+    },
+    sizeFor: function (inst, v) { return { w: v.reach + 0.5, h: v.height }; },
     build: function (b) {
       var H = b.si('height'), R = b.si('reach'), s = b.text('facing') === 'left' ? -1 : 1;
       var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: b.inst.label || 'jib', shapes: [
@@ -329,12 +372,19 @@
       var A = b.end('a'), B = b.end('b');
       var s = routeFor(b, B.world);
       if (!s) return direct(b);
-      var w = s.world;
+      var w = wrap(s, A.world, B.world);
       var j = b.joint(new b.P.PulleyJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
-        groundAnchorA: w, groundAnchorB: w, length: b.text('length') ? b.si('length') : undefined,
+        groundAnchorA: w.a, groundAnchorB: w.b, length: b.text('length') ? b.si('length') : undefined,
         breakForce: b.si('rating'), label: b.inst.label || 'cable' }));
-      j.radius = s.r;
-      return { joint: j, over: s };
+      j.radius = 0.001;   // the debug renderer marks the leave points; the wheel is drawn below
+      return { joint: j, over: s, lead: w };
+    };
+    var coreDraw = cable.draw;
+    cable.draw = function (ctx, cam, built, view) {
+      if (coreDraw) coreDraw(ctx, cam, built, view);
+      if (!built.over || built.joint.broken) return;
+      wheel(ctx, cam, built.over.world, built.over.r || 0.2);
+      drawWrap(ctx, cam, built.over, built.lead, '#c9a86a');
     };
   }
 
