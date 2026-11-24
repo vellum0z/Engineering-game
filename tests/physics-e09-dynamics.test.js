@@ -291,6 +291,6 @@ suite('e09 dynamics: energy drift limits', () => {
     w.addJoint(new P.DistanceJoint({ bodyA: wall, bodyB: b, length: 1, stiffness: k, damping: 0 }));
     let late = 0;
     runFor(w, 10, wd => { if (wd.time > 9) late = Math.max(late, b.c.x - 1); });
-    knownIssue('E05', () => check('energy: spring amplitude after 10 s', late, 0.3, 0.02));
+    check('energy: spring amplitude after 10 s', late, 0.3, 0.02);
   });
 });
