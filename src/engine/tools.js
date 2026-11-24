@@ -198,7 +198,7 @@
 
   /* --------------------------------------------------------- sig-fig gauge */
   function sigGauge() {
-    var input = el('input', { type: 'text', class: 'answer-input mono', placeholder: 'a number, e.g. 0.002 750 or 23 400', spellcheck: 'false' });
+    var input = el('input', { type: 'text', class: 'answer-input mono', placeholder: 'a number, e.g. 0.002 750 or 61 200', spellcheck: 'false' });
     var nIn = el('input', { type: 'number', class: 'answer-input mono small', value: 3, min: 1, max: 10 });
     var out = el('div', { class: 'sig-out' });
     function go() {

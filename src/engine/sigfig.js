@@ -7,13 +7,13 @@
  *   - first dropped digit less than 5: leave it;
  *   - exactly 5 (nothing nonzero after it): round to make the kept digit
  *     even, i.e. an odd preceding digit is rounded up, an even one is kept.
- *     75.25 -> 75.2, 0.1275 -> 0.128, 0.2555 -> 0.256.
+ *     48.65 -> 48.6, 0.3735 -> 0.374, 0.4815 -> 0.482.
  * The "exactly 5" case is round-half-to-even. It is unbiased: over many
  * values, half of the exact-5 cases go up and half stay, so repeated
  * rounding does not drift upward.
  *
  * All rounding is done on decimal digit strings, never on binary floats, so
- * 0.1275 really ends in 5 here (as a double it is 0.12749999...).
+ * 0.3735 really ends in 5 here (as a double it is 0.37349999...).
  */
 (function (SE) {
   'use strict';
@@ -105,7 +105,7 @@
   /*
    * Count significant figures in a written mantissa (no exponent part).
    * Trailing zeros of a whole number without a decimal point are ambiguous:
-   * "23400" could have 3, 4 or 5.
+   * "61200" could have 3, 4 or 5.
    */
   function countSigFigs(text) {
     var s = String(text).replace(/[\s  ]/g, '').replace(/^[+-]/, '');
@@ -129,7 +129,7 @@
 
   /*
    * Engineering notation: mantissa in [1, 1000) and exponent a multiple of 3,
-   * written to n significant figures. 23400 (3 s.f.) -> "23.4(10^3)".
+   * written to n significant figures. 61200 (3 s.f.) -> "61.2(10^3)".
    */
   function toEngineering(x, n) {
     var r = roundSig(x, n);
@@ -137,7 +137,7 @@
     var e = r.point - 1;                 // exponent of first digit
     var e3 = Math.floor(e / 3) * 3;
     var mant = compose(r.sign, r.digits, r.point - e3);
-    // keep trailing zeros that are significant, e.g. 23.400
+    // keep trailing zeros that are significant, e.g. 61.200
     return { mantissa: mant, exp: e3, text: e3 === 0 ? mant : mant + '(10' + supNum(e3) + ')' };
   }
 

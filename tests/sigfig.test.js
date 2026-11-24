@@ -18,22 +18,22 @@ suite('sigfig: rounding to 3 s.f. with the course rule', () => {
   test('0.3762 → 0.376', () => eq(r3(0.3762), '0.376'));
   test('9.871 → 9.87', () => eq(r3(9.871), '9.87'));
   // exactly 5: odd kept digit goes up, even stays
-  test('75.25 → 75.2 (exact 5 after an even 2)', () => eq(r3(75.25), '75.2'));
-  test('0.1275 → 0.128 (exact 5 after an odd 7; as a double this is 0.12749…)', () => {
-    eq(r3(0.1275), '0.128');
+  test('48.65 → 48.6 (exact 5 after an even 6)', () => eq(r3(48.65), '48.6'));
+  test('0.3735 → 0.374 (exact 5 after an odd 3; as a double this is 0.37349…)', () => {
+    eq(r3(0.3735), '0.374');
   });
-  test('0.2555 → 0.256 (exact 5 after an odd 5)', () => eq(r3(0.2555), '0.256'));
-  test('5 followed by anything nonzero is more than half: 75.2501 → 75.3', () => {
-    eq(r3(75.2501), '75.3');
+  test('0.4815 → 0.482 (exact 5 after an odd 1)', () => eq(r3(0.4815), '0.482'));
+  test('5 followed by anything nonzero is more than half: 48.6501 → 48.7', () => {
+    eq(r3(48.6501), '48.7');
   });
   test('string input is rounded on its digits', () => {
-    eq(r3('0.1275'), '0.128');
-    eq(r3('75.250'), '75.2');
+    eq(r3('0.3735'), '0.374');
+    eq(r3('48.650'), '48.6');
   });
   test('negative values round on their magnitude', () => {
     eq(r3(-3.5587), '-3.56');
-    eq(r3(-75.25), '-75.2');
-    eq(S.roundSig(-75.25, 3).value, -75.2);
+    eq(r3(-48.65), '-48.6');
+    eq(S.roundSig(-48.65, 3).value, -48.6);
   });
 });
 
@@ -79,8 +79,8 @@ suite('sigfig: carries and padding', () => {
     eq(S.roundSig(0, 3).value, 0);
   });
   test('other rules: up and truncate', () => {
-    eq(S.roundSig(75.25, 3, 'up').text, '75.3');
-    eq(S.roundSig(75.24, 3, 'up').text, '75.2');
+    eq(S.roundSig(48.65, 3, 'up').text, '48.7');
+    eq(S.roundSig(48.64, 3, 'up').text, '48.6');
     eq(S.roundSig(9.879, 3, 'truncate').text, '9.87');
   });
   test('roundedUp flag', () => {
@@ -102,14 +102,14 @@ suite('sigfig: countSigFigs', () => {
     eq(c('0.0009996'), '4,4,false');
     eq(c('007'), '1,1,false');
   });
-  test('trailing zeros of a whole number are ambiguous: 23 400 has 3 to 5', () => {
-    eq(c('23400'), '3,5,true');
-    eq(c('23 400'), '3,5,true');
+  test('trailing zeros of a whole number are ambiguous: 61 200 has 3 to 5', () => {
+    eq(c('61200'), '3,5,true');
+    eq(c('61 200'), '3,5,true');
     eq(c('4620'), '3,4,true');
   });
   test('a decimal point makes trailing zeros significant', () => {
-    eq(c('23400.'), '5,5,false');
-    eq(c('23400.0'), '6,6,false');
+    eq(c('61200.'), '5,5,false');
+    eq(c('61200.0'), '6,6,false');
   });
   test('whole numbers without trailing zeros are exact counts', () => {
     eq(c('2553'), '4,4,false');
@@ -133,7 +133,7 @@ suite('sigfig: countSigFigs', () => {
 
 suite('sigfig: engineering notation', () => {
   test('formatEng uses exponents in multiples of 3', () => {
-    eq(S.formatEng(23400, 3), '23.4(10³)');
+    eq(S.formatEng(61200, 3), '61.2(10³)');
     eq(S.formatEng(1234567, 3), '1.23(10⁶)');
     eq(S.formatEng(0.000123, 3), '123(10⁻⁶)');
     eq(S.formatEng(0.0462, 3), '46.2(10⁻³)');
@@ -144,7 +144,7 @@ suite('sigfig: engineering notation', () => {
     eq(S.formatEng(1, 3), '1.00');
   });
   test('significant trailing zeros are kept', () => {
-    eq(S.formatEng(23400, 5), '23.400(10³)');
+    eq(S.formatEng(61200, 5), '61.200(10³)');
   });
   test('rounding that carries moves to the next power of 1000', () => {
     // 999.6 → 1000 → 1.00(10³)
@@ -155,8 +155,8 @@ suite('sigfig: engineering notation', () => {
     eq(S.formatEng(0, 3), '0');
   });
   test('toEngineering exposes mantissa and exponent', () => {
-    const t = S.toEngineering(23400, 3);
-    eq(t.mantissa, '23.4'); eq(t.exp, 3);
+    const t = S.toEngineering(61200, 3);
+    eq(t.mantissa, '61.2'); eq(t.exp, 3);
   });
   test('supNum', () => {
     eq(S.supNum(-12), '⁻¹²');

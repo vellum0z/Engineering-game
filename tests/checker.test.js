@@ -169,12 +169,12 @@ suite('checker: error kinds', () => {
     ok(/more than half/.test(r.errors[0].msg), r.errors[0].msg);
   });
   test('rounding hint for the exact-5 rule', () => {
-    // 75.25 → 75.2 (even 2 stays). "75.3" is misrounded.
-    const r = C.check('75.3 N', { value: 75.25, unit: 'N' });
+    // 48.65 → 48.6 (even 6 stays). "48.7" is misrounded.
+    const r = C.check('48.7 N', { value: 48.65, unit: 'N' });
     eq(r.kind, 'rounding');
     ok(/exactly 5/.test(r.errors[0].msg) && /even/.test(r.errors[0].msg), r.errors[0].msg);
-    // 0.1275 → 0.128 (odd 7 goes up). "0.127" is misrounded.
-    const s = C.check('0.127 m', { value: 0.1275, unit: 'm' });
+    // 0.3735 → 0.374 (odd 3 goes up). "0.373" is misrounded.
+    const s = C.check('0.373 m', { value: 0.3735, unit: 'm' });
     eq(s.kind, 'rounding');
     ok(/odd/.test(s.errors[0].msg));
   });
@@ -264,13 +264,13 @@ suite('checker: exactRounding', () => {
     eq(r.kind, 'rounding');
   });
   test('book rounding of exact-5 cases passes', () => {
-    ok(C.check('75.2 N', { value: 75.25, unit: 'N', exactRounding: true }).correct);
-    ok(C.check('0.128 m', { value: 0.1275, unit: 'm', exactRounding: true }).correct);
-    ok(C.check('0.256 m', { value: 0.2555, unit: 'm', exactRounding: true }).correct);
+    ok(C.check('48.6 N', { value: 48.65, unit: 'N', exactRounding: true }).correct);
+    ok(C.check('0.374 m', { value: 0.3735, unit: 'm', exactRounding: true }).correct);
+    ok(C.check('0.482 m', { value: 0.4815, unit: 'm', exactRounding: true }).correct);
     ok(C.check('7.56 kN', { value: 7555, unit: 'N', exactRounding: true }).correct);
   });
   test('round-half-up of an exact 5 is rejected', () => {
-    const r = C.check('75.3 N', { value: 75.25, unit: 'N', exactRounding: true });
+    const r = C.check('48.7 N', { value: 48.65, unit: 'N', exactRounding: true });
     ok(!r.correct);
     eq(r.parts.value, false);
   });

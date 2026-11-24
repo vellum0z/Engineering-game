@@ -94,7 +94,7 @@
     if (!q.ok) {
       res.kind = 'parse';
       res.parts.sigfigs = res.parts.form = res.parts.rounding = false;
-      res.errors.push({ kind: 'parse', msg: q.error || 'Could not read that. Try "4.62 kN" or "23.4(10^3) N".' });
+      res.errors.push({ kind: 'parse', msg: q.error || 'Could not read that. Try "4.62 kN" or "61.2(10^3) N".' });
       return res;
     }
     var expDims = spec.dims || (spec.unit ? U.unitInfo(spec.unit).dims : U.dim());

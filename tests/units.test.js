@@ -217,22 +217,22 @@ suite('units: numbers', () => {
     eq(n.value, 12);
     eq(n.rest.trim(), 'in');
   });
-  test('engineering notation 23.4(10^3)', () => {
-    const n = U.parseNumberPrefix('23.4(10^3) N');
-    eq(n.mantissa, '23.4'); eq(n.exp10, 3); eq(n.expStyle, 'paren');
-    near(n.value, 23400);
-    eq(n.mantissaValue, 23.4);
+  test('engineering notation 61.2(10^3)', () => {
+    const n = U.parseNumberPrefix('61.2(10^3) N');
+    eq(n.mantissa, '61.2'); eq(n.exp10, 3); eq(n.expStyle, 'paren');
+    near(n.value, 61200);
+    eq(n.mantissaValue, 61.2);
   });
-  test('engineering notation 23.4(10³) and 23.4(10⁻³)', () => {
-    near(U.parseNumberPrefix('23.4(10³) N').value, 23400);
-    const n = U.parseNumberPrefix('23.4(10⁻³) N');
+  test('engineering notation 61.2(10³) and 61.2(10⁻³)', () => {
+    near(U.parseNumberPrefix('61.2(10³) N').value, 61200);
+    const n = U.parseNumberPrefix('61.2(10⁻³) N');
     eq(n.exp10, -3);
-    near(n.value, 0.0234);
+    near(n.value, 0.0612);
   });
-  test('the printed form 23.4(10-3) means 10^-3', () => {
-    const n = U.parseNumberPrefix('23.4(10-3) N');
+  test('the printed form 61.2(10-3) means 10^-3', () => {
+    const n = U.parseNumberPrefix('61.2(10-3) N');
     eq(n.exp10, -3);
-    near(n.value, 0.0234);
+    near(n.value, 0.0612);
   });
   test('e-notation 2.3e3 and 2.3E-3', () => {
     const a = U.parseNumberPrefix('2.3e3 N');
@@ -261,9 +261,9 @@ suite('units: quantities in SI base units', () => {
     eq(q.dims.join(','), '1,1,-2,0');
   });
   test('engineering-notation quantities', () => {
-    near(qty('23.4(10^3) N').value, 23400);
-    near(qty('23.4(10³) N').value, 23400);
-    near(qty('23.4(10-3) N').value, 0.0234);
+    near(qty('61.2(10^3) N').value, 61200);
+    near(qty('61.2(10³) N').value, 61200);
+    near(qty('61.2(10-3) N').value, 0.0612);
     near(qty('2.3e3 N').value, 2300);
     near(qty('2.3 × 10^3 N').value, 2300);
   });
@@ -344,7 +344,7 @@ suite('units: checkSIForm', () => {
   const codes = s => U.checkSIForm(qty(s)).map(i => i.code).sort().join(',');
   test('clean SI answers pass', () => {
     eq(codes('4.62 kN'), '');
-    eq(codes('23.4(10^3) N'), '');
+    eq(codes('61.2(10^3) N'), '');
     eq(codes('9.81 m/s^2'), '');
     eq(codes('0.1 m'), '', '0.1 is inside the range');
     eq(codes('999 MPa'), '');
