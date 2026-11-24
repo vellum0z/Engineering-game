@@ -45,8 +45,8 @@
     this.gravity = def.gravity ? M.v(def.gravity.x, def.gravity.y) : M.v(0, -9.81);
     this.substeps = def.substeps || 4;
     this.cfg = {
-      contactHertz: def.contactHertz || 30,
-      contactDampingRatio: def.contactDampingRatio || 10,
+      contactHertz: def.contactHertz || 60,
+      contactDampingRatio: def.contactDampingRatio || 4,
       jointHertz: def.jointHertz || 60,
       jointDampingRatio: def.jointDampingRatio || 2,
       maxPushVelocity: def.maxPushVelocity || 3,
