@@ -213,6 +213,31 @@
       }
     },
     {
+      id: 'tackle', name: 'Winch and tackle',
+      blurb: 'Two winches on one crane, both lines rated 3 kN. Left: a single line from the drum over the jib sheave lifts 200 kg (line tension = W = 1.96 kN). Right: the same line reeved as a 4-part tackle lifts 800 kg with the same 1.96 kN in the line (T = W/4), but the hook rises at a quarter of the reel speed.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        if (!P.WinchJoint) return { world: w };
+        var crane = w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 }, material: 'steel', label: '',
+          shapes: [P.box(0.2, 4, { x: -4, y: 4 }), P.box(4.6, 0.15, { x: 0.4, y: 8.1 }), P.box(0.6, 0.4, { x: -4, y: 1.2 })] }));
+        var light = crate(P, w, -1.5, 1.0, 0.4, { mass: 200, label: '200 kg' });
+        var heavy = crate(P, w, 3.5, 1.0, 0.6, { mass: 800, label: '800 kg' });
+        var single = w.addJoint(new P.WinchJoint({ bodyA: crane, localAnchorA: { x: -4.3, y: 1.7 }, bodyB: light, localAnchorB: { x: 0, y: 0.4 },
+          via: { body: crane, local: { x: -1.5, y: 7.7 } }, reelSpeed: 0.4, accel: 1, drumRadius: 0.25, breakForce: 3000, label: 'single line' }));
+        var tackle = w.addJoint(new P.WinchJoint({ bodyA: crane, localAnchorA: { x: -3.7, y: 1.7 }, bodyB: heavy, localAnchorB: { x: 0, y: 0.6 },
+          via: { body: crane, local: { x: 3.5, y: 7.7 } }, parts: 4, reelSpeed: 0.8, accel: 1, drumRadius: 0.25, breakForce: 3000, label: '4-part tackle' }));
+        return {
+          world: w,
+          view: { lo: { x: -5.5, y: -0.5 }, hi: { x: 6, y: 8.6 } },
+          update: function () {
+            // stop each hook a safe distance below its sheave
+            if (light.c.y > 5.2) single.reelSpeed = 0;
+            if (heavy.c.y > 4.6) tackle.reelSpeed = 0;
+          }
+        };
+      }
+    },
+    {
       id: 'ramp', name: 'Ramp with friction',
       blurb: 'A 30° concrete ramp (tan 30° = 0.577). Each block slides only if the mixed friction μ = √(μ₁μ₂) is below 0.577: ice (0.14) races off, timber (0.56) creeps, steel (0.62) and rubber (0.79) hold.',
       build: function (P) {
