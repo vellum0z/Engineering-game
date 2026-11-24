@@ -77,8 +77,9 @@
     if (this.state !== 'running' && this.state !== 'falling') return;
     var W = p.mass * p.g;
     if (this.state === 'running') {
-      // the motor ramps tension up over 0.3 s, like a real winch taking load
-      var ramp = Math.min(1, this.time / 0.3);
+      // the motor ramps tension up over 0.3 s, like a real winch taking load.
+      // In hover mode the brake was already holding the load, so there is no ramp.
+      var ramp = p.mode === 'hover' ? 1 : Math.min(1, this.time / 0.3);
       var T = this.T * ramp;
       this.cableTension = T;
       if (this.snapAt != null && this.time >= this.snapAt) {
