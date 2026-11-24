@@ -75,7 +75,7 @@ Rules for parts:
 
 What each one does in the engine:
 
-- **Winch**: a `WinchJoint`. Above `pull` the drum is overhauled and the load runs down (the inspector art says STALLED). With `brake` on, a stopped drum holds anything the line can carry. With `brake` off and speed 0 the drum free-wheels and the load falls. `stop` stops reeling in (or paying out, for a negative speed) when the line out reaches it. Line out counts every run, including drum to sheave.
+- **Winch**: a `WinchJoint`. While the load needs all of `pull` the drum slips: if the load still rises (it is only speeding up) the art says FULL PULL and the tension reads the pull; once the line out stops falling it says STALLED and the load runs down. The built part has `stalled()` and `atMaxPull()`. Near its `stop` the drum slows at 0.5 m/s² so the load stays on a taut line, and at the stop a braked drum holds whatever the line can carry. With `brake` on, a stopped drum holds anything the line can carry. With `brake` off and speed 0 the drum free-wheels and the load falls. `stop` stops reeling in (or paying out, for a negative speed) when the line out reaches it. Line out counts every run, including drum to sheave.
 - **Chain**: a pull-only rope joint rated at `P.rating.cable('chain80', d)` (10 mm breaks at about 126 kN). The plate prints the working load limit (breaking load / 4) and the breaking load in kN and lb. Its own weight is applied half at each end, and the art drapes it when slack. A slack chain that jerks tight can snap: that is a real shock load.
 - **Spring**: a `DistanceJoint` spring, F = k·(L − rest), pushing and pulling. `light` damping is a damping ratio of 0.05 on the lighter end.
 

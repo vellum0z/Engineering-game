@@ -111,6 +111,7 @@
   }
 
   /* --------------------------------------------------------------- winch */
+  var STOP_DECEL = 0.5;   // m/s², drum slowing into its stop (well under g, so the line stays taut)
   Y.definePart({
     type: 'winch', name: 'Winch', category: 'Rigging',
     blurb: 'A motor drum that reels its line in (positive speed) or pays it out. It stalls if the load needs more than its pull, and the line snaps above its rating.',
@@ -148,7 +149,30 @@
       }
       if (stop != null) { if (speed >= 0) def.minLength = stop; else def.maxLength = stop; }
       var j = b.joint(new P.WinchJoint(def));
-      return { joint: j, sheave: null, over: s, lead: lead, drum: A, hook: B };
+      var st = { prev: j.length, stalled: false, maxed: false, braked: false };
+      // Each step: is the drum winning? At max pull the drum slips, but a load
+      // that still rises (line out falling) is only accelerating at full
+      // pull. It is stalled when the line out stops falling.
+      // Near a stop the drum slows at STOP_DECEL so the load doesn't fly up
+      // off the line, and at the stop a braked drum holds (the brake takes
+      // over from the motor).
+      b.on('step', function () {
+        if (j.broken) return;
+        var dL = j.length - st.prev;
+        st.prev = j.length;
+        st.maxed = j.slipping;
+        st.stalled = j.slipping && speed > 0 ? dL > -1e-7 : false;
+        if (stop == null || st.braked || speed === 0) return;
+        var left = speed > 0 ? j.length - stop : stop - j.length;
+        if (left <= 1e-4) {
+          if (brake) { j.reelSpeed = 0; st.braked = true; }
+          return;
+        }
+        var v = Math.min(Math.abs(speed), Math.sqrt(2 * STOP_DECEL * left));
+        j.reelSpeed = speed > 0 ? v : -v;
+      });
+      return { joint: j, sheave: null, over: s, lead: lead, drum: A, hook: B, state: st,
+        stalled: function () { return st.stalled; }, atMaxPull: function () { return st.maxed; } };
     },
     plate: function (inst) {
       return ['Pull ' + (inst.dials.pull || '?') + ' at ' + (inst.dials.speed || '?'), 'Line breaks at ' + (inst.dials.rating || '?')];
@@ -164,7 +188,10 @@
     },
     draw: function (ctx, cam, built) {
       var j = built.joint;
-      if (j.broken || !built.over || SE.phys.debugDrawsWinchVia) return;
+      if (j.broken) return;
+      if (built.stalled()) tag(ctx, cam, j.anchorA(), 'STALLED', -16);
+      else if (built.atMaxPull()) tag(ctx, cam, j.anchorA(), 'FULL PULL', -16);
+      if (!built.over || SE.phys.debugDrawsWinchVia) return;
       // the debug renderer draws drum to hook; show the real path over the sheave
       // (set SE.phys.debugDrawsWinchVia once debugdraw.js draws it itself)
       var a = j.anchorA(), v = j.via.body ? j.via.body.worldPoint(j.via.local) : j.via.local, h = j.anchorB();
@@ -176,7 +203,6 @@
         var off = (k - (j.parts - 1) / 2) * 0.08;
         line(ctx, cam, [{ x: v.x + off, y: v.y }, { x: h.x + off, y: h.y }], col, 2, dash);
       }
-      if (j.stalled()) tag(ctx, cam, a, 'STALLED', -16);
     }
   });
 
