@@ -59,7 +59,9 @@
       var g = siteG(b.si('body'), b.si('altitude'), b.si('latitude'));
       b.world.gravity = { x: 0, y: -g };
       b.site.g = g;
-      return { body: null, bodies: [], g: g, at: b.at({ x: 0, y: 0 }) };
+      // a sensor over the sign so the marker can be clicked and set; nothing collides with it
+      var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: '', shapes: [{ shape: b.P.box(0.4, 0.7), sensor: true }] });
+      return { body: body, g: g, at: b.at({ x: 0, y: 0 }) };
     },
     plate: function (inst) { return [inst.dials.body || 'Earth', 'Alt ' + (inst.dials.altitude || '0 m'), 'Lat ' + (inst.dials.latitude || '0 deg')]; },
     readouts: function (built) { return [{ key: 'g', label: 'g', q: 'accel', read: function () { return built.g; } }]; },
