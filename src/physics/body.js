@@ -4,7 +4,8 @@
  *   var b = new SE.phys.Body({
  *     type: 'dynamic' | 'static' | 'kinematic',
  *     position: {x, y}, angle, velocity: {x, y}, angularVelocity,
- *     shapes: [shape | { shape, material, friction, restitution, density, sensor }],
+ *     shapes: [shape | { shape, material, friction, muS, muK, restitution, density, sensor,
+ *                        rollingResistance, tangentSpeed }],
  *     material: 'steel',            // default for shapes that don't set one
  *     mass: 250,                     // optional: overrides density-derived mass (keeps the centroid)
  *     fixedRotation: false, linearDamping: 0, angularDamping: 0, gravityScale: 1,
@@ -12,7 +13,8 @@
  *   });
  *
  * The body origin is `position`; the solver works on the centre of mass `c`.
- * Forces added with applyForce act for one step and are then cleared.
+ * Forces added with applyForce act for one step and are then cleared;
+ * body.lastApplied lists the ones that acted during the last step.
  */
 (function (SE) {
   'use strict';
@@ -31,6 +33,11 @@
     this.w = def.angularVelocity || 0;
     this.force = M.v(0, 0);
     this.torque = 0;
+    // Forces applied since the last step, and the ones that acted during it
+    // (the world moves appliedLog to lastApplied when it clears forces), so
+    // gauges can show where each applied force acted.
+    this.appliedLog = [];
+    this.lastApplied = [];
     this.linearDamping = def.linearDamping || 0;
     this.angularDamping = def.angularDamping || 0;
     this.gravityScale = def.gravityScale == null ? 1 : def.gravityScale;
@@ -47,7 +54,13 @@
         density: f.density != null ? f.density : mat.density,
         friction: f.friction != null ? f.friction : mat.friction,
         restitution: f.restitution != null ? f.restitution : mat.restitution,
-        sensor: !!f.sensor, group: f.group || 0, body: null
+        sensor: !!f.sensor, group: f.group || 0, body: null,
+        // static / kinetic friction: the fixture's own values, else the
+        // material's (only when the fixture didn't override `friction`)
+        muS: f.muS != null ? f.muS : (f.friction == null && mat.muS != null ? mat.muS : null),
+        muK: f.muK != null ? f.muK : (f.friction == null && mat.muK != null ? mat.muK : null),
+        rollingResistance: f.rollingResistance != null ? f.rollingResistance : (mat.rollingResistance || 0),
+        tangentSpeed: f.tangentSpeed || 0
       };
     });
     var self = this;
@@ -96,9 +109,14 @@
     if (this.type !== 'dynamic') return;
     this.force = M.add(this.force, F);
     if (worldPoint) this.torque += M.cross(M.sub(worldPoint, this.c), F);
+    this.appliedLog.push({ vector: M.v(F.x, F.y), point: worldPoint ? M.v(worldPoint.x, worldPoint.y) : null, torque: 0 });
     this.awake = true;
   };
-  Body.prototype.applyTorque = function (T) { if (this.type === 'dynamic') this.torque += T; };
+  Body.prototype.applyTorque = function (T) {
+    if (this.type !== 'dynamic') return;
+    this.torque += T;
+    this.appliedLog.push({ vector: M.v(0, 0), point: null, torque: T });
+  };
   Body.prototype.applyImpulse = function (J, worldPoint) {
     if (this.type !== 'dynamic') return;
     this.v = M.mulAdd(this.v, this.invM, J);

@@ -8,7 +8,7 @@
  *   w.step(1 / 60);
  *
  * Step order (Box2D 3 "soft step"):
- *   1. broadphase (sort and sweep on x) and narrowphase -> contact manifolds,
+ *   1. broadphase (dynamic AABB trees) and narrowphase -> contact manifolds,
  *      matched to last step's contacts so their impulses warm-start
  *   2. prepare contacts and joints for substep h = dt / substeps
  *   3. for each substep: integrate velocities, warm start, solve with soft
@@ -45,13 +45,14 @@
     this.gravity = def.gravity ? M.v(def.gravity.x, def.gravity.y) : M.v(0, -9.81);
     this.substeps = def.substeps || 4;
     this.cfg = {
-      contactHertz: def.contactHertz || 30,
-      contactDampingRatio: def.contactDampingRatio || 10,
+      contactHertz: def.contactHertz || 60,
+      contactDampingRatio: def.contactDampingRatio || 4,
       jointHertz: def.jointHertz || 60,
       jointDampingRatio: def.jointDampingRatio || 2,
       maxPushVelocity: def.maxPushVelocity || 3,
       restitutionThreshold: def.restitutionThreshold || 1,
-      maxLinearSpeed: def.maxLinearSpeed || 400
+      maxLinearSpeed: def.maxLinearSpeed || 400,
+      enableSleep: def.enableSleep !== false
     };
     this.bodies = [];
     this.joints = [];
@@ -93,6 +94,7 @@
   /* ---------------------------------------------------------------- step */
   World.prototype.step = function (dt) {
     var self = this, n = this.substeps, h = dt / n, invH = 1 / h, cfg = this.cfg, S = stages();
+    this.dt = dt;
     CS = S.cs;
     var awake = function (b) { return b.type !== 'static' && b.awake !== false; };
     var active = function (A, B) { return awake(A) || awake(B); };
@@ -136,7 +138,7 @@
       contacts.forEach(function (ct) { CS.solve(ct, invH, false, cfg); });
     }
     contacts.forEach(function (ct) { CS.restitute(ct, cfg); });
-    dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; });
+    dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; b.lastApplied = b.appliedLog; b.appliedLog = []; });
     this.joints.forEach(function (j) { if (j.postStep) j.postStep(dt); });
     S.brk.check(this, dt);
     S.isl.update(this, dt);
