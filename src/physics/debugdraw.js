@@ -519,17 +519,97 @@
     [ga, gb].forEach(function (g) { wheel(ctx, g, r); });
   }
 
-  // Winch: a drum at anchor A with the line paid out to anchor B.
+  // Tangent point on circle (C, r) of a line from the outside point Pt.
+  // side +1 rotates the radius toward Pt counter-clockwise by α = acos(r/d), -1 clockwise.
+  function tangentPoint(Pt, C, r, side) {
+    var d = M.sub(Pt, C), L = M.len(d);
+    if (L <= r + 1e-9) return M.mulAdd(C, r, M.norm(d.x || d.y ? d : M.v(0, 1)));
+    var u = M.scale(d, 1 / L), al = side * Math.acos(r / L);
+    return M.mulAdd(C, r, M.rotate(M.rot(al), u));
+  }
+
+  // Winch: a drum at anchor A with the line paid out to the hook at anchor B.
+  // With a `via` sheave the line leaves the drum, wraps over the sheave rim
+  // (tangent in, arc, tangent out) and drops to the hook; with parts > 1 it
+  // is a tackle, drawn as `parts` falls between the sheave block and a lower
+  // block on the hook. The physics treats the sheave as a point (winch.js);
+  // the rim here is only for the picture.
   function drawWinch(ctx, j, sa, sb, cam, col) {
-    var r = Math.max(7, (j.drumRadius || j.radius || 0.2) * cam.zoom);
+    var D = j.anchorA(), H = j.anchorB(), z = cam.zoom;
+    var rd = Math.max(j.drumRadius || j.radius || 0.15, 7 / z);
     var slack = j.isSlack ? j.isSlack() : false;
-    ctx.strokeStyle = col; ctx.lineWidth = 2.5;
-    if (slack) ctx.setLineDash([7, 5]);
-    ctx.beginPath(); ctx.moveTo(sa.x + r, sa.y); ctx.lineTo(sb.x, sb.y); ctx.stroke(); ctx.setLineDash([]);
-    wheel(ctx, sa, r);
-    // turns of line on the drum
+    var parts = Math.max(1, Math.round(j.parts || 1));
+    var S = null, rs = 0;
+    if (j.via) {
+      S = j.via.body ? j.via.body.worldPoint(j.via.local) : j.via.local;
+      rs = Math.max(j.via.radius || j.sheaveRadius || 0.15, 6 / z);
+    }
+    var W = function (p) { return cam.worldToScreen(p); };
+
+    // the drum and sheave wheels go underneath the line
+    wheel(ctx, sa, rd * z);
     ctx.strokeStyle = '#c9a86a'; ctx.lineWidth = 1;
-    for (var k = 1; k <= 3; k++) { ctx.beginPath(); ctx.arc(sa.x, sa.y, r * (0.45 + 0.15 * k), 0, Math.PI * 2); ctx.stroke(); }
+    for (var k = 1; k <= 3; k++) { ctx.beginPath(); ctx.arc(sa.x, sa.y, rd * z * (0.45 + 0.15 * k), 0, Math.PI * 2); ctx.stroke(); }
+    // the block the falls hang from: the sheave, or the drum itself with no sheave
+    var top = S || D, rt = S ? rs : rd;
+    if (S) wheel(ctx, W(S), rs * z);
+
+    ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    if (slack) ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    var outPt = null, inS = null, sense = -1;
+    if (S) {
+      // bend direction: −1 = the line turns clockwise over the sheave (e.g. up, over, down)
+      sense = M.cross(M.sub(S, D), M.sub(H, S)) > 0 ? 1 : -1;
+      inS = tangentPoint(D, S, rs, sense);
+      var offD = tangentPoint(inS, D, rd, -sense);                // leaves the drum on the same side
+      outPt = tangentPoint(H, S, rs, -sense);
+      var p0 = W(offD), p1 = W(inS);
+      ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+    } else {
+      outPt = tangentPoint(H, D, rd, 1);
+      var q0 = W(outPt); ctx.moveTo(q0.x, q0.y);
+    }
+
+    if (parts === 1) {
+      if (S) arcTo(ctx, cam, S, rs, inS, outPt, sense);
+      var h = W(H); ctx.lineTo(h.x, h.y);
+      ctx.stroke(); ctx.setLineDash([]);
+      return;
+    }
+
+    // tackle: falls spread across the top block, converging on a lower block above the hook
+    var dir = M.norm(M.sub(H, top)), n = M.perp(dir);
+    var rb = rt * 0.7, Hb = M.mulAdd(H, -(rb + 0.08), dir);
+    var outSide = M.dot(M.sub(outPt, top), n) >= 0 ? 1 : -1;
+    var falls = [];
+    for (var i = 0; i < parts; i++) {
+      var o = rt * (-1 + 2 * i / (parts - 1));
+      falls.push({ o: o, a: M.mulAdd(top, o, n), b: M.mulAdd(Hb, o * (rb / rt), n) });
+    }
+    // the line from the drum wraps onto the outermost fall on its side
+    falls.sort(function (f, g) { return outSide * (g.o - f.o); });
+    if (S) arcTo(ctx, cam, S, rs, inS, falls[0].a, sense);
+    else { var fa = W(falls[0].a); ctx.lineTo(fa.x, fa.y); }
+    ctx.stroke();
+    ctx.beginPath();
+    falls.forEach(function (f) { var a1 = W(f.a), b1 = W(f.b); ctx.moveTo(a1.x, a1.y); ctx.lineTo(b1.x, b1.y); });
+    ctx.stroke(); ctx.setLineDash([]);
+    // lower block and its hook
+    var hb = W(Hb), hk = W(H);
+    ctx.strokeStyle = C.steelHi; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(hb.x, hb.y); ctx.lineTo(hk.x, hk.y); ctx.stroke();
+    wheel(ctx, hb, rb * z);
+    var mid = W(M.lerp(falls[0].a, falls[0].b, 0.5));
+    label_(ctx, '×' + parts, mid.x + (outSide > 0 ? 1 : -1) * (n.x >= 0 ? 18 : -18), mid.y, col);
+  }
+
+  // Continue the current path around circle (C, r) from point `from` to point `to`,
+  // turning the way the line bends (sense −1 = clockwise as seen on screen).
+  function arcTo(ctx, cam, C, r, from, to, sense) {
+    var c = cam.worldToScreen(C), f = cam.worldToScreen(from), t = cam.worldToScreen(to);
+    var a0 = Math.atan2(f.y - c.y, f.x - c.x), a1 = Math.atan2(t.y - c.y, t.x - c.x);
+    ctx.arc(c.x, c.y, r * cam.zoom, a0, a1, sense > 0);
   }
 
   function wheel(ctx, c, r) {
@@ -754,6 +834,8 @@
   P.debugDrawFreeBody = debugDrawFreeBody;
   // Start listening for a world's 'break' events now, so a joint that snaps
   // before the first frame is drawn still flashes.
+  // The build yard checks this to drop its own rope-over-sheave overlay.
+  P.debugDrawsWinchVia = true;
   P.debugDraw.track = function (world) { stateFor(world); return world; };
   P.debugDraw.worldBounds = worldBounds;
   P.debugDraw.stressColor = stressColor;

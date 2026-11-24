@@ -12,7 +12,7 @@
  *     brake, brakeForce,        holds the line when reelSpeed is 0, up to brakeForce (N)
  *     drumRadius,               m, for drumTorque() (default 0.15)
  *     minLength, maxLength,     drum limits on line out, m
- *     via: { body | null, local }, parts,   optional sheave the line runs over,
+ *     via: { body | null, local, radius }, parts,   optional sheave the line runs over,
  *                               then `parts` falls down to the hook (a tackle)
  *     EA,                       optional axial stiffness of the line, N
  *     breakForce })             the line snaps above this tension
@@ -51,6 +51,7 @@
     if (def.via) {
       var vl = def.via.local || def.via.localAnchor || M.v(0, 0);
       var via = this.via = { body: def.via.body || null, local: M.v(vl.x, vl.y) };
+      if (def.via.radius) via.radius = def.via.radius;   // sheave size, for drawing only
       runs = [{ a: drum, b: via, k: 1 }, { a: via, b: hook, k: this.parts }];
     } else {
       runs = [{ a: drum, b: hook, k: this.parts }];
@@ -145,12 +146,12 @@
   (P.jointTypes = P.jointTypes || {}).winch = {
     toJSON: function (j, indexOf) {
       var o = fieldsCodec().toJSON(j, indexOf);
-      if (j.via) o.via = { body: j.via.body ? indexOf(j.via.body) : null, local: { x: j.via.local.x, y: j.via.local.y } };
+      if (j.via) { o.via = { body: j.via.body ? indexOf(j.via.body) : null, local: { x: j.via.local.x, y: j.via.local.y } }; if (j.via.radius) o.via.radius = j.via.radius; }
       return o;
     },
     fromJSON: function (o, bodies) {
       var copy = Object.assign({}, o);
-      if (o.via) copy.via = { body: o.via.body == null ? null : bodies[o.via.body], local: o.via.local };
+      if (o.via) copy.via = { body: o.via.body == null ? null : bodies[o.via.body], local: o.via.local, radius: o.via.radius };
       return fieldsCodec().fromJSON(copy, bodies);
     }
   };

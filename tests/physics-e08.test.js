@@ -9,10 +9,11 @@ const P = globalThis.SE.phys;
 // A 2D context that records calls and checks every numeric argument is finite.
 function stubContext() {
   const calls = [];
+  const log = [];
   const bad = [];
   const gradient = { addColorStop() {} };
   const target = {
-    calls, bad,
+    calls, bad, log,
     measureText: (s) => ({ width: String(s).length * 7 }),
     createLinearGradient: () => gradient, createRadialGradient: () => gradient,
     createPattern: () => ({}), getImageData: () => ({ data: [] })
@@ -23,7 +24,7 @@ function stubContext() {
       return function () {
         const args = Array.from(arguments);
         args.forEach((a) => { if (typeof a === 'number' && !isFinite(a)) bad.push(k + '(' + args.join(', ') + ')'); });
-        calls.push(k);
+        calls.push(k); log.push([k, args]);
       };
     },
     set(t, k, v) { t[k] = v; return true; }
@@ -126,9 +127,9 @@ suite('physics E08: debug drawing', () => {
   });
 
   const scenes = labScenes();
-  test('the lab defines the seven demo scenes', () => {
+  test('the lab defines the eight demo scenes', () => {
     const ids = scenes.map((s) => s.id).join(',');
-    ok(ids === 'stack,pyramid,pendulum,cradle,hoist,cantilever,ramp', ids);
+    ok(ids === 'stack,pyramid,pendulum,cradle,hoist,cantilever,tackle,ramp', ids);
   });
 
   const everything = { contacts: true, aabbs: true, forces: true, contactForces: true, weights: true, labels: true, dt: 1 / 60 };
@@ -182,6 +183,41 @@ suite('physics E08: debug drawing', () => {
     w.on('break', (e) => { if (!broke) broke = e; });
     for (let i = 0; i < 180 && !broke; i++) { sc.update(w); w.step(1 / 60); }
     ok(broke && broke.joint.label === 'weld 0', 'root weld did not break: ' + (broke && broke.joint.label));
+  });
+
+  test('winch over a sheave: rope wraps the sheave rim, tackle draws one fall per part', () => {
+    ok(P.debugDrawsWinchVia === true, 'flag for the build yard not set');
+    const def = scenes.find((s) => s.id === 'tackle'), sc = def.build(P), w = sc.world;
+    w.run(1);
+    const cam = new P.Camera({ width: 960, height: 600 }).fit(sc.view, 40);
+    const ctx = stubContext();
+    P.debugDraw(ctx, w, cam, { grid: false, shapes: false, stress: true });
+    const near2 = (a, b) => Math.abs(a - b) < 1e-6;
+    w.joints.forEach((j) => {
+      // winch.js doesn't store a sheave radius, so the renderer uses its 0.15 m default (at least 6 px)
+      const S = cam.worldToScreen(j.via.body.worldPoint(j.via.local)), r = Math.max(0.15, 6 / cam.zoom) * cam.zoom;
+      // the wheel is a full circle; the rope wrap is a partial arc on the same rim
+      const arcs = ctx.log.filter(([k, a]) => k === 'arc' && near2(a[0], S.x) && near2(a[1], S.y) && near2(a[2], r));
+      const wrap = arcs.filter(([, a]) => !(near2(a[3], 0) && near2(a[4], 2 * Math.PI)));
+      ok(arcs.length >= 2 && wrap.length === 1, j.label + ': ' + arcs.length + ' arcs on the sheave rim, ' + wrap.length + ' wraps');
+      // the wrap turns clockwise on screen (up from the drum, over, down to the hook)
+      ok(wrap[0][1][5] === false, j.label + ' wraps the wrong way');
+    });
+    // 4-part tackle: the ×4 label, and 4 falls drawn as separate segments after the wrap
+    ok(ctx.log.some(([k, a]) => k === 'fillText' && a[0] === '×4') || ctx.log.some(([k, a]) => k === 'fillText' && String(a[0]).indexOf('×4') >= 0), 'no ×4 label');
+    const tackle = w.joints.find((j) => j.parts === 4);
+    const S = cam.worldToScreen(tackle.via.body.worldPoint(tackle.via.local)), rt = Math.max(0.15, 6 / cam.zoom) * cam.zoom;
+    const tops = ctx.log.filter(([k, a]) => k === 'moveTo' && Math.abs(Math.hypot(a[0] - S.x, a[1] - S.y)) <= rt + 1e-6 && a[1] >= S.y - rt - 1e-6);
+    ok(tops.length >= 4, 'expected 4 falls leaving the sheave block, saw ' + tops.length);
+  });
+
+  test('tackle scene: the 4-part line carries a quarter of its 800 kg load, like the single line under 200 kg (within 5%)', () => {
+    const def = scenes.find((s) => s.id === 'tackle'), sc = def.build(P), w = sc.world;
+    for (let i = 0; i < 600; i++) { sc.update(w); w.step(1 / 60); }
+    const [single, tackle] = w.joints;
+    // both hooks parked and still: T = W / parts = 200·9.81 = 800·9.81/4 = 1962 N
+    near(single.lineTension(), 200 * 9.81, 0.05);
+    near(tackle.lineTension(), 800 * 9.81 / 4, 0.05);
   });
 
   test('debugdraw.js loads headless: no window or document used at load time', () => {
