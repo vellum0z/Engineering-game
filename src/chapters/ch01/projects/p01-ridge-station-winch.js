@@ -1,23 +1,29 @@
 /*
- * P1 · Ridge Station Winch (manual project).
+ * P1 · Ridge Station Winch (manual project, played in the build yard).
  *
  * Weight and mass at a real site: W = m g with the local g instead of the
  * standard value, statics as the a = 0 case (a hovering load), Newton's
- * second law for the drift when the cable tension is off, and the SI / FPS
+ * second law for the drift when the line tension is off, and the SI / FPS
  * conversions for force and mass. Course sections 1.2–1.4.
  *
- * The beyond-the-book factor is the site gravity: the relay station sits at
- * 2400 m on a ridge at 12° latitude, where g is about 0.36 % below 9.81.
- * That is small, but the winch governor can only absorb 0.2 % of error, so
- * a governor set with 9.81 lets the generator creep up into the head block.
+ * The relay station sits at 2400 m on a ridge at 12° latitude, where g is
+ * about 0.36 % below 9.81. The winch governor can only trim away 0.2 % of
+ * error, so a setting worked out with 9.81 sends the generator up into the
+ * head block. The yard itself is on the ridge: world gravity is the site g,
+ * so any test rig the player builds feels it too.
+ *
+ * Parts that only this job uses are defined at the bottom of this file
+ * (library: false): the gantry, the generator, the station governor, the
+ * US-made backup winch, the depot checkweigher and the spare-part crates.
  */
 (function (SE) {
   'use strict';
+  var Y = SE.yard, G = Y.goals, D = Y.dial;
   var GR = SE.physics.gravity;
 
   var LAT = 12, ALT = 2400;           // relay station site
   var M = 1850;                       // generator, kg (nameplate)
-  var LBF = 4.448, SLUG = 14.59, FT = 0.3048;
+  var LBF = 4.448, SLUG = 14.59;
   var G_STD = 9.81;                   // standard g used on spec sheets
 
   // Site gravity. Hand-check:
@@ -29,364 +35,496 @@
   var G_SITE = GR.gSite(LAT, ALT);
 
   // True weight at the site. 1850 × 9.775153 = 18 084.0 N → 18.08 kN (4 s.f.)
-  var W = M * G_SITE;
-
-  // Same setting for the US-made winch. 18 084.0 / 4.448 = 4065.65 lb → 4066 lb
-  var W_LB = W / LBF;
-
-  // Mass in slugs. 1850 / 14.59 = 126.80 slug → 127 slug. Location never enters.
-  var M_SLUG = M / SLUG;
-
-  // Spare parts for the station's spec sheet, which lists weights at
-  // standard gravity (9.81 m/s²) so a tag reads the same wherever it ships.
+  // Same in lb: 18 084.0 / 4.448 = 4065.65 lb → 4066 lb
+  // Mass in slugs: 1850 / 14.59 = 126.80 slug. Location never enters.
+  //
+  // Spare parts for the station spec sheet, at standard gravity:
   //   timing crystal  0.0742 kg × 9.81 = 0.727 902 N → 728 mN   (site g: 725 mN)
   //   rotor bearing   63.8 kg  × 9.81 = 625.878 N   → 626 N    (site g: 624 N)
   //   transformer     8450 kg  × 9.81 = 82 894.5 N  → 82.9 kN  (site g: 82.6 kN)
-  // The masses were picked so that the site-g figure differs from the
-  // standard one in the third digit, which the checker can tell apart.
-  var PARTS = {
-    crystal: { m: 0.0742, label: 'CRYSTAL', name: 'timing crystal' },
-    bearing: { m: 63.8, label: 'BEARING', name: 'rotor bearing' },
-    transformer: { m: 8450, label: 'XFMR', name: 'spare transformer' }
-  };
 
-  // ------------------------------------------------------------------ hover physics
-
-  // The precision governor holds the dialled tension, and a small servo trim
-  // corrects the last little bit of error from a load cell. The trim has
-  // authority for ±0.2 % of the load; past that it saturates and whatever
-  // error is left over accelerates the load (Eq. 1-1: a = ΣF / m).
+  // Governor model. The governor holds the dialled line tension; a servo trim
+  // driven by a position sensor corrects the last bit of error, but only up
+  // to ±0.2 % of the dialled tension. Past that, whatever is left over
+  // accelerates the load (ΣF = m a).
   var TRIM = 0.002;
   var BOLT_TIME = 45;                 // s the generator must hold while the pad crew bolts it
-  var HEADROOM = 4.2;                 // m of travel above the hover point before the head block
-  var FLOOR = 3.0;                    // m below the hover point to the pad
+  var TOL = 0.025;                    // m: the base plate holes line up within ±25 mm
+  var RATING = 30000;                 // N: the gantry line's breaking load
 
-  function governed(T, Wtrue) {
-    var err = T - Wtrue, lim = TRIM * Wtrue;
-    if (Math.abs(err) <= lim) return { Teff: Wtrue, trimUsed: lim ? Math.abs(err) / lim : 0, residual: 0, err: err };
-    var s = err > 0 ? 1 : -1;
-    return { Teff: T - s * lim, trimUsed: 1, residual: err - s * lim, err: err };
+  var HOVER_Y = 1.9;                  // generator centre at the hover point
+  var GEN = { w: 1.6, h: 1.2 };
+  var PAD_TOP = 0.3;
+  var HEAD_Y = HOVER_Y + GEN.h / 2 + 4.2;   // underside of the head block: 4.2 m of headroom
+
+  var f3 = function (x) { return D.fmtNum(x, 3); };
+  var f2 = function (x) { return D.fmtNum(x, 2); };
+
+  /* ------------------------------------------------------------ the rigs */
+
+  // The gantry and generator on the pad, plus a test hook and a calibration
+  // crate off to the side for anyone who wants to weigh something first.
+  function ridge(winch) {
+    return { parts: [
+      { id: 'pad', type: 'block', x: 0, y: PAD_TOP / 2, dials: { width: '3 m', height: PAD_TOP + ' m' }, locked: true, label: 'pad' },
+      { id: 'gantry', type: 'p01-gantry', x: 0, y: HEAD_Y, locked: true, label: 'gantry' },
+      { id: 'gen', type: 'p01-generator', x: 0, y: HOVER_Y, locked: true, label: 'generator' },
+      winch,
+      { id: 'testhook', type: 'hook', x: -8, y: 5, locked: true, label: 'test hook' },
+      { id: 'calib', type: 'crate', x: -8, y: 0.5, dials: { mass: '100.0 kg' }, fixed: ['mass'], label: 'calibration mass' }
+    ] };
+  }
+  var LINE = { a: { part: 'gantry', anchor: 'head' }, b: { part: 'gen', anchor: 'top' } };
+  var STATION = ridge(Object.assign({ id: 'gov', type: 'p01-governor', locked: true, open: ['tension'], dials: { tension: '' }, label: 'station governor' }, LINE));
+  var BACKUP_LB = ridge(Object.assign({ id: 'gov', type: 'p01-backup', locked: true, open: ['tension'], dials: { mode: 'tension' }, label: 'backup winch' }, LINE));
+  var BACKUP_SLUG = ridge(Object.assign({ id: 'gov', type: 'p01-backup', locked: true, open: ['mass'], dials: { mode: 'mass' }, label: 'backup winch' }, LINE));
+
+  var SPARES = [
+    { id: 'crystal', name: 'timing crystal', mass: '74.2 g', x: -6, w: 0.4, h: 0.3 },
+    { id: 'bearing', name: 'rotor bearing', mass: '63.8 kg', x: -1, w: 0.8, h: 0.8 },
+    { id: 'xfmr', name: 'spare transformer', mass: '8.45 Mg', x: 5, w: 2.0, h: 1.6 }
+  ];
+  var DEPOT = { parts: [] };
+  SPARES.forEach(function (sp) {
+    DEPOT.parts.push({ id: 'cw-' + sp.id, type: 'p01-checkweigher', x: sp.x, y: 0.2, locked: true, label: sp.name + ' scale' });
+    DEPOT.parts.push({ id: sp.id, type: 'p01-spare', x: sp.x, y: 0.4 + sp.h / 2, dials: { mass: sp.mass, tag: '', w: sp.w + ' m', h: sp.h + ' m' }, locked: true, open: ['tag'], label: sp.name });
+  });
+
+  /* ------------------------------------------------------------ the goal */
+
+  // Hold the generator inside the bolt-up window for the whole bolt-up,
+  // hanging on nothing but the winch line.
+  function touching(s, id) {
+    var body = s.body(id), hit = null;
+    s.world.contacts.forEach(function (ct) {
+      if (hit || !ct.points || !ct.points.length) return;
+      var other = ct.fa.body === body ? ct.fb.body : ct.fb.body === body ? ct.fa.body : null;
+      if (other) hit = (other.userData && other.userData.part) || 'something';
+    });
+    return hit;
+  }
+  var hoverGoal = G.all(
+    G.never(function (s) {
+      var b = s.breaks[0];
+      return b ? 'The winch line parted: it was dialled to ' + D.format(b.force, D.autoUnit(b.force, 'force'), 3, 'force') + ' and it breaks at 30 kN. The generator went into the pad.' : null;
+    }),
+    G.never(function (s) {
+      var extra = s.built.design.parts.filter(function (p) { return p.id !== 'gov' && ((p.a && p.a.part === 'gen') || (p.b && p.b.part === 'gen')); })[0];
+      return extra ? 'The ' + (extra.label || Y.partDef(extra.type).name.toLowerCase()) + ' is fixed to the generator. The pad crew needs it hanging free on the winch line alone, or the base plate won\'t seat.' : null;
+    }),
+    G.never(function (s) {
+      var hit = touching(s, 'gen');
+      if (!hit) return null;
+      if (hit === 'gantry') return 'The generator climbed into the head block.';
+      if (hit === 'pad' || hit === 'ground') return 'The generator came down on the pad before the crew had a bolt in.';
+      return 'Something is touching the generator.';
+    }),
+    G.never(function (s) {
+      var p = s.pos('gen'); if (!p) return null;
+      var dy = p.y - HOVER_Y;
+      s.peak('drift', dy);
+      if (Math.abs(dy) <= TOL) return null;
+      return 'The generator drifted ' + Math.round(Math.abs(dy) * 1000) + ' mm ' + (dy > 0 ? 'up' : 'down') + ' after ' + f2(s.t) + ' s. The bolt holes only line up within ±' + TOL * 1000 + ' mm.';
+    }),
+    G.after(BOLT_TIME)
+  );
+  var hoverMargin = function (s) { return Math.round(Math.min(20, s.peakOf('drift') * 1000)); };
+
+  // The drift a failed hover shows, read back through Newton's second law.
+  function driftNote(ctx) {
+    var r = ctx.result, st = r && r.state;
+    if (!st || !st.pos('gen') || !(st.t > 0.2)) return '';
+    var dy = st.pos('gen').y - HOVER_Y, v = st.vel('gen').y, t = st.t;
+    var a = 2 * dy / (t * t);
+    if (Math.abs(a) < 1e-5) return '';
+    var gov = st.part('gov'), trim = gov && gov.trimLimit;
+    var msg = 'The generator started at rest and moved ' + Math.round(Math.abs(dy) * 1000) + ' mm in ' + f2(t) + ' s: **a ≈ 2y/t² = ' + f2(Math.abs(a)) + ' m/s² ' + (a > 0 ? 'up' : 'down') + '**.';
+    msg += ' By ΣF = m a, about **' + f2(M * Math.abs(a)) + ' N** was left unbalanced';
+    if (trim) msg += ' after the trim gave all ' + f2(trim) + ' N it has';
+    msg += '. The dial is off by the sum of those two. Over the ' + BOLT_TIME + ' s bolt-up that would be ½·a·t² = ' + f2(0.5 * Math.abs(a) * BOLT_TIME * BOLT_TIME) + ' m.';
+    return msg;
+  }
+  function trimNote(ctx) {
+    var gov = ctx.result && ctx.result.state.part('gov');
+    if (!gov || !gov.trimLimit) return '';
+    var used = Math.abs(gov.trimUsed || 0) / gov.trimLimit;
+    return 'The trim loop was using **' + Math.round(used * 100) + ' %** of its authority at the end. ' + (used < 0.3 ? 'That is just the last digit of the dial: a clean setting.' : 'It held, but with that much trim in use a gust on the cable will saturate it. Check where your g came from.');
   }
 
-  // Predicted drift over the bolt-up window from the leftover force.
-  function boltDrift(residual, m) {
-    var a = residual / m;
-    return { a: a, d: 0.5 * a * BOLT_TIME * BOLT_TIME };
+  function offText(off) {
+    if (Math.abs(off) < 0.5) return f2(Math.abs(off) * 100) + ' % ' + (off < 0 ? 'light' : 'heavy');
+    var r = off + 1;
+    return r > 1 ? 'about ' + D.fmtNum(r, 2) + ' times too heavy' : 'about ' + D.fmtNum(1 / r, 2) + ' times too light';
   }
 
-  // The hoist scene ramps cable tension up from zero over its first 0.3 s, as
-  // for a lift off the ground. In a hover the governor is already holding
-  // the load when the test starts, so start the clock past the ramp;
-  // otherwise the load sags for 0.3 s and falls whatever the setting.
-  function hold(s, T, dur) {
-    var pr = s.run(T, { duration: dur });
-    s.time = 0.3;
-    return pr;
-  }
-
-  function fmtN(N) { return SE.sceneUtil.fmtForce(N, 'SI'); }
-  function fmtLb(N) { return SE.sceneUtil.fmtForce(N, 'FPS'); }
-  function pct(x) { return SE.sigfig.roundSig(x * 100, 2).text + ' %'; }
-  function sig(x, n) { return SE.sigfig.roundSig(x, n).text; }
-
-  // Run the hover on the ridge hoist with tension T (N) and describe it.
-  function hoverTest(ctx, T, units, label) {
-    var g = governed(T, W);
-    var s = ctx.setScene('hoist', { mass: M, g: G_SITE, label: label || 'GENERATOR', mode: 'hover', hookHeight: 3, height: 9, rating: 30000, units: units || 'SI', hideKey: true });
-    var show = units === 'FPS' ? fmtLb : fmtN;
-    return hold(s, g.Teff, 8).then(function (r) {
-      if (r.outcome === 'snapped') return 'The cable is rated 30 kN. At ' + show(T) + ' it parted before the governor even settled, and the generator went into the pad.';
-      if (r.outcome === 'held') {
-        if (g.trimUsed < 0.25) return 'Held dead still for the full bolt-up. The trim loop used **' + pct(g.trimUsed) + '** of its authority, which is just the last digit of the dial. The pad crew torqued every bolt without touching the load.';
-        return 'It held, but only because the trim loop is soaking up ' + show(Math.abs(g.err)) + ', **' + pct(g.trimUsed) + '** of everything it has. One gust on the cable and it saturates. The dial figure itself is off, so it fails the sign-off.';
+  // Every crate stays on its scale through the check, and nothing is rejected.
+  var CHECK_T = 2;
+  var depotGoal = G.all(
+    G.never(function (s) {
+      for (var i = 0; i < SPARES.length; i++) {
+        var w = s.part('cw-' + SPARES[i].id);
+        if (w && w.verdict && w.verdict.empty) return 'Nothing was standing on the ' + SPARES[i].name + ' scale at the check.';
+        if (w && w.verdict && !w.verdict.ok) return 'The depot checkweigher **rejected the ' + SPARES[i].name + '**: its tag is ' + offText(w.verdict.off) + ' against the scale. The line allows 0.15 %.';
       }
-      var dr = boltDrift(g.residual, M);
-      var dir = dr.a > 0 ? 'up' : 'down';
-      var lim = dr.a > 0 ? HEADROOM : FLOOR;
-      var watched = r.detail && r.detail.y != null ? Math.abs(r.detail.y - 3) : null;
-      var msg = 'The governor set ' + show(T) + ' against a true weight of ' + show(W) + '. The trim loop saturated and the leftover ' + show(Math.abs(g.residual)) + ' gave the load **a = ' + sig(Math.abs(dr.a), 2) + ' m/s² ' + dir + '**.';
-      if (r.outcome === 'slammed') return msg + ' It climbed into the head block in seconds.';
-      if (r.outcome === 'dropped') return msg + ' It came down on the pad before the crew had a bolt in.';
-      msg += watched != null ? ' In ' + 8 + ' s on the rig it crept ' + sig(watched * 100, 2) + ' cm.' : '';
-      msg += ' Over the ' + BOLT_TIME + ' s bolt-up that is ½·a·t² = **' + sig(Math.abs(dr.d), 2) + ' m**';
-      msg += Math.abs(dr.d) > lim ? (dr.a > 0 ? ', and there is only ' + HEADROOM + ' m to the head block.' : ', and the pad is only ' + FLOOR + ' m below.') : ', far too much to line up bolt holes.';
-      return msg;
-    });
-  }
+      return null;
+    }),
+    G.after(CHECK_T + 1)
+  );
 
-  // Weigh a part on the depot's standard-gravity reference scale.
-  function tagTest(ctx, part, a) {
-    var Wstd = part.m * G_STD;
-    var s = ctx.setScene('scales', { mode: 'compare', location: 'earth', mass: part.m, k: 1.6 * Wstd, capacity: 2 * Wstd, label: part.label });
-    return s.run({ mass: part.m, location: 'earth' }).then(function (r) {
-      var read = r.detail.reading;
-      if (a.si == null) return 'The reference scale (standard g) reads **' + fmtN(read) + '**. Nothing usable on the tag to compare.';
-      var off = a.si / read - 1;
-      if (Math.abs(off) < 0.0015) return 'The depot reference scale, calibrated at standard g, reads **' + fmtN(read) + '**. Your tag agrees. Any depot on the line will see the same number.';
-      var site = part.m * G_SITE;
-      var msg = 'The reference scale (standard g) reads **' + fmtN(read) + '**; your tag says ' + fmtN(a.si) + ', ' + pct(Math.abs(off)) + (off < 0 ? ' light.' : ' heavy.');
-      if (Math.abs(a.si / site - 1) < 0.002) msg += ' That is what it weighs *up on the ridge*. The spec sheet is for the whole line, so it uses standard g.';
-      return msg;
-    });
-  }
-
-  // Ratio window helper for checker mistakes.
-  function between(lo, hi) { return function (r) { return r > lo && r < hi; }; }
+  /* ------------------------------------------------------------ project */
 
   SE.content.registerProject('ch01', {
     id: 'P1', order: 1, title: 'Ridge Station Winch', subtitle: 'Weight is a local number',
     brief: [
-      'The relay station on Cinder Ridge keeps our radio link to the coast caravans. Its generator died last winter. We have a rebuilt one, **1850 kg** on the nameplate, and a gantry winch up there to set it on the new pad.',
-      'The pad crew needs the generator to **hover**, perfectly still, a metre or so above the bolts while they line up the base plate and torque it down. That takes about 45 seconds. The winch has a precision governor that holds whatever cable tension you dial in. Dial the wrong number and the generator walks up or down on its own.',
-      'I also need the backup figures for the old US-made winch, the generator\'s mass for that winch\'s controller, and three spare-part weights for the station\'s spec sheet. Work it by hand. The converter is down the mountain with Hask.'
+      'The relay station on Cinder Ridge keeps our radio link to the coast caravans. Its generator died last winter. We have a rebuilt one, **1850 kg** on the nameplate, hanging on the gantry winch over the new pad.',
+      'The pad crew needs the generator to **hover**, dead still, a metre above the bolts while they line up the base plate and torque it down. That takes **45 seconds**. The winch has a precision governor that holds whatever line tension you dial in. Dial the wrong number and the generator walks up or down on its own.',
+      'After that: the same hover on the old US-made backup winch, which thinks in pounds and slugs, and the weight tags for three spare parts going down to the depot. The converter is down the mountain with Hask, so work it by hand.',
+      'This yard is up on the ridge with the generator, so anything you hang here feels the ridge\'s gravity. There is a test hook and a 100 kg calibration mass by the shed if you want to check a number before you trust it.'
     ].join('\n\n'),
     conditions: [
       'Site: **Cinder Ridge relay station**, latitude **12° N**, elevation **2400 m** above sea level.',
-      'The governor dial takes **4 significant figures**. Its servo trim can only absorb **±0.2 %** of the load; beyond that the load accelerates.',
-      'Use the international gravity formula for latitude, with the free-air drop of **3.086(10⁻⁶) m/s² per metre** of elevation.',
-      'The backup winch is US-made and reads in **pounds**. Its controller wants the load\'s mass in **slugs**.',
-      'Station spec sheets list part weights at **standard gravity (9.81 m/s²)**, so a tag reads the same at every depot on the line.',
-      'Conversion factors: 1 lb = 4.448 N, 1 slug = 14.59 kg, 1 ft = 0.3048 m. Report 3 s.f. unless the hardware asks for more.'
+      'Gravity at sea level, latitude φ: **g = 9.780327(1 + 0.0053024 sin²φ − 0.0000058 sin²2φ) m/s²**. Take off **3.086(10⁻⁶) m/s² per metre** of elevation.',
+      'The governor dial shows **4 significant figures**. Its trim can absorb **±0.2 %** of the dialled tension; beyond that the load accelerates.',
+      'The bolt holes line up within **±25 mm**. The gantry line breaks at **30 kN**.',
+      'The backup winch is US-made: its tension dial reads **lb**, and in mass mode its controller wants the load in **slug** and multiplies by the g its own gravimeter measures.',
+      'Spec-sheet weights use **standard gravity (9.81 m/s²)** so a tag reads the same at every depot. The depot checkweighers reject a tag more than **0.15 %** off.',
+      'Conversion factors: 1 lb = 4.448 N, 1 slug = 14.59 kg.'
     ],
-    scene: { type: 'hoist', params: { mass: 500, g: G_STD, label: 'TEST 500 kg', mode: 'hover', hookHeight: 3, height: 9, rating: 30000 } },
-    controls: [],
-    rigText: 'The depot calibration hoist: a **500 kg** test mass on the same model of governor, here at Rustline where the governors are set with standard g. Try the presets to see how much error the trim loop tolerates.',
-    rigActions: [
+    yard: {
+      site: { g: G_SITE, floor: 'concrete' },
+      camera: { fit: { lo: { x: -10, y: -0.5 }, hi: { x: 5, y: 8.5 } } },
+      design: STATION
+    },
+    jobs: [
       {
-        label: 'Hover the test mass at m·g = 500 × 9.81',
-        run: function (ctx) {
-          var s = ctx.setScene('hoist', { mass: 500, g: G_STD, label: 'TEST 500 kg', mode: 'hover', hookHeight: 3, height: 9, rating: 30000 });
-          return hold(s, 500 * G_STD, 6).then(function (r) { return 'Outcome: **' + r.outcome + '**. Tension equals weight, so ΣF = 0 and a = 0. It just hangs there.'; });
-        }
+        id: 'P1.hover', label: '**Hover the generator** on the station governor for the 45 s bolt-up',
+        design: STATION,
+        goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
+        hints: [
+          'Hovering means the generator\'s acceleration is zero. What does Newton\'s second law say about the forces on it then? And which g is acting on it up here?',
+          'With a = 0, ΣF = T − W = 0, so the line tension equals the weight **at this site**: T = m g_site. Get g_site from the latitude formula, then take off the free-air drop for 2400 m. You can check it by hanging the calibration mass on the test hook with a cable.',
+          'sin²12° = 0.04323 and sin²24° = 0.1654, so sea-level g is 9.780327 × 1.000228 = 9.78256 m/s². The drop is 3.086(10⁻⁶) × 2400 = 0.00741, so g_site = 9.77515 m/s². T = 1850 × 9.77515 = 18 084 N: dial **18.08 kN**.'
+        ],
+        onFail: driftNote,
+        success: function (ctx) { return 'Bolted down without anyone touching the load. ' + trimNote(ctx) + '\n\nThat is statics: Newton\'s second law with **a = 0**, so T = W, and W = m g with *this* site\'s g.'; }
       },
       {
-        label: 'Same, but set 0.15 % high',
-        run: function (ctx) {
-          var Wt = 500 * G_STD, gv = governed(Wt * 1.0015, Wt);
-          var s = ctx.setScene('hoist', { mass: 500, g: G_STD, label: 'TEST 500 kg', mode: 'hover', hookHeight: 3, height: 9, rating: 30000 });
-          return hold(s, gv.Teff, 6).then(function (r) { return 'Outcome: **' + r.outcome + '**. The trim loop took up the extra ' + fmtN(Wt * 0.0015) + ' (' + pct(gv.trimUsed) + ' of its range).'; });
-        }
+        id: 'P1.lb', label: 'Same hover on the **US-made backup winch**, dialled in lb',
+        design: BACKUP_LB,
+        goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
+        hints: [
+          'The generator weighs exactly what it weighed a moment ago. Only the unit on the dial changes.',
+          'Convert the site weight with 1 lb = 4.448 N. Start from the unrounded weight, not your 4-figure dial setting, and give the dial 4 figures again.',
+          '18 084.0 N × (1 lb / 4.448 N) = 4065.7 lb: dial **4066 lb**.'
+        ],
+        onFail: driftNote,
+        success: function (ctx) { return 'Held on the backup winch too. ' + trimNote(ctx) + ' A force is a force: 18.08 kN and 4066 lb are the same pull on the same line.'; }
       },
       {
-        label: 'Same, but set 0.4 % low',
-        run: function (ctx) {
-          var Wt = 500 * G_STD, gv = governed(Wt * 0.996, Wt);
-          var s = ctx.setScene('hoist', { mass: 500, g: G_STD, label: 'TEST 500 kg', mode: 'hover', hookHeight: 3, height: 9, rating: 30000 });
-          return hold(s, gv.Teff, 6).then(function (r) {
-            var dr = boltDrift(gv.residual, 500);
-            return 'Outcome: **' + r.outcome + '**. The trim saturated; the leftover ' + fmtN(Math.abs(gv.residual)) + ' pulls it down at ' + sig(Math.abs(dr.a), 2) + ' m/s². Over 45 s that is ' + sig(Math.abs(dr.d), 2) + ' m.';
-          });
-        }
+        id: 'P1.slug', label: 'Backup winch in **mass mode**: give its controller the generator\'s mass in slugs',
+        design: BACKUP_SLUG,
+        goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
+        hints: [
+          'Does the generator have less *stuff* in it on the ridge than at the depot? The controller measures g itself.',
+          'Mass is the same everywhere, so you never need g for this figure. Convert the nameplate mass with 1 slug = 14.59 kg. Don\'t divide a weight by 32.2 ft/s²: that sneaks standard g back in.',
+          '1850 kg × (1 slug / 14.59 kg) = 126.80 slug: dial **126.8 slug**.'
+        ],
+        onFail: driftNote,
+        success: function (ctx) { return 'Held. The controller multiplied your mass by the ridge\'s own g and got the right pull. ' + trimNote(ctx) + ' Mass never changes with place, which is why the nameplate is in kg and not in newtons.'; }
       },
       {
-        label: 'Look at the globe from the standard location (45°, sea level)',
-        run: function (ctx) {
-          ctx.setScene('gravity', { mode: 'site', latitude: 45, siteAltitude: 0 });
-          return 'The standard location is sea level at 45° latitude. Note which way the spin and the bulge push g as you head toward the equator.';
-        }
+        id: 'P1.tags', label: '**Tag the spare parts** for the depot spec sheet: the timing crystal, the rotor bearing and the spare transformer',
+        design: DEPOT,
+        yard: { site: { g: G_STD, floor: 'concrete' }, camera: { fit: { lo: { x: -8, y: -0.5 }, hi: { x: 7, y: 3 } } } },
+        goal: depotGoal, timeout: CHECK_T + 1.5,
+        hints: [
+          'Read the site conditions again: which g does the spec sheet use? These crates are being checked at the depot, not on the ridge.',
+          'Spec-sheet weight: W = m g with g = 9.81 m/s², mass in kilograms. Watch the prefixes: g is grams and Mg is a megagram (1000 kg). Give each tag 3 figures and a prefix that keeps the number between 0.1 and 1000.',
+          '0.0742 × 9.81 = 0.7279 N → **728 mN**. 63.8 × 9.81 = 625.9 N → **626 N**. 8450 × 9.81 = 82 894.5 N → **82.9 kN**.'
+        ],
+        success: 'All three passed the depot scale. Note that the scale down there doesn\'t care about the ridge: a spec-sheet weight uses one standard g, so the tag means the same at every depot on the line.'
       }
     ],
-    lockedTools: ['converter'],
-    deliverables: [
-      {
-        id: 'P1.g',
-        label: '**Local g** at the relay station, to 4 s.f.',
-        placeholder: 'e.g. 9.812 m/s^2',
-        spec: {
-          value: G_SITE, unit: 'm/s^2', sf: 4, form: 'any', tol: 0.0002,
-          mistakes: [
-            { test: between(1.0028, 1.0040), kind: 'concept', msg: 'That is standard gravity, the value at sea level and 45°. The ridge is neither.' },
-            { test: between(1.0005, 1.0011), kind: 'concept', msg: 'Right latitude, but at sea level. The station is 2400 m up: subtract the free-air drop.' },
-            { test: between(1.0012, 1.0019), kind: 'sign', msg: 'The elevation correction went the wrong way. Higher up you are farther from the centre, so g is smaller.' }
-          ]
-        },
-        answer: '9.775 m/s^2',   // 9.775153 → 9.775
-        wrong: [
-          { input: '9.810 m/s^2', kind: 'concept' },
-          { input: '9.783 m/s^2', kind: 'concept' },
-          { input: '9.790 m/s^2', kind: 'sign' },
-          { input: '9.78 m/s^2', kind: 'rounding' }
-        ],
-        hints: [
-          'Gravity at a site depends on two things the standard value assumes away: how far you are from the equator, and how high you are. The conditions give you both.',
-          'Sea-level g at latitude φ: $g = 9.780327(1 + 0.0053024\\sin^2\\phi - 0.0000058\\sin^2 2\\phi)$. Then take off $3.086(10^{-6})\\u{ m/s^2}$ for every metre of elevation. Make sure your calculator is in degrees.',
-          '$\\sin^2 12° = 0.04323$ and $\\sin^2 24° = 0.1654$, so sea-level g is $9.780327 \\times 1.000228 = 9.78256\\u{ m/s^2}$. The free-air drop is $3.086(10^{-6}) \\times 2400 = 0.00741$. Subtract.'
-        ],
-        consequence: function (ctx, a) {
-          var s = ctx.setScene('gravity', { mode: 'site', latitude: LAT, siteAltitude: ALT });
-          return s.run().then(function (r) {
-            var gs = r.detail.gSite;
-            if (a.si == null) return 'The station gravimeter reads **' + gs.toFixed(5) + ' m/s²**.';
-            var gv = governed(M * a.si, W), dr = boltDrift(gv.residual, M);
-            var msg = 'The station gravimeter reads **' + gs.toFixed(5) + ' m/s²**; you said ' + sig(a.si, 4) + ' (' + pct(Math.abs(a.si / gs - 1)) + ' off). ';
-            msg += gv.residual === 0 ? 'A governor set from your g stays inside the trim window.' : 'A governor set from your g would leave ' + fmtN(Math.abs(gv.residual)) + ' unbalanced, a drift of ' + sig(Math.abs(dr.d), 2) + ' m over the bolt-up.';
-            return msg;
-          });
-        }
-      },
-      {
-        id: 'P1.hover',
-        label: '**Governor setting** to hover the 1850 kg generator at the station (4 s.f., SI)',
-        placeholder: 'e.g. 12.34 kN',
-        spec: {
-          value: W, unit: 'N', sf: 4, form: 'si', tol: 0.0004,
-          mistakes: [
-            { test: between(1.0028, 1.0040), kind: 'concept', msg: 'That is the generator\'s weight at standard gravity. Up on the ridge it weighs less, by more than the trim can absorb.' },
-            { test: between(1.0005, 1.0011), kind: 'concept', msg: 'That is the weight at sea level. The elevation correction is missing.' }
-          ]
-        },
-        answer: '18.08 kN',      // 1850 × 9.775153 = 18 084.0 N → 18.08 kN
-        wrong: [
-          { input: '18.15 kN', kind: 'concept' },
-          { input: '18.10 kN', kind: 'concept' },
-          { input: '1.850 Mg', kind: 'concept' },
-          { input: '18084 N', kind: 'sigfig' },
-          { input: '18080 N', kind: 'sigfig' }
-        ],
-        hints: [
-          'Hovering means the generator\'s acceleration is zero. What does Newton\'s second law say about the forces on it then?',
-          'With $a = 0$, $\\Sigma F = T - W = 0$, so the tension equals the weight at *this* site: $T = mg_{\\t{site}}$. Carry full precision for g.',
-          '$T = 1850 \\times 9.77515 = 18\\,084\\u{ N}$. Four significant figures, with a prefix so the number sits between 0.1 and 1000.'
-        ],
-        consequence: function (ctx, a) {
-          if (a.si == null || a.spec.unit !== 'N' || !a.result.parts.units) return Promise.resolve('The governor takes a force. A mass on the dial means nothing to it; the winch would not even engage.');
-          return hoverTest(ctx, a.si, 'SI');
-        }
-      },
-      {
-        id: 'P1.lb',
-        label: 'The same hover setting for the **US-made backup winch**, in lb (4 s.f.)',
-        placeholder: 'e.g. 1234 lb',
-        spec: {
-          value: W_LB * LBF, unit: 'N', sf: 4, form: 'any', expressIn: 'lb', tol: 0.0004,
-          mistakes: [
-            { test: between(1.0035, 1.0050), kind: 'concept', msg: 'That is mass in slugs times 32.2 ft/s²: the weight at standard gravity, not on the ridge.' },
-            { test: between(1.0028, 1.0035), kind: 'concept', msg: 'That is the standard-gravity weight converted to pounds. Convert the ridge weight instead.' }
-          ]
-        },
-        answer: '4066 lb',       // 18 084.0 / 4.448 = 4065.65 → 4066 lb
-        wrong: [
-          { input: '4083 lb', kind: 'concept' },
-          { input: '80440 lb', kind: 'conversion' },
-          { input: '4065 lb', kind: 'rounding' },
-          { input: '4.066 kip', kind: 'form' }
-        ],
-        hints: [
-          'The generator weighs exactly what it weighed a moment ago. Only the units change.',
-          'Convert the site weight with the force factor $1\\u{ lb} = 4.448\\u{ N}$. Start from the unrounded weight, not your 4-figure dial reading.',
-          '$18\\,084.0\\u{ N} \\times \\frac{1\\u{ lb}}{4.448\\u{ N}} = 4065.7\\u{ lb}$. Round to 4 s.f.'
-        ],
-        consequence: function (ctx, a) {
-          if (a.si == null || !a.result.parts.units) return Promise.resolve('The backup governor reads force in pounds. That figure is not a force.');
-          return hoverTest(ctx, a.si, 'FPS', 'GENERATOR (US winch)');
-        }
-      },
-      {
-        id: 'P1.slug',
-        label: 'The generator\'s **mass in slugs** for the backup winch controller',
-        placeholder: 'e.g. 123 slug',
-        spec: {
-          value: M_SLUG * SLUG, unit: 'kg', sf: 3, form: 'any', expressIn: 'slug', tol: 0.002,
-          mistakes: [
-            { test: between(0.990, 0.9975), kind: 'concept', msg: 'You divided the ridge weight by 32.2 ft/s². That mixes the site weight with standard g. Mass doesn\'t depend on location, so convert it directly.' }
-          ]
-        },
-        answer: '127 slug',      // 1850 / 14.59 = 126.80 → 127 slug
-        wrong: [
-          { input: '126 slug', kind: 'concept' },
-          { input: '27000 slug', kind: 'conversion' },
-          { input: '4066 lb', kind: 'concept' }
-        ],
-        hints: [
-          'Does the generator have less *stuff* in it on the ridge than at the depot?',
-          'Mass is the same everywhere, so you never need g here. Convert the nameplate mass with $1\\u{ slug} = 14.59\\u{ kg}$.',
-          '$1850\\u{ kg} \\times \\frac{1\\u{ slug}}{14.59\\u{ kg}} = 126.80\\u{ slug}$. Three significant figures.'
-        ],
-        consequence: function (ctx, a) {
-          var Wr = M * G_SITE;
-          var s = ctx.setScene('scales', { mode: 'compare', location: 'ridge', mass: M, standardMass: a.si && a.result.parts.units ? a.si : M, k: 1.6 * Wr, capacity: 2 * Wr, label: 'GENERATOR' });
-          return s.run({ mass: M, location: 'ridge' }).then(function (r) {
-            if (a.si == null || !a.result.parts.units) return 'The controller needs a mass. The spring scale on the ridge reads ' + fmtN(r.detail.reading) + ', which is a weight; the beam balance is the instrument that measures mass.';
-            var off = a.si / M - 1;
-            var msg = 'On the ridge\'s beam balance, the generator against ' + sig(a.si, 4) + ' kg of standard masses (your ' + sig(a.si / SLUG, 3) + ' slug): ';
-            msg += Math.abs(off) < 0.002 ? '**level**. The same pans would balance at the depot, on the Moon, anywhere: g acts on both sides and cancels.' : 'it tips, ' + pct(Math.abs(off)) + (off < 0 ? ' short' : ' over') + '. Mass doesn\'t change with location, so no g belongs in this figure.';
-            return msg;
-          });
-        }
-      },
-      {
-        id: 'P1.parts.crystal',
-        label: 'Spec-sheet weight of the **timing crystal** (74.2 g)',
-        placeholder: 'e.g. 123 mN',
-        spec: {
-          value: PARTS.crystal.m * G_STD, unit: 'N', sf: 3, form: 'si', tol: 0.0015,
-          mistakes: [{ test: between(0.993, 0.9985), kind: 'concept', msg: 'That is its weight on the ridge. Spec sheets use standard gravity.' }]
-        },
-        answer: '728 mN',        // 0.0742 × 9.81 = 0.727 902 N → 728 mN
-        wrong: [
-          { input: '725 mN', kind: 'concept' },
-          { input: '728 N', kind: 'prefix' },
-          { input: '74.2 g', kind: 'concept' }
-        ],
-        hints: [
-          'Read the site conditions again: which g does the spec sheet use?',
-          'Spec-sheet weight: $W = mg$ with $g = 9.81\\u{ m/s^2}$, mass in kilograms. Then choose a prefix that puts the number between 0.1 and 1000.',
-          '$74.2\\u{ g} = 0.0742\\u{ kg}$, so $W = 0.0742 \\times 9.81 = 0.7279\\u{ N}$.'
-        ],
-        consequence: function (ctx, a) { return tagTest(ctx, PARTS.crystal, a); }
-      },
-      {
-        id: 'P1.parts.bearing',
-        label: 'Spec-sheet weight of the **rotor bearing** (63.8 kg)',
-        placeholder: 'e.g. 123 N',
-        spec: {
-          value: PARTS.bearing.m * G_STD, unit: 'N', sf: 3, form: 'si', tol: 0.0015,
-          mistakes: [{ test: between(0.993, 0.9985), kind: 'concept', msg: 'That is its weight on the ridge. Spec sheets use standard gravity.' }]
-        },
-        answer: '626 N',         // 63.8 × 9.81 = 625.878 N → 626 N
-        wrong: [
-          { input: '624 N', kind: 'concept' },
-          { input: '63.8 kg', kind: 'concept' },
-          { input: '0.626 MN', kind: 'prefix' }
-        ],
-        hints: [
-          'Same spec sheet, same rule.',
-          '$W = mg$ with standard g. This one already sits in range without a prefix.',
-          '$W = 63.8 \\times 9.81 = 625.9\\u{ N}$.'
-        ],
-        consequence: function (ctx, a) { return tagTest(ctx, PARTS.bearing, a); }
-      },
-      {
-        id: 'P1.parts.transformer',
-        label: 'Spec-sheet weight of the **spare transformer** (8.45 Mg)',
-        placeholder: 'e.g. 12.3 kN',
-        spec: {
-          value: PARTS.transformer.m * G_STD, unit: 'N', sf: 3, form: 'si', tol: 0.0015,
-          mistakes: [{ test: between(0.993, 0.9985), kind: 'concept', msg: 'That is its weight on the ridge. Spec sheets use standard gravity.' }]
-        },
-        answer: '82.9 kN',       // 8450 × 9.81 = 82 894.5 N → 82.9 kN
-        wrong: [
-          { input: '82.6 kN', kind: 'concept' },
-          { input: '82.9 N', kind: 'prefix' },
-          { input: '82900 N', kind: 'sigfig' }
-        ],
-        hints: [
-          'Mg is a megagram, not milligrams. How many kilograms is that?',
-          '$1\\u{ Mg} = 10^{3}\\u{ kg}$. Work in base units, multiply by standard g, then pick one prefix for the answer.',
-          '$8.45\\u{ Mg} = 8450\\u{ kg}$, so $W = 8450 \\times 9.81 = 82\\,894.5\\u{ N}$.'
-        ],
-        consequence: function (ctx, a) { return tagTest(ctx, PARTS.transformer, a); }
-      }
-    ],
+    solutions: {
+      'P1.hover': [
+        { set: { gov: { tension: '18.08 kN' } } },
+        { pass: false, set: { gov: { tension: '18.15 kN' } } },     // 1850 × 9.81: climbs into the head block
+        { pass: false, set: { gov: { tension: '18.08 MN' } } },     // prefix slip: the line parts
+        { pass: false, set: { gov: { tension: '18.08 kN' } }, add: [{ type: 'cable', a: { part: 'testhook', anchor: 'eye' }, b: { part: 'gen', anchor: 'top' }, dials: { rating: '50 kN' } }] }
+      ],
+      'P1.lb': [
+        { set: { gov: { tension: '4066 lb' } } },
+        { pass: false, set: { gov: { tension: '4080 lb' } } },      // standard-g weight in lb
+        { pass: false, set: { gov: { tension: '18084 lb' } } },     // forgot to convert: snaps
+        { pass: false, set: { gov: { tension: '18.08 kN' } } }      // the dial only reads lb
+      ],
+      'P1.slug': [
+        { set: { gov: { mass: '126.8 slug' } } },
+        { pass: false, set: { gov: { mass: '126.3 slug' } } },      // site weight / 32.2 ft/s²
+        { pass: false, set: { gov: { mass: '1850 slug' } } },       // forgot to convert: snaps
+        { pass: false, set: { gov: { mass: '1850 kg' } } }          // the controller only reads slug
+      ],
+      'P1.tags': [
+        { set: { crystal: { tag: '728 mN' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 kN' } } },
+        { pass: false, set: { crystal: { tag: '725 mN' }, bearing: { tag: '624 N' }, xfmr: { tag: '82.6 kN' } } },   // ridge g
+        { pass: false, set: { crystal: { tag: '728 N' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 kN' } } },    // prefix slip
+        { pass: false, set: { crystal: { tag: '728 mN' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 N' } } }     // Mg read as a small mass
+      ]
+    },
     deeper: [
       '**Latitude.** g at sea level runs from about 9.780 m/s² at the equator to 9.832 m/s² at the poles. Part of that is rotation: a point on the equator rides a 40 000 km circle once a day, and some of gravity\'s pull goes into keeping it on that circle. The rest is shape: the spin has flattened the Earth, so the equator sits about 21 km farther from the centre.',
       '**Elevation.** Climbing h metres moves you farther from the centre, and by $g = GM_e/r^2$ the pull falls off. Near the surface that works out to about $3.086(10^{-6})\\u{ m/s^2}$ per metre, the *free-air* correction. It ignores the rock under your feet, which pulls back slightly.',
-      '**Why it mattered here.** At 12° and 2400 m the two corrections add to about 0.36 %. That is invisible on a bathroom scale, but bigger than the 0.2 % the governor could trim away, so a setting based on 9.81 would have driven the generator into the head block.'
+      '**Why it mattered here.** At 12° and 2400 m the two corrections add to about 0.36 %. That is invisible on a bathroom scale, but bigger than the 0.2 % the governor could trim away, so a setting based on 9.81 drove the generator into the head block.'
     ],
     debrief: [
       'Generator\'s on the pad and bolted. The link to the coast is back.',
       'What made this work: **statics is just Newton\'s second law with a = 0**, so the hover tension had to equal the generator\'s weight *where it hung*. Weight is $W = mg$, and g is a property of the place. Mass isn\'t, which is why the slug figure never needed g, and why the spec sheet can fix one standard g and mean the same thing everywhere.',
       'Hask says the ridge is worth remembering: whenever a tolerance is tighter than a few tenths of a percent, standard g stops being good enough.'
     ].join('\n\n')
+  });
+
+  /* ------------------------------------------------------------ job parts */
+
+  var C = { steel: '#8d96a0', dark: '#4b5258', paint: '#c98a2b', line: '#d8d2c4', text: 'rgba(240,235,225,.95)' };
+  function label(ctx, s, text, color) {
+    ctx.save(); ctx.fillStyle = color || C.text; ctx.font = '12px "IBM Plex Mono", monospace'; ctx.textAlign = 'center';
+    ctx.fillText(text, s.x, s.y); ctx.restore();
+  }
+
+  // The gantry: two legs, a beam and the head block. Static scenery.
+  Y.definePart({
+    type: 'p01-gantry', name: 'Gantry', category: 'Site', library: false,
+    blurb: 'The station gantry over the pad. The winch line runs down from the head block.',
+    size: { w: 5.4, h: 0.8 },
+    anchors: { head: { x: 0, y: 0 } },
+    build: function (b) {
+      var P = b.P, x = b.inst.x, y = b.inst.y;
+      var body = b.body({ type: 'static', position: { x: x, y: y }, label: '', shapes: [
+        { shape: P.box(0.3, 0.2, { x: 0, y: 0.2 }), material: 'steel' },           // head block
+        { shape: P.box(2.8, 0.15, { x: 0, y: 0.55 }), material: 'steel' },          // beam
+        { shape: P.box(0.12, (y + 0.7) / 2, { x: -2.7, y: -(y + 0.7) / 2 + 0.7 }), material: 'steel', sensor: true },
+        { shape: P.box(0.12, (y + 0.7) / 2, { x: 2.7, y: -(y + 0.7) / 2 + 0.7 }), material: 'steel', sensor: true }
+      ] });
+      return { body: body, anchors: { head: { body: body, local: body.localPoint({ x: x, y: y }) } } };
+    }
+  });
+
+  // The generator: a heavy box with a lifting eye. Mass from the nameplate.
+  Y.definePart({
+    type: 'p01-generator', name: 'Generator', category: 'Loads', library: false,
+    blurb: 'The rebuilt station generator. Nameplate mass 1850 kg.',
+    size: { w: GEN.w, h: GEN.h },
+    dials: [{ key: 'mass', label: 'Mass', q: 'mass', def: M + ' kg', locked: true }],
+    anchors: { top: { x: 0, y: GEN.h / 2 } },
+    build: function (b) {
+      var body = b.body({ position: b.at({ x: 0, y: 0 }), label: '', mass: b.si('mass'), fixedRotation: true,
+        shapes: [{ shape: b.P.box(GEN.w / 2, GEN.h / 2), material: 'steel' }] });
+      return { body: body, y0: b.inst.y };
+    },
+    plate: function (inst) { return ['Mass ' + inst.dials.mass]; },
+    readouts: function (built) {
+      return [
+        { key: 'drift', label: 'drift', q: 'length', read: function () { return built.body.c.y - built.y0; } },
+        { key: 'vy', label: 'vertical speed', q: 'speed', read: function () { return built.body.v.y; } }
+      ];
+    },
+    draw: function (ctx, cam, built) {
+      var c = built.body.c, s = cam.worldToScreen({ x: c.x, y: c.y + 0.05 });
+      label(ctx, s, 'GENERATOR 1850 kg');
+      // the bolt-up window on the pad
+      var top = cam.worldToScreen({ x: c.x - 1.4, y: built.y0 + TOL }), bot = cam.worldToScreen({ x: c.x - 1.4, y: built.y0 - TOL });
+      ctx.save(); ctx.strokeStyle = 'rgba(120,190,80,.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(top.x - 6, top.y); ctx.lineTo(top.x + 6, top.y); ctx.moveTo(bot.x - 6, bot.y); ctx.lineTo(bot.x + 6, bot.y);
+      ctx.moveTo(top.x, top.y); ctx.lineTo(bot.x, bot.y); ctx.stroke();
+      var mid = cam.worldToScreen({ x: c.x, y: c.y });
+      ctx.beginPath(); ctx.moveTo(top.x, mid.y); ctx.lineTo(top.x + 10, mid.y); ctx.strokeStyle = '#e6b422'; ctx.stroke();
+      ctx.restore();
+    }
+  });
+
+  // A governed winch line: holds the set tension T on the load, plus a trim
+  // force of at most ±0.2 % of T from a position loop. The load does the rest.
+  function governedLine(b, T) {
+    var A = b.end('a'), B = b.end('b'), body = B.body, world = b.world;
+    var lim = TRIM * T;
+    var y0 = B.world.y;
+    // trim loop: full authority at 20 mm off, critically damped for the load the tension implies
+    var k = lim / 0.02, m = T / 9.81, c = 2 * Math.sqrt(k * Math.max(m, 1e-6));
+    var out = { joint: null, bodies: [], setting: T, tension: T, trimLimit: lim, trimUsed: 0, broken: false, head: A, load: B };
+    if (T > RATING) {
+      // the line parts as soon as the drum takes up the load
+      var fake = { userData: { part: b.inst.id }, label: b.inst.label };
+      out.broken = true;
+      b.on('step', function once() {
+        if (out.reported) return;
+        out.reported = true;
+        world.emit('break', { joint: fake, force: T, reason: 'rating' });
+      });
+      return out;
+    }
+    function apply() {
+      if (body.type !== 'dynamic') return;
+      var p = body.worldPoint(B.local), head = A.body.worldPoint(A.local);
+      var dx = head.x - p.x, dy = head.y - p.y, L = Math.hypot(dx, dy) || 1;
+      var trim = -k * (p.y - y0) - c * body.v.y;
+      trim = Math.max(-lim, Math.min(lim, trim));
+      out.trimUsed = trim;
+      var F = Math.max(0, T + trim);
+      out.tension = F;
+      body.applyForce({ x: F * dx / L, y: F * dy / L }, p);
+    }
+    apply();
+    b.on('step', apply);
+    return out;
+  }
+  function drawLine(ctx, cam, built, dialText) {
+    if (!built.head || !built.load) return;
+    var h = cam.worldToScreen(built.head.body.worldPoint(built.head.local));
+    if (built.broken) { label(ctx, { x: h.x, y: h.y + 24 }, 'LINE PARTED', '#e0583a'); return; }
+    var l = cam.worldToScreen(built.load.body.worldPoint(built.load.local));
+    ctx.save(); ctx.strokeStyle = C.line; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(h.x, h.y); ctx.lineTo(l.x, l.y); ctx.stroke();
+    ctx.fillStyle = C.paint; ctx.fillRect(h.x - 30, h.y - 52, 60, 20);
+    ctx.restore();
+    label(ctx, { x: h.x, y: h.y - 38 }, dialText, '#1b1b1b');
+    var used = built.trimLimit ? built.trimUsed / built.trimLimit : 0;
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(h.x + 36, h.y - 52, 8, 20);
+    ctx.fillStyle = Math.abs(used) > 0.99 ? '#e0583a' : '#78be50';
+    var hh = 10 * Math.max(-1, Math.min(1, used));
+    ctx.fillRect(h.x + 36, h.y - 42 - Math.max(0, hh), 8, Math.abs(hh));
+    ctx.restore();
+  }
+  function sig4(x) { return SE.sigfig.roundSig(x, 4).value; }
+  function lineReadouts(built) {
+    return [
+      { key: 'tension', label: 'line tension', q: 'force', read: function () { return built.broken ? 0 : built.tension; } },
+      { key: 'trim', label: 'trim', q: 'force', read: function () { return built.broken ? 0 : built.trimUsed; } }
+    ];
+  }
+  function unitOf(text) {
+    var p = SE.units.parseQuantity(String(text || ''));
+    return p && p.ok ? String(p.unitText).trim() : '';
+  }
+
+  // The station governor: SI dial, 4 figures.
+  Y.definePart({
+    type: 'p01-governor', name: 'Station governor', category: 'Rigging', library: false, connector: true,
+    blurb: 'A precision winch governor. It holds the line tension you dial, to 4 figures, and trims the last ±0.2 % from a position sensor.',
+    size: { w: 0.1, h: 2 },
+    dials: [{ key: 'tension', label: 'Line tension', q: 'force', def: '', min: 0 }],
+    build: function (b) {
+      var u = unitOf(b.text('tension'));
+      if (!/^(|[a-zA-Zµμ]*N)$/.test(u)) throw new Error('This governor is SI: its dial reads N, kN or MN.');
+      return governedLine(b, sig4(b.si('tension')));
+    },
+    plate: function () { return ['Dial: 4 figures, SI', 'Trim ±0.2 % of setting', 'Line breaks at 30 kN']; },
+    readouts: lineReadouts,
+    draw: function (ctx, cam, built) { drawLine(ctx, cam, built, D.fmtNum(built.setting, 4).replace(/\s/g, '') + ' N'); }
+  });
+
+  // The US-made backup winch: tension in lb, or mass in slug times its own
+  // gravimeter's g.
+  Y.definePart({
+    type: 'p01-backup', name: 'Backup winch (US)', category: 'Rigging', library: false, connector: true,
+    blurb: 'The old US-made winch. Tension mode holds a pull dialled in pounds. Mass mode takes the load in slugs and multiplies by the g its own gravimeter measures.',
+    size: { w: 0.1, h: 2 },
+    dials: [
+      { key: 'mode', label: 'Mode', choice: ['tension', 'mass'], def: 'tension', locked: true },
+      { key: 'tension', label: 'Line pull', q: 'force', def: '', optional: true, min: 0 },
+      { key: 'mass', label: 'Load mass', q: 'mass', def: '', optional: true, min: 0 }
+    ],
+    build: function (b) {
+      var T;
+      if (b.text('mode') === 'mass') {
+        if (b.si('mass') == null) throw new Error('Mass mode: dial the load mass in slug.');
+        if (unitOf(b.text('mass')) !== 'slug') throw new Error('This controller is US-made: it reads mass in slug only.');
+        T = sig4(b.si('mass') / SLUG) * SLUG * b.site.g;
+      } else {
+        if (b.si('tension') == null) throw new Error('Tension mode: dial the line pull in lb.');
+        if (unitOf(b.text('tension')) !== 'lb') throw new Error('This dial is US-made: it is printed in lb only.');
+        T = sig4(b.si('tension') / LBF) * LBF;
+      }
+      var out = governedLine(b, T);
+      out.mode = b.text('mode');
+      out.gMeter = b.site.g;
+      return out;
+    },
+    plate: function () { return ['Dial: 4 figures, lb / slug', 'Gravimeter: local g', 'Line breaks at 6 750 lb']; },
+    readouts: function (built) {
+      var list = lineReadouts(built);
+      if (built.mode === 'mass') list.push({ key: 'g', label: 'gravimeter', q: 'accel', read: function () { return built.gMeter; } });
+      return list;
+    },
+    draw: function (ctx, cam, built) {
+      var txt = built.mode === 'mass' ? D.fmtNum(built.setting / built.gMeter / SLUG, 4) + ' slug' : D.fmtNum(built.setting / LBF, 4).replace(/\s/g, '') + ' lb';
+      drawLine(ctx, cam, built, built.broken ? '' : txt);
+    }
+  });
+
+  // A spare part in a crate, with the weight tag the player writes.
+  Y.definePart({
+    type: 'p01-spare', name: 'Spare part', category: 'Loads', library: false,
+    blurb: 'A spare part crated for the depot. The tag on the side is its spec-sheet weight.',
+    size: { w: 1, h: 1 },
+    dials: [
+      { key: 'mass', label: 'Mass', q: 'mass', def: '1 kg', locked: true },
+      { key: 'tag', label: 'Weight tag', q: 'force', def: '' },
+      { key: 'w', label: 'Width', q: 'length', def: '1 m', locked: true },
+      { key: 'h', label: 'Height', q: 'length', def: '1 m', locked: true }
+    ],
+    build: function (b) {
+      var w = b.si('w'), h = b.si('h');
+      var body = b.body({ position: b.at({ x: 0, y: 0 }), label: '', mass: b.si('mass'), shapes: [{ shape: b.P.box(w / 2, h / 2), material: 'cargo' }] });
+      return { body: body, tag: b.si('tag'), w: w, h: h };
+    },
+    plate: function (inst) { return ['Mass ' + inst.dials.mass]; },
+    draw: function (ctx, cam, built) {
+      var c = built.body.c, s = cam.worldToScreen({ x: c.x, y: c.y + built.h / 2 + 0.35 });
+      label(ctx, s, (built.inst.label || '') + ' · ' + built.inst.dials.mass);
+      label(ctx, cam.worldToScreen({ x: c.x, y: c.y + built.h / 2 + 0.12 }), 'tag ' + built.inst.dials.tag, '#e6b422');
+    }
+  });
+
+  // The depot checkweigher: a scale pad calibrated at standard g. At t = 2 s
+  // it compares the force it measures with the crate's tag and kicks the
+  // crate off the line if they disagree by more than 0.15 %.
+  Y.definePart({
+    type: 'p01-checkweigher', name: 'Depot checkweigher', category: 'Measure', library: false,
+    blurb: 'A depot scale pad. It weighs the crate on it and kicks it off the line if the tag disagrees by more than 0.15 %.',
+    size: { w: 2.4, h: 0.4 },
+    build: function (b) {
+      var P = b.P, world = b.world;
+      var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: '', shapes: [{ shape: P.box(1.2, 0.2), material: 'steel' }] });
+      var out = { body: body, verdict: null, reading: 0, kick: null };
+      function load() {
+        var F = 0, top = null, invH = world.substeps / (world.dt || 1 / 60);
+        world.contacts.forEach(function (ct) {
+          var sign = ct.fa.body === body ? 1 : ct.fb.body === body ? -1 : 0;
+          if (!sign || !ct.normal) return;
+          top = ct.fa.body === body ? ct.fb.body : ct.fa.body;
+          ct.points.forEach(function (cp) { F += cp.normalImpulse * invH * Math.abs(ct.normal.y); });
+        });
+        return { F: F, top: top };
+      }
+      b.on('step', function () {
+        if (out.kick) {
+          if (world.time < out.kick.until) out.kick.body.applyForce({ x: 20 * out.kick.body.m, y: 0 }, out.kick.body.c);
+          return;
+        }
+        if (out.verdict !== null || world.time < CHECK_T - 1e-9) { if (out.verdict === null) out.reading = load().F; return; }
+        var r = load(); out.reading = r.F;
+        var crate = r.top && r.top.userData && r.top.userData.part, bp = crate && b.out.parts[crate];
+        if (!bp || bp.tag == null) { out.verdict = { ok: false, empty: true }; return; }
+        var off = bp.tag / r.F - 1;
+        out.verdict = { ok: Math.abs(off) <= 0.0015, off: off };
+        if (!out.verdict.ok) out.kick = { body: r.top, until: world.time + 0.3 };
+      });
+      return out;
+    },
+    draw: function (ctx, cam, built) {
+      var c = built.body.c, s = cam.worldToScreen({ x: c.x, y: c.y - 0.55 });
+      var v = built.verdict;
+      label(ctx, s, v && v.ok ? 'ACCEPTED' : v ? 'REJECTED' : 'checking at ' + CHECK_T + ' s', v && v.ok ? '#78be50' : v ? '#e0583a' : C.text);
+    }
   });
 })(globalThis.SE);
