@@ -12,7 +12,8 @@
  *   });
  *
  * The body origin is `position`; the solver works on the centre of mass `c`.
- * Forces added with applyForce act for one step and are then cleared.
+ * Forces added with applyForce act for one step and are then cleared;
+ * body.lastApplied lists the ones that acted during the last step.
  */
 (function (SE) {
   'use strict';
@@ -31,6 +32,11 @@
     this.w = def.angularVelocity || 0;
     this.force = M.v(0, 0);
     this.torque = 0;
+    // Forces applied since the last step, and the ones that acted during it
+    // (the world moves appliedLog to lastApplied when it clears forces), so
+    // gauges can show where each applied force acted.
+    this.appliedLog = [];
+    this.lastApplied = [];
     this.linearDamping = def.linearDamping || 0;
     this.angularDamping = def.angularDamping || 0;
     this.gravityScale = def.gravityScale == null ? 1 : def.gravityScale;
@@ -96,9 +102,14 @@
     if (this.type !== 'dynamic') return;
     this.force = M.add(this.force, F);
     if (worldPoint) this.torque += M.cross(M.sub(worldPoint, this.c), F);
+    this.appliedLog.push({ vector: M.v(F.x, F.y), point: worldPoint ? M.v(worldPoint.x, worldPoint.y) : null, torque: 0 });
     this.awake = true;
   };
-  Body.prototype.applyTorque = function (T) { if (this.type === 'dynamic') this.torque += T; };
+  Body.prototype.applyTorque = function (T) {
+    if (this.type !== 'dynamic') return;
+    this.torque += T;
+    this.appliedLog.push({ vector: M.v(0, 0), point: null, torque: T });
+  };
   Body.prototype.applyImpulse = function (J, worldPoint) {
     if (this.type !== 'dynamic') return;
     this.v = M.mulAdd(this.v, this.invM, J);

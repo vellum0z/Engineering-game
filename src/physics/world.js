@@ -93,6 +93,7 @@
   /* ---------------------------------------------------------------- step */
   World.prototype.step = function (dt) {
     var self = this, n = this.substeps, h = dt / n, invH = 1 / h, cfg = this.cfg, S = stages();
+    this.dt = dt;
     CS = S.cs;
     var awake = function (b) { return b.type !== 'static' && b.awake !== false; };
     var active = function (A, B) { return awake(A) || awake(B); };
@@ -136,7 +137,7 @@
       contacts.forEach(function (ct) { CS.solve(ct, invH, false, cfg); });
     }
     contacts.forEach(function (ct) { CS.restitute(ct, cfg); });
-    dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; });
+    dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; b.lastApplied = b.appliedLog; b.appliedLog = []; });
     this.joints.forEach(function (j) { if (j.postStep) j.postStep(dt); });
     S.brk.check(this, dt);
     S.isl.update(this, dt);
