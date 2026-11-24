@@ -168,6 +168,7 @@
     this.archiveCard();
     if (s.scene) this.ctx.setScene(s.scene.type, s.scene.params);
     if (s.hud !== undefined) this.ctx.hud(s.hud);
+    else if (s.scene) this.ctx.hud([]);   // a new scene starts with a clean overlay
     var done = function () { self.applySideEffects(s); self.run(i + 1); };
     this.renderStep(s, done);
   };
