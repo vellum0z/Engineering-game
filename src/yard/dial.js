@@ -38,6 +38,7 @@
     moment:    { dims: d(2, 1, -2),   si: 'N·m',   name: 'moment',        examples: 'N·m, kN·m, lb·ft' },
     energy:    { dims: d(2, 1, -2),   si: 'J',     name: 'energy',        examples: 'J, kJ' },
     density:   { dims: d(-3, 1, 0),   si: 'kg/m^3', name: 'density',      examples: 'kg/m^3' },
+    gravconst: { dims: d(3, -1, -2),  si: 'm^3/(kg·s^2)', name: 'gravitational constant', examples: 'm^3/(kg·s^2), N·m^2/kg^2' },
     text:      { dims: null,          si: '',      name: 'text',          examples: 'text' }
   };
 
