@@ -111,6 +111,8 @@ suite('physics E10: JSON scenes', () => {
       w.addJoint(new P.PulleyJoint({ bodyA: e, bodyB: f, groundAnchorA: { x: -4, y: 7 }, groundAnchorB: { x: 4, y: 7 }, ratio: 1.5, EA: 1e5 }));
       w.addJoint(new P.WinchJoint({ bodyA: anchor, localAnchorA: { x: 1, y: 0 }, bodyB: f, via: { body: anchor, local: { x: 3, y: 0 } }, parts: 2, reelSpeed: 0.2, maxPull: 400, accel: 1 }));
     }
+    w.addJoint(new P.PrismaticJoint({ bodyA: anchor, bodyB: d, worldAnchor: { x: 2.8, y: 4 }, worldAxis: { x: 0, y: 1 }, lowerTranslation: -1, upperTranslation: 0.5, motorSpeed: 0.5, maxMotorForce: 80 }));
+    w.addJoint(new P.MouseJoint({ body: b, target: { x: 0.5, y: 4.5 }, maxForce: 200 }));
     return w;
   }
 
