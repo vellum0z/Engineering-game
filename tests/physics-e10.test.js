@@ -71,14 +71,14 @@ suite('physics E10: snapshot / restore', () => {
 
   test('restore removes bodies and joints added after the snapshot and brings back removed ones', () => {
     const { w } = busyWorld();
-    const snap = P.snapshot(w);
+    const snap = P.snapshot(w), count = w.bodies.length;
     const extra = w.add(new P.Body({ position: { x: 20, y: 3 }, shapes: [P.box(0.5, 0.5)] }));
     const victim = w.bodies[1];
     w.remove(victim);
     P.restore(w, snap);
     ok(!w.bodies.includes(extra), 'extra body gone');
     ok(w.bodies.includes(victim), 'removed body back');
-    eq(w.bodies.length, snap.bodies.length);
+    eq(w.bodies.length, count);
   });
 
   test('fields created after the snapshot (peakForce, prevPose) are cleared on restore', () => {
@@ -273,5 +273,102 @@ suite('physics E10: stepper', () => {
     crate.v = { x: NaN, y: 0 };
     const r = st.runUntil(() => false, { timeout: 1 });
     ok(!r.ok); eq(r.reason, 'diverged');
+  });
+});
+
+// A loaded steel cantilever (50 x 100 mm, L = 2 m, M_y = σ_y·S = 20.8 kN·m)
+// carrying 0.6 M_y at its tip, which a 300 kg crate dropped 11 m lands on at
+// t = sqrt(2*11/g) = 1.50 s and snaps on moment. Plus a truss on a supplied
+// ground body, and plain joints tied to structure bodies on both sides of
+// the structures in the joint list.
+function structureWorld() {
+  const w = new P.World({ gravity: { x: 0, y: -g } });
+  const gr = ground(w);
+  const anchor = w.add(new P.Body({ type: 'static', position: { x: 4, y: 6 }, shapes: [P.box(0.2, 0.1)] }));
+  const hang = w.add(new P.Body({ position: { x: 4, y: 4.5 }, shapes: [P.box(0.2, 0.2)], mass: 20 }));
+  w.addJoint(new P.DistanceJoint({ bodyA: anchor, bodyB: hang, localAnchorB: { x: 0, y: 0.2 }, rope: true }));
+  const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: 2, y: 3 }, section: { b: 0.05, h: 0.1 },
+    material: 'steel', segments: 20, supports: [{ at: 'start', type: 'fixed' }], label: 'shelf' });
+  bm.load(2, { x: 0, y: -0.6 * bm.limits.moment / 2 });
+  w.add(new P.Body({ position: { x: 1.8, y: 3.05 + 0.25 + 11 }, shapes: [P.box(0.25, 0.25)], mass: 300, label: 'crate' }));
+  const tr = P.structures.truss(w, { nodes: [{ x: 8, y: 0.2 }, { x: 10, y: 0.2 }, { x: 9, y: 1.9 }],
+    members: [[0, 1], [1, 2], [2, 0]], material: 'steel', area: 4e-4, ground: gr,
+    supports: [{ node: 0, type: 'pin' }, { node: 1, type: 'roller' }] });
+  tr.load(2, { x: 0, y: -5000 });
+  // a pendulum hung from a beam segment, added after the beam
+  const bob = w.add(new P.Body({ position: { x: 1.0, y: 2.0 }, shapes: [P.circle(0.1)], mass: 5 }));
+  w.addJoint(new P.RevoluteJoint({ bodyA: bm.bodies[10], bodyB: bob, worldAnchor: { x: 1.0, y: 3.0 } }));
+  return { w, bm, tr };
+}
+
+suite('physics E10: structures in scenes and snapshots', () => {
+  test('scene saves beams and trusses as definitions, not their parts', () => {
+    const { w } = structureWorld();
+    const scene = JSON.parse(JSON.stringify(P.toScene(w)));
+    eq(scene.version, 2);
+    eq(scene.structures.length, 2);
+    eq(scene.structures[0].kind, 'beam'); eq(scene.structures[1].kind, 'truss');
+    eq(scene.structures[0].ground, undefined, 'beam made its own ground');
+    eq(scene.structures[1].ground, 0, 'truss ground is body 0');
+    eq(scene.structures[0].loads.length, 1); eq(scene.structures[1].loads[0].node, 2);
+    ok(scene.joints.every(j => j.structure != null || j.type !== 'structure'), 'no solver in the joint list');
+    eq(scene.joints.filter(j => j.structure != null).length, 2, 'one placeholder per structure');
+    eq(scene.bodies.filter(b => b.structure === 0).length, 21, '20 segments + own ground');
+    eq(scene.bodies.filter(b => b.structure === 1).length, 6, '3 nodes + 3 members');
+  });
+
+  test('beam + truss scene round trip, 300 steps: same state within 1e-12, and a fixed point', () => {
+    const A = structureWorld().w;
+    const json = JSON.stringify(P.toScene(A));
+    const B = P.fromScene(json);
+    eq(B.bodies.length, A.bodies.length); eq(B.joints.length, A.joints.length);
+    eq(B.structures.length, 2);
+    eq(JSON.stringify(P.toScene(B)), json, 'second toScene is identical');
+    for (let i = 0; i < 300; i++) { A.step(1 / 60); B.step(1 / 60); }
+    const sa = state(A), sb = state(B);
+    let worst = 0;
+    sa.forEach((r, i) => r.forEach((v, k) => { worst = Math.max(worst, Math.abs(v - sb[i][k])); }));
+    ok(worst <= 1e-12, 'largest difference ' + worst);
+    const bA = A.events.filter(e => e.type === 'break').length, bB = B.events.filter(e => e.type === 'break').length;
+    ok(bA > 0, 'the beam should snap within 5 s'); eq(bB, bA, 'same breaks after loading');
+  });
+
+  test('version 1 scenes (no structures) still load', () => {
+    const w = new P.World();
+    const s0 = w.add(new P.Body({ type: 'static', shapes: [P.circle(0.1)] }));
+    const b = w.add(new P.Body({ position: { x: 1, y: 0 }, shapes: [P.circle(0.1)] }));
+    w.addJoint(new P.DistanceJoint({ bodyA: s0, bodyB: b }));
+    const scene = P.toScene(w);
+    scene.version = 1; delete scene.structures;
+    const B = P.fromScene(JSON.stringify(scene));
+    eq(B.bodies.length, 2); eq(B.joints.length, 1); eq(B.joints[0].length, 1);
+  });
+
+  test('snapshot at 1 s, run 2 s (beam snaps on moment at 1.5 s), restore, run 2 s: bit-identical', () => {
+    const { w, bm } = structureWorld();
+    w.run(1);
+    ok(!w.events.some(e => e.type === 'break'), 'nothing broken before the snapshot');
+    const snap = P.snapshot(w);
+    const joints0 = w.joints.length;
+    w.run(2);
+    const first = state(w), ev = w.events.filter(e => e.type === 'break');
+    ok(ev.length > 0 && ev[0].reason === 'moment', 'beam should break on moment: ' + ev.map(e => e.reason));
+    ok(w.joints.length < joints0, 'links removed');
+    P.restore(w, snap);
+    eq(w.joints.length, joints0, 'links back');
+    ok(bm.links.every(l => !l || !l.broken), 'no link flagged broken');
+    eq(bm.loads.length, 1);
+    w.run(2);
+    sameExactly(state(w), first, 'replay');
+    eq(w.events.filter(e => e.type === 'break').length, ev.length, 'same breaks in the replay');
+  });
+
+  test('a load handle kept by the level still drives the beam after restore', () => {
+    const { w, bm } = structureWorld();
+    const ld = bm.loads[0];
+    const snap = P.snapshot(w);
+    w.run(0.5);
+    P.restore(w, snap);
+    ok(bm.loads[0] === ld, 'same load object');
   });
 });
