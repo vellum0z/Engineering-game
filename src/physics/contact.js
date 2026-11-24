@@ -6,91 +6,284 @@
  *   warmStart(ct)                  each substep
  *   solve(ct, invH, useBias, cfg)  each substep; useBias false = relax pass
  *   restitute(ct, cfg)             once, after the substeps
+ *   pointForces(ct, h)             [{ point, normal, tangent }] in N, for gauges
  * Each contact point keeps normalImpulse / tangentImpulse (N·s per substep),
  * which broadphase.js carries over between steps by feature id.
+ *
+ * Method (Box2D 3 contact_solver.c, written fresh for this engine):
+ *
+ * Anchors. Each point stores rA, rB from the body centres of mass at the
+ * start of the step and an "adjusted separation" s0 - dot(rB - rA, n). The
+ * current separation inside a substep is then rebuilt from how far the bodies
+ * have moved, s = dot(dB - dA, n) + adjusted, where dX is the anchor's world
+ * position now minus the centre at the start of the step. No narrowphase is
+ * re-run between substeps.
+ *
+ * Softness. Penetration is corrected by a soft constraint (soft.js). At rest
+ * a soft contact behaves like a spring of stiffness k = m_eff·ω², so under a
+ * load F it sits at a penetration F / (m_eff ω²). The effective mass m_eff
+ * is set by the *lighter* body (and for a corner point it is smaller still,
+ * because the point can also rotate the body). So a heavy crate on a light
+ * one sinks by about (M/m)·g/ω², and a tall column of light boxes is soft in
+ * rocking and buckles under its own weight.
+ *
+ * Rules, following Box2D 3: contactHertz is capped at a quarter of the
+ * substep rate, and contacts against a static or kinematic body get twice
+ * that (4x the stiffness), because there is no second body to share the
+ * error. The doubled value is held to the same cap: a light box squeezed
+ * between a stiff floor and a heavy load is a two-spring system, and above
+ * the cap it is under-resolved by the substep and gets squirted out.
+ *
+ * Tuning (proposed world.cfg defaults: contactHertz 60, contactDampingRatio
+ * 4). At 4 substeps of 1/60 s the cap is 60 Hz. At Box2D's 30 Hz a 20-box
+ * column buckles within 15 s, and 1000 kg on 10 kg sinks 35 mm at the top
+ * contact. At 60 Hz both hold (9 mm per contact for the 100:1 stack), and a
+ * damping ratio of 4 instead of 10 lets the rocking modes settle.
+ *
+ * Speculative points (s > 0) push only hard enough to close the gap this
+ * substep (bias = s/h, rigid), so fast bodies stop at the surface. Overlap
+ * correction is clamped to cfg.maxPushVelocity so deep overlaps separate
+ * gently instead of exploding.
+ *
+ * Friction. Coulomb, solved after the normal impulses each iteration, with
+ * the cone set by the point's current normal impulse. A point uses the static
+ * coefficient muS while it sticks (|vt| at the start of the step under
+ * STICK_SPEED) and the kinetic coefficient muK while it slides. So a crate
+ * breaks loose when the pull exceeds muS·N and then needs only muK·N to keep
+ * going, which is the behaviour the game teaches. Fixtures may carry muS /
+ * muK; both fall back to `friction`. Pairs mix by geometric mean.
+ *
+ * Rolling resistance (Box2D 3.1). A fixture's dimensionless
+ * `rollingResistance` c gives a resisting couple of at most c·r·N on the
+ * relative spin of the two bodies, r being the larger rounded radius (circle
+ * radius). In textbook terms the lever arm a = c·r, so a wheel of weight W
+ * needs a horizontal push P ≈ W·a/r = c·W to keep rolling.
+ *
+ * Conveyor belts. A fixture's `tangentSpeed` (m/s) moves its surface along
+ * rightPerp(outward normal), i.e. to +x along the top face of a level belt.
+ * Friction drives the relative tangential velocity at the point to the sum
+ * of both surfaces' speeds instead of to zero.
+ *
+ * Restitution is applied once after the substeps, using the relative normal
+ * velocity measured before the step, and only to points that approached
+ * faster than cfg.restitutionThreshold and actually pushed this step.
+ *
+ * Results for gauges, set at the end of every step:
+ *   ct.normalForce    sum of point normal forces, N (impulse / h, last substep)
+ *   ct.frictionForce  sum of point friction forces, N (signed along ct.tangent)
+ *   ct.rollingTorque  rolling-resistance couple, N·m
+ *   cp.totalNormalImpulse  N·s summed over the whole step (all substeps)
  */
 (function (SE) {
   'use strict';
   var M = SE.pmath, P = SE.phys;
-  var softness = P.softness, anchorShift = P.anchorShift, applyPair = P.applyPair, relVel = P.relVel;
+  var softness = P.softness;
 
-/* ---------------------------------------------------------- contacts */
-  // One contact constraint = one manifold between two fixtures.
+  // Below this tangential speed (m/s) a point counts as sticking: static μ.
+  var STICK_SPEED = 0.01;
+
+  function fixtureMuS(f) { return f.muS != null ? f.muS : f.friction; }
+  function fixtureMuK(f) { return f.muK != null ? f.muK : f.friction; }
+  function shapeRadius(s) { return s.type === 'circle' ? s.radius : (s.radius || 0); }
+
+  /* ------------------------------------------------------------- prepare */
   function prepareContact(ct, h, cfg) {
     var A = ct.fa.body, B = ct.fb.body, n = ct.manifold.normal;
     var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
-    ct.normal = n; ct.tangent = M.rightPerp(n);
-    ct.friction = P.mixFriction(ct.fa.friction, ct.fb.friction);
+    var nx = n.x, ny = n.y, tx = ny, ty = -nx;           // tangent = rightPerp(n)
+    ct.normal = n; ct.tangent = M.v(tx, ty);
+
+    ct.muS = P.mixFriction(fixtureMuS(ct.fa), fixtureMuS(ct.fb));
+    ct.muK = P.mixFriction(fixtureMuK(ct.fa), fixtureMuK(ct.fb));
+    ct.friction = ct.muK;                                 // kept for older callers
     ct.restitution = P.mixRestitution(ct.fa.restitution, ct.fb.restitution);
-    ct.soft = softness(cfg.contactHertz, cfg.contactDampingRatio, h);
-    ct.points.forEach(function (cp) {
-      cp.rA = M.sub(cp.point, A.c);
-      cp.rB = M.sub(cp.point, B.c);
-      var rnA = M.cross(cp.rA, n), rnB = M.cross(cp.rB, n);
+    ct.tangentSpeed = (ct.fa.tangentSpeed || 0) + (ct.fb.tangentSpeed || 0);
+    var rr = Math.max(ct.fa.rollingResistance || 0, ct.fb.rollingResistance || 0);
+    ct.rollingResistance = rr * Math.max(shapeRadius(ct.fa.shape), shapeRadius(ct.fb.shape));
+    var kR = iA + iB;
+    ct.rollingMass = kR > 0 ? 1 / kR : 0;
+    if (ct.rollingImpulse == null) ct.rollingImpulse = 0;
+
+    // Contact stiffness: capped at a quarter of the substep rate, doubled
+    // against bodies that cannot move (see header).
+    var hertz = Math.min(cfg.contactHertz, 0.25 / h);
+    if (mA === 0 || mB === 0) hertz = Math.min(2 * hertz, 0.25 / h);
+    ct.soft = softness(hertz, cfg.contactDampingRatio, h);
+
+    var pts = ct.points;
+    for (var i = 0; i < pts.length; i++) {
+      var cp = pts[i];
+      var rAx = cp.point.x - A.c.x, rAy = cp.point.y - A.c.y;
+      var rBx = cp.point.x - B.c.x, rBy = cp.point.y - B.c.y;
+      cp.rA = M.v(rAx, rAy); cp.rB = M.v(rBx, rBy);
+      cp.adjustedSeparation = cp.separation - ((rBx - rAx) * nx + (rBy - rAy) * ny);
+
+      var rnA = rAx * ny - rAy * nx, rnB = rBx * ny - rBy * nx;
       var kN = mA + mB + iA * rnA * rnA + iB * rnB * rnB;
       cp.normalMass = kN > 0 ? 1 / kN : 0;
-      var t = ct.tangent, rtA = M.cross(cp.rA, t), rtB = M.cross(cp.rB, t);
+      var rtA = rAx * ty - rAy * tx, rtB = rBx * ty - rBy * tx;
       var kT = mA + mB + iA * rtA * rtA + iB * rtB * rtB;
       cp.tangentMass = kT > 0 ? 1 / kT : 0;
-      var dv = M.sub(B.velocityAt(cp.point), A.velocityAt(cp.point));
-      cp.relativeVelocity = M.dot(dv, n);
+
+      // relative velocity at the point before the step: drives restitution
+      // and decides whether the point starts the step sticking or sliding
+      var dvx = (B.v.x - B.w * rBy) - (A.v.x - A.w * rAy);
+      var dvy = (B.v.y + B.w * rBx) - (A.v.y + A.w * rAx);
+      cp.relativeVelocity = dvx * nx + dvy * ny;
+      var vt = dvx * tx + dvy * ty - ct.tangentSpeed;
+      cp.sliding = Math.abs(vt) > STICK_SPEED;
       cp.maxNormalImpulse = 0;
-    });
+      cp.totalNormalImpulse = 0;
+      if (cp.normalImpulse == null) cp.normalImpulse = 0;
+      if (cp.tangentImpulse == null) cp.tangentImpulse = 0;
+    }
   }
 
-
+  /* ----------------------------------------------------------- warm start */
   function warmStartContact(ct) {
-    var A = ct.fa.body, B = ct.fb.body;
-    ct.points.forEach(function (cp) {
-      var Pv = M.add(M.scale(ct.normal, cp.normalImpulse), M.scale(ct.tangent, cp.tangentImpulse));
-      applyPair(A, B, cp.rA, cp.rB, Pv);
-    });
+    var A = ct.fa.body, B = ct.fb.body, n = ct.normal, t = ct.tangent;
+    var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
+    var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
+    var pts = ct.points;
+    for (var i = 0; i < pts.length; i++) {
+      var cp = pts[i], rA = cp.rA, rB = cp.rB;
+      var px = cp.normalImpulse * n.x + cp.tangentImpulse * t.x;
+      var py = cp.normalImpulse * n.y + cp.tangentImpulse * t.y;
+      vAx -= mA * px; vAy -= mA * py; wA -= iA * (rA.x * py - rA.y * px);
+      vBx += mB * px; vBy += mB * py; wB += iB * (rB.x * py - rB.y * px);
+    }
+    wA -= iA * ct.rollingImpulse; wB += iB * ct.rollingImpulse;
+    store(A, vAx, vAy, wA); store(B, vBx, vBy, wB);
   }
 
+  // Write velocities back without disturbing bodies that cannot move.
+  function store(b, vx, vy, w) {
+    if (b.invM === 0 && b.invI === 0) return;
+    b.v = M.v(vx, vy); b.w = w;
+  }
 
+  /* ---------------------------------------------------------------- solve */
   function solveContact(ct, invH, useBias, cfg) {
-    var A = ct.fa.body, B = ct.fb.body, n = ct.normal, t = ct.tangent;
-    var total = 0;
-    ct.points.forEach(function (cp) {
-      // current separation, tracked through the bodies' motion this step
-      var s = cp.separation + M.dot(M.sub(anchorShift(B, cp.rB), anchorShift(A, cp.rA)), n);
+    var A = ct.fa.body, B = ct.fb.body, n = ct.normal, nx = n.x, ny = n.y, tx = ct.tangent.x, ty = ct.tangent.y;
+    var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
+    var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
+    // centre displacement since the start of the step and the rotation change
+    var dcAx = A.c.x - A.c0.x, dcAy = A.c.y - A.c0.y, dcBx = B.c.x - B.c0.x, dcBy = B.c.y - B.c0.y;
+    var daA = A.angle - A.angle0, daB = B.angle - B.angle0;
+    var cA = Math.cos(daA), sA = Math.sin(daA), cB = Math.cos(daB), sB = Math.sin(daB);
+    var soft = ct.soft, pts = ct.points, count = pts.length, total = 0, i, cp, rA, rB;
+    var maxPush = cfg.maxPushVelocity;
+
+    // normal constraints first, so friction sees this iteration's normal impulse
+    for (i = 0; i < count; i++) {
+      cp = pts[i]; rA = cp.rA; rB = cp.rB;
+      // current anchor positions relative to the old centres: dc + R(dθ) r
+      var dAx = dcAx + cA * rA.x - sA * rA.y, dAy = dcAy + sA * rA.x + cA * rA.y;
+      var dBx = dcBx + cB * rB.x - sB * rB.y, dBy = dcBy + sB * rB.x + cB * rB.y;
+      var s = (dBx - dAx) * nx + (dBy - dAy) * ny + cp.adjustedSeparation;
+
       var bias = 0, massScale = 1, impulseScale = 0;
-      if (s > 0) bias = s * invH;                      // speculative: close the gap, no further
+      if (s > 0) bias = s * invH;                       // speculative: close the gap, no further
       else if (useBias) {
-        bias = Math.max(ct.soft.biasRate * s, -cfg.maxPushVelocity);
-        massScale = ct.soft.massScale; impulseScale = ct.soft.impulseScale;
+        bias = Math.max(soft.biasRate * s, -maxPush);
+        massScale = soft.massScale; impulseScale = soft.impulseScale;
       }
-      var vn = M.dot(relVel(A, B, cp.rA, cp.rB), n);
+      var dvx = (vBx - wB * rB.y) - (vAx - wA * rA.y);
+      var dvy = (vBy + wB * rB.x) - (vAy + wA * rA.x);
+      var vn = dvx * nx + dvy * ny;
       var imp = -cp.normalMass * massScale * (vn + bias) - impulseScale * cp.normalImpulse;
       var next = Math.max(cp.normalImpulse + imp, 0);
       imp = next - cp.normalImpulse; cp.normalImpulse = next;
-      cp.maxNormalImpulse = Math.max(cp.maxNormalImpulse, imp);
+      if (imp > cp.maxNormalImpulse) cp.maxNormalImpulse = imp;
+      cp.totalNormalImpulse += imp > 0 ? imp : 0;
       total += next;
-      applyPair(A, B, cp.rA, cp.rB, M.scale(n, imp));
-    });
-    ct.points.forEach(function (cp) {
-      var vt = M.dot(relVel(A, B, cp.rA, cp.rB), t);
-      var imp = -cp.tangentMass * vt;
-      var maxF = ct.friction * cp.normalImpulse;
-      var next = M.clamp(cp.tangentImpulse + imp, -maxF, maxF);
-      imp = next - cp.tangentImpulse; cp.tangentImpulse = next;
-      applyPair(A, B, cp.rA, cp.rB, M.scale(t, imp));
-    });
+      var px = imp * nx, py = imp * ny;
+      vAx -= mA * px; vAy -= mA * py; wA -= iA * (rA.x * py - rA.y * px);
+      vBx += mB * px; vBy += mB * py; wB += iB * (rB.x * py - rB.y * px);
+    }
+
+    // friction: Coulomb cone on each point's own normal impulse
+    var tSpeed = ct.tangentSpeed;
+    for (i = 0; i < count; i++) {
+      cp = pts[i]; rA = cp.rA; rB = cp.rB;
+      var dtx = (vBx - wB * rB.y) - (vAx - wA * rA.y);
+      var dty = (vBy + wB * rB.x) - (vAy + wA * rA.x);
+      var vt = dtx * tx + dty * ty - tSpeed;
+      var mu = cp.sliding ? ct.muK : ct.muS;
+      var maxF = mu * cp.normalImpulse;
+      var timp = -cp.tangentMass * vt;
+      var tnext = M.clamp(cp.tangentImpulse + timp, -maxF, maxF);
+      timp = tnext - cp.tangentImpulse; cp.tangentImpulse = tnext;
+      var qx = timp * tx, qy = timp * ty;
+      vAx -= mA * qx; vAy -= mA * qy; wA -= iA * (rA.x * qy - rA.y * qx);
+      vBx += mB * qx; vBy += mB * qy; wB += iB * (rB.x * qy - rB.y * qx);
+    }
+
+    // rolling resistance: a couple on the relative spin, capped at c·r·N
+    if (ct.rollingResistance > 0 && ct.rollingMass > 0) {
+      var maxR = ct.rollingResistance * total;
+      var rimp = -ct.rollingMass * (wB - wA);
+      var rnext = M.clamp(ct.rollingImpulse + rimp, -maxR, maxR);
+      rimp = rnext - ct.rollingImpulse; ct.rollingImpulse = rnext;
+      wA -= iA * rimp; wB += iB * rimp;
+    }
+
+    store(A, vAx, vAy, wA); store(B, vBx, vBy, wB);
     return total;
   }
 
+  /* ---------------------------------------------------------- restitution */
   function restituteContact(ct, cfg) {
+    // gauges first: forces from the last substep, before any bounce impulse
+    recordForces(ct, ct.h);
     if (ct.restitution === 0) return;
-    var A = ct.fa.body, B = ct.fb.body, n = ct.normal;
-    ct.points.forEach(function (cp) {
-      if (cp.relativeVelocity > -cfg.restitutionThreshold || cp.maxNormalImpulse === 0) return;
-      var vn = M.dot(relVel(A, B, cp.rA, cp.rB), n);
+    var A = ct.fa.body, B = ct.fb.body, n = ct.normal, nx = n.x, ny = n.y;
+    var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
+    var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
+    var pts = ct.points, any = false;
+    for (var i = 0; i < pts.length; i++) {
+      var cp = pts[i], rA = cp.rA, rB = cp.rB;
+      if (cp.relativeVelocity > -cfg.restitutionThreshold || cp.maxNormalImpulse === 0) continue;
+      var dvx = (vBx - wB * rB.y) - (vAx - wA * rA.y);
+      var dvy = (vBy + wB * rB.x) - (vAy + wA * rA.x);
+      var vn = dvx * nx + dvy * ny;
       var imp = -cp.normalMass * (vn + ct.restitution * cp.relativeVelocity);
       var next = Math.max(cp.normalImpulse + imp, 0);
       imp = next - cp.normalImpulse; cp.normalImpulse = next;
-      applyPair(A, B, cp.rA, cp.rB, M.scale(n, imp));
+      if (imp > cp.maxNormalImpulse) cp.maxNormalImpulse = imp;
+      cp.totalNormalImpulse += imp > 0 ? imp : 0;
+      var px = imp * nx, py = imp * ny;
+      vAx -= mA * px; vAy -= mA * py; wA -= iA * (rA.x * py - rA.y * px);
+      vBx += mB * px; vBy += mB * py; wB += iB * (rB.x * py - rB.y * px);
+      any = true;
+    }
+    if (any) { store(A, vAx, vAy, wA); store(B, vBx, vBy, wB); }
+  }
+
+  /* --------------------------------------------------------------- gauges */
+  function recordForces(ct, h) {
+    var invH = h > 0 ? 1 / h : 0, fn = 0, ft = 0, pts = ct.points;
+    for (var i = 0; i < pts.length; i++) { fn += pts[i].normalImpulse; ft += pts[i].tangentImpulse; }
+    ct.normalForce = fn * invH;
+    ct.frictionForce = ft * invH;
+    ct.rollingTorque = (ct.rollingImpulse || 0) * invH;
+  }
+
+  // Per-point forces in N for a substep h (world.substeps / dt):
+  // [{ point, normal (N, >= 0), tangent (N, signed along ct.tangent), force {x, y} on body B }]
+  function pointForces(ct, h) {
+    h = h || ct.h;
+    var invH = h > 0 ? 1 / h : 0, n = ct.normal || ct.manifold.normal, t = ct.tangent || M.rightPerp(n);
+    return ct.points.map(function (cp) {
+      var fn = cp.normalImpulse * invH, ft = cp.tangentImpulse * invH;
+      return { point: cp.point, normal: fn, tangent: ft, force: M.v(fn * n.x + ft * t.x, fn * n.y + ft * t.y) };
     });
   }
 
-  P.contactSolver = { prepare: prepareContact, warmStart: warmStartContact, solve: solveContact, restitute: restituteContact };
+  function prepareWithStep(ct, h, cfg) { ct.h = h; prepareContact(ct, h, cfg); }
+
+  P.contactSolver = {
+    prepare: prepareWithStep, warmStart: warmStartContact, solve: solveContact,
+    restitute: restituteContact, pointForces: pointForces, STICK_SPEED: STICK_SPEED
+  };
 })(globalThis.SE);
