@@ -15,16 +15,16 @@ suite('H7 trade ledger', () => {
 
   test('sling plates read in FPS and mean the 4-figure factors', () => {
     const plates = Y.partDef('h07-sling').dials[0].choice;
-    const want = { '150 lb': 150, '300 lb': 300, '600 lb': 600, '1 kip': 1000, '2.5 kip': 2500, '4 ton': 8000 };
+    const want = { '120 lb': 120, '250 lb': 250, '600 lb': 600, '1 kip': 1000, '2.5 kip': 2500, '4 ton': 8000 };
     plates.forEach(p => near(D.parse(p, 'force').si, want[p] * LB, 1e-6));
   });
 
   test('a sling holds a still load just under its plate and snaps just over it', () => {
-    const cap = 300 * LB;
+    const cap = 250 * LB;
     [[0.95, true], [1.05, false]].forEach(([f, holds]) => {
       const m = f * cap / 9.81;
       const d = { parts: [part('hook', { id: 'h', x: 0, y: 4.6 }), part('crate', { id: 'c', x: 0, y: 2.6, dials: { mass: m.toFixed(3) + ' kg' } }),
-        part('h07-sling', { id: 's', a: { part: 'h', anchor: 'eye' }, b: { part: 'c', anchor: 'top' }, dials: { plate: '300 lb' } })] };
+        part('h07-sling', { id: 's', a: { part: 'h', anchor: 'eye' }, b: { part: 'c', anchor: 'top' }, dials: { plate: '250 lb' } })] };
       const r = Y.judge({ design: d, goal: G.all(G.noBreaks(), G.after(3)), timeout: 4 });
       ok(r.pass === holds, f + ' of the plate: ' + r.reason);
       if (holds) near(r.state.read('s.tension'), m * 9.81, 0.02 * m * 9.81);
@@ -45,13 +45,13 @@ suite('H7 trade ledger', () => {
     near(W / (1000 * LB), 0.80, 0.01);
   });
 
-  test('the hatch window: 27.2 psi to 51.8 psi on a 100 mm bore', () => {
-    const psi = LB / (IN * IN), A = Math.PI * 0.1 * 0.1 / 4, W = 150 * 9.81, strap = 300 * LB;
+  test('the hatch window: 27.2 psi to 46.9 psi on a 100 mm bore', () => {
+    const psi = LB / (IN * IN), A = Math.PI * 0.1 * 0.1 / 4, W = 150 * 9.81, strap = 2 * 120 * LB;
     near(D.parse('32.0 psi', 'pressure').si, 32 * psi, 1e-6);
     near(32 * psi, 220.6e3, 50);
     near(32 * psi * A, 1733, 1);
     near(W / A / psi, 27.2, 0.05);
-    near((W + strap) / A / psi, 51.8, 0.05);
+    near((W + strap) / A / psi, 46.9, 0.05);
   });
 
   test('every job has a passing and a failing reference build', () => {
