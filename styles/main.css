@@ -279,6 +279,8 @@ a { color: var(--hazard); }
 .bin-pick { display: flex; gap: 4px; flex-wrap: wrap; }
 .bin-btn { font-family: var(--mono); font-size: 12px; padding: 4px 8px; border: 1.5px solid var(--ink); background: transparent; border-radius: 3px; cursor: pointer; color: var(--ink); }
 .bin-btn.on { background: var(--ink); color: var(--paper); }
+.classify-row.many { grid-template-columns: 1fr auto; }
+.classify-row.many .bin-pick { grid-column: 1 / -1; }
 @media (max-width: 520px) { .classify-row { grid-template-columns: 1fr; } }
 
 .level-complete { text-align: center; border-top: 6px solid var(--hazard); }

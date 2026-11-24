@@ -562,7 +562,7 @@
         sel.appendChild(bb);
       });
       var preview = it.preview ? btn('▶ watch', function () { it.preview(self.ctx); }, 'small ghost') : null;
-      var r = el('div', { class: 'classify-row' }, [el('div', { class: 'classify-item', html: inline(it.t) }), preview, sel]);
+      var r = el('div', { class: 'classify-row' + (s.bins.length > 3 ? ' many' : '') }, [el('div', { class: 'classify-item', html: inline(it.t) }), preview, sel]);
       return { el: r, get: function () { return chosen; }, it: it };
     });
     var list = el('div', { class: 'classify' }, rows.map(function (r) { return r.el; }));

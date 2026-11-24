@@ -249,10 +249,11 @@
     this.timed.push({ id: right.id, F: mag, t0: t0, t1: t1, kind: 'spring', pair: pair });
     this.wake();
   };
-  Track.prototype.wake = function () { if (this.state === 'idle') this.state = 'live'; };
+  Track.prototype.wake = function () { if (this.state === 'idle' || this.state === 'done') this.state = 'live'; };
   Track.prototype.start = Track.prototype.wake;
 
   Track.prototype.appliedForce = function (b) {
+    if (this.state === 'done') return 0;   // the run is over: the crew lets go
     var F = this.forceSet[b.id] || 0, t = this.time;
     for (var i = 0; i < this.timed.length; i++) {
       var e = this.timed[i];
