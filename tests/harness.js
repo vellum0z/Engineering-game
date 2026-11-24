@@ -17,7 +17,10 @@ function loadGame() {
   // UI-only scripts touch the DOM at load time; everything else must load
   // headless so physics and answer keys can be tested.
   const skip = /\/(ui|game|tools|runner|manual|main)\.js$/;
-  srcs.filter(s => s.startsWith('src/') && !skip.test(s)).forEach(s => require(path.join(ROOT, s)));
+  // Chapter files that are listed but not written yet are skipped, the same
+  // way a browser just logs a missing script.
+  srcs.filter(s => s.startsWith('src/') && !skip.test(s) && fs.existsSync(path.join(ROOT, s)))
+    .forEach(s => require(path.join(ROOT, s)));
   return globalThis.SE;
 }
 
