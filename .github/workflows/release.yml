@@ -1,9 +1,10 @@
 name: release
-# Pushing a version tag (v0.1.0, v0.2.0, ...) builds the offline download and
-# attaches it to a GitHub Release as salvage-engineer.zip.
+# When main carries a version (SE.version in src/engine/ns.js) that has no
+# release yet, build the offline download and publish a GitHub Release with
+# salvage-engineer.zip attached. Bumping the version is all a release takes.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 permissions:
   contents: write
 jobs:
@@ -15,17 +16,33 @@ jobs:
         with:
           node-version: 20
       - run: node tests/run.js
+      - name: Read the version
+        id: ver
+        run: |
+          v=$(node -e "globalThis.SE={};require('./src/engine/ns.js');console.log(SE.version)")
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+      - name: Check for an existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.v }}" > /dev/null 2>&1; then echo "exists=yes" >> "$GITHUB_OUTPUT"; else echo "exists=no" >> "$GITHUB_OUTPUT"; fi
       - name: Build the zip
+        if: steps.check.outputs.exists == 'no'
         run: |
           mkdir -p dist/salvage-engineer
           cp -r index.html src styles assets LICENSE README.md CHANGELOG.md dist/salvage-engineer/
           cd dist && zip -r -q salvage-engineer.zip salvage-engineer
       - name: Release notes from the changelog
+        if: steps.check.outputs.exists == 'no'
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          v="${{ steps.ver.outputs.v }}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
           printf '\n**To play offline:** download salvage-engineer.zip below, unzip it, and open index.html.\n' >> notes.md
       - name: Publish the release
+        if: steps.check.outputs.exists == 'no'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/salvage-engineer.zip --title "Salvage Engineer $GITHUB_REF_NAME" --notes-file notes.md
+        run: |
+          v="v${{ steps.ver.outputs.v }}"
+          gh release create "$v" dist/salvage-engineer.zip --target "$GITHUB_SHA" --title "Salvage Engineer $v" --notes-file notes.md
