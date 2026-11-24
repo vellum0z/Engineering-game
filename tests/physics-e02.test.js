@@ -368,3 +368,29 @@ suite('physics E02: sleeping', () => {
     ok(c.awake !== false, 'allowSleep false slept');
   });
 });
+
+suite('physics E02: snapshot / restore', () => {
+  test('restoring a busy scene (pair churn, sleeping, a sensor) replays bit-identically, twice', () => {
+    const w = world(), r = rng(9); ground(w);
+    w.add(new P.Body({ type: 'static', position: { x: 3, y: 0.5 }, shapes: [{ shape: P.box(1, 0.5), sensor: true }] }));
+    for (let i = 0; i < 120; i++) {
+      w.add(new P.Body({ position: { x: -6 + r() * 12, y: 0.6 + r() * 12 }, angle: r() * 6,
+        shapes: [i % 3 ? P.box(0.2 + r() * 0.3, 0.2 + r() * 0.3) : P.circle(0.25)] }));
+    }
+    const sig = () => w.bodies.map(b => [b.c.x, b.c.y, b.angle, b.awake]).flat();
+    let events;
+    ['contactBegin', 'contactEnd', 'sensorBegin', 'sensorEnd'].forEach(t => w.on(t, () => events++));
+    w.run(0.5);
+    const snap = P.snapshot(w);
+    events = 0; w.run(5);
+    const ref = sig(), refEvents = events;
+    ok(w.bodies.some(b => b.awake === false), 'nothing fell asleep, so sleeping is not exercised');
+    for (let k = 0; k < 2; k++) {
+      P.restore(w, snap);
+      events = 0; w.run(5);
+      const got = sig();
+      eq(events, refEvents, 'replay ' + k + ' event count');
+      for (let i = 0; i < ref.length; i++) if (got[i] !== ref[i]) throw new Error('replay ' + k + ': value ' + i + ' differs: ' + got[i] + ' vs ' + ref[i]);
+    }
+  });
+});
