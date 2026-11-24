@@ -60,6 +60,40 @@ Rules for parts:
 - **Rating plates can be in any unit**, including lb, kip or kgf, so the player has to convert.
 - Add a test for each part in `tests/yard-parts.test.js` that checks it against the textbook result it stands for.
 
+## Rigging parts
+
+`src/yard/parts/rigging.js`, tested in `tests/yard-parts-rigging.test.js`.
+
+| Part | Kind | Dials | Readouts | Anchors |
+| --- | --- | --- | --- | --- |
+| `winch` | connector: `a` = drum, `b` = hook | `pull` (max pull), `speed` (+ reels in), `rating` (line breaks), `brake` on/off, `stop` (line out to stop at), `route`, `parts` (falls to the hook) | `tension`, `lineOut`, `speed`, `hook` (only with 2+ falls) | |
+| `chain` | connector | `size` (6 to 16 mm, grade 80), `length` (empty = taut) | `tension` | |
+| `spring` | connector | `k`, `rest` (empty = as built), `rating`, `damping` light/none | `force` (+ = tension), `stretch` | |
+| `sheave` | static wheel | `size` (diameter) | | `rim` |
+| `jib` | static mast and boom, origin at the mast foot | `height`, `reach`, `facing` right/left | | `tip` (the tip sheave), `base` (drum mount) |
+| `counterweight` | load | `mass`, `cast` kg/lb (the unit on the side) | `speed` (vertical) | `top`, `left`, `right`, `bottom` |
+
+What each one does in the engine:
+
+- **Winch**: a `WinchJoint`. Above `pull` the drum is overhauled and the load runs down (the inspector art says STALLED). With `brake` on, a stopped drum holds anything the line can carry. With `brake` off and speed 0 the drum free-wheels and the load falls. `stop` stops reeling in (or paying out, for a negative speed) when the line out reaches it. Line out counts every run, including drum to sheave.
+- **Chain**: a pull-only rope joint rated at `P.rating.cable('chain80', d)` (10 mm breaks at about 126 kN). The plate prints the working load limit (breaking load / 4) and the breaking load in kN and lb. Its own weight is applied half at each end, and the art drapes it when slack. A slack chain that jerks tight can snap: that is a real shock load.
+- **Spring**: a `DistanceJoint` spring, F = k·(L − rest), pushing and pulling. `light` damping is a damping ratio of 0.05 on the lighter end.
+
+### Running a line over a sheave
+
+A `winch` or a `cable` has a `route` dial:
+
+- `direct`: the line runs straight from end `a` to end `b`.
+- `over sheave`: the line runs from `a` to the nearest sheave to end `b` (a `sheave` part, or the tip of a `jib`), then down to `b`. With no sheave in the yard the build is refused with a reason.
+
+A level can name the sheave instead: `{ type: 'winch', via: { part: 'jibA' }, ... }`. That wins over the dial. Sheaves are frictionless points at their hub, so the tension is the same all along the line: a sheave turns a pull, it doesn't change its size.
+
+The winch's `parts` dial is the number of falls between the sheave and the hook (a block and tackle). The hook carries `parts` × line tension and rises at speed / `parts`, so a winch too weak for a direct lift can manage it with a tackle.
+
+A cable over a sheave is a `PulleyJoint` with both sides on the sheave, so the same breaking load applies on both sides. Any part that wants lines to run over it can return `sheave: { body, local, r }` from `build`.
+
+A typical crane: a `jib`, a `winch` from the jib's `base` to the load's `top` with `route: 'over sheave'`.
+
 ## Writing a yard level
 
 See `src/chapters/ch01/levels/h01-still-or-moving.js` for a complete example.
