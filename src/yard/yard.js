@@ -420,6 +420,14 @@
       var dd = segDist(p, seg[0], seg[1]);
       if (dd < bd) { bd = dd; best = id; }
     });
+    if (best) return best;
+    // parts with no body of their own (a site marker, a stopwatch): their size box
+    (this.design.parts || []).forEach(function (inst) {
+      var d = Y.partDef(inst.type), bp = self.built.parts[inst.id];
+      if (best || !d || d.connector || inst.x == null || (bp && bp.body)) return;
+      var sz = Y.sizeOf(inst);
+      if (Math.abs(p.x - inst.x) <= sz.w / 2 && Math.abs(p.y - inst.y) <= sz.h / 2) best = inst.id;
+    });
     return best;
   };
   Yard.prototype.connectorSegment = function (bp) {
