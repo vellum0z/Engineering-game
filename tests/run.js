@@ -1,0 +1,10 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const h = require('./harness');
+h.loadGame();
+fs.readdirSync(__dirname).filter(f => f.endsWith('.test.js')).sort().forEach(f => require(path.join(__dirname, f)));
+const r = h.results;
+r.failures.forEach(f => console.log('✗ ' + f));
+console.log(`\n${r.pass} passed, ${r.fail} failed`);
+process.exit(r.fail ? 1 : 0);
