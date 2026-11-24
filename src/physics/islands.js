@@ -13,10 +13,17 @@
  * neither do kinematic ones; a kinematic body that is moving keeps every
  * island it touches awake.
  *
- * A body is "still" while |v| < SLEEP_LINEAR (0.05 m/s) and
- * |w| < SLEEP_ANGULAR (2°/s). body.sleepTime counts how long it has been
- * still. When every body in an island has been still for TIME_TO_SLEEP
- * (0.5 s), the whole island sleeps: awake = false, v = w = 0. The world then
+ * A body is "still" while |v| < SLEEP_LINEAR (0.01 m/s),
+ * |w| < SLEEP_ANGULAR (0.5°/s) and every joint and touching contact on it
+ * has settled: its force changed by less than SETTLE_TOLERANCE (1e-4)
+ * relative to its size since the last step. body.sleepTime counts how long
+ * it has been still. When every body in an island has been still for
+ * TIME_TO_SLEEP (0.5 s), the whole island sleeps: awake = false, v = w = 0.
+ * The force check matters for statics: soft joints keep creeping towards
+ * equilibrium long after the bodies look still, and a structure must not
+ * freeze before its gauges read the equilibrium values. Each threshold can
+ * be overridden on world.cfg (sleepLinear, sleepAngular, timeToSleep,
+ * sleepSettleTolerance). The world then
  * skips those bodies, and skips contacts and joints whose bodies are all
  * asleep or static, so a settled stack costs nothing. The contact impulses
  * are kept, so the stack warm-starts when it wakes.
@@ -34,9 +41,22 @@
   'use strict';
   var P = SE.phys;
 
-  var SLEEP_LINEAR = 0.05;                     // m/s
-  var SLEEP_ANGULAR = 2 * Math.PI / 180;       // rad/s
+  var SLEEP_LINEAR = 0.01;                     // m/s
+  var SLEEP_ANGULAR = 0.5 * Math.PI / 180;     // rad/s
   var TIME_TO_SLEEP = 0.5;                     // s
+  var SETTLE_TOLERANCE = 1e-4;                 // relative change in a force per step
+  var FORCE_FLOOR = 1;                         // N (or N·m): below this, changes count as absolute
+
+  function cfgOr(world, k, d) { var v = world.cfg && world.cfg[k]; return v == null ? d : v; }
+
+  // Has a force stopped changing? Relative change against the larger of the
+  // two readings, with a 1 N floor so a force that is near zero isn't judged
+  // by its rounding noise.
+  function settled(now, prev, tol, ref) {
+    if (prev == null) return false;
+    var d = Math.abs(now - prev), scale = Math.max(Math.abs(now), Math.abs(prev), ref || 0, FORCE_FLOOR);
+    return d <= tol * scale;
+  }
 
   function enabled(world) { return !world.cfg || world.cfg.enableSleep !== false; }
   function moving(b) { return b.v.x !== 0 || b.v.y !== 0 || b.w !== 0; }
@@ -129,6 +149,31 @@
     world.contacts.forEach(function (ct) { if (ct.touching) link(ct.fa.body, ct.fb.body, true); });
     world.joints.forEach(function (j) { if (j.bodyA && j.bodyB) link(j.bodyA, j.bodyB, true); });
 
+    // forces still changing keep their bodies awake (sleeping ones are frozen
+    // and so read as settled)
+    var tol = cfgOr(world, 'sleepSettleTolerance', SETTLE_TOLERANCE);
+    function unsettle(A, B) { A._unsettled = true; B._unsettled = true; }
+    for (i = 0; i < bodies.length; i++) bodies[i]._unsettled = false;
+    world.joints.forEach(function (j) {
+      if (!j.bodyA || !j.bodyB) return;
+      var F = j.lastForce != null ? j.lastForce : j.force(), T = j.lastTorque || 0;
+      var ok = settled(F, j._sleepForce, tol) && settled(T, j._sleepTorque, tol);
+      j._sleepForce = F; j._sleepTorque = T;
+      if (!ok) unsettle(j.bodyA, j.bodyB);
+    });
+    world.contacts.forEach(function (ct) {
+      if (!ct.touching) return;
+      var N = 0, Tn = 0, invH = world.substeps / dt;
+      for (var q = 0; q < ct.points.length; q++) { N += ct.points[q].normalImpulse; Tn += ct.points[q].tangentImpulse; }
+      N *= invH; Tn *= invH;
+      // friction is judged against the normal force it is bounded by
+      var ok = settled(N, ct._sleepN, tol) && settled(Tn, ct._sleepT, tol, Math.abs(N));
+      ct._sleepN = N; ct._sleepT = Tn;
+      if (!ok) unsettle(ct.fa.body, ct.fb.body);
+    });
+    var linTol = cfgOr(world, 'sleepLinear', SLEEP_LINEAR), angTol = cfgOr(world, 'sleepAngular', SLEEP_ANGULAR);
+    var timeToSleep = cfgOr(world, 'timeToSleep', TIME_TO_SLEEP);
+
     // still-time per awake body
     var groups = new Map();
     for (i = 0; i < bodies.length; i++) {
@@ -140,8 +185,8 @@
         continue;
       }
       if (b.awake !== false) {
-        var still = b.allowSleep !== false && !b._keepAwake &&
-          b.v.x * b.v.x + b.v.y * b.v.y < SLEEP_LINEAR * SLEEP_LINEAR && Math.abs(b.w) < SLEEP_ANGULAR;
+        var still = b.allowSleep !== false && !b._keepAwake && !b._unsettled &&
+          b.v.x * b.v.x + b.v.y * b.v.y < linTol * linTol && Math.abs(b.w) < angTol;
         b.sleepTime = still ? b.sleepTime + dt : 0;
       }
       var root = find(b);
@@ -160,7 +205,7 @@
         if (isl[k].sleepTime < minSleep) minSleep = isl[k].sleepTime;
       }
       if (!anyAwake) return;
-      if (minSleep >= TIME_TO_SLEEP) {
+      if (minSleep >= timeToSleep) {
         for (k = 0; k < isl.length; k++) {
           var s = isl[k];
           s.awake = false; s.v = { x: 0, y: 0 }; s.w = 0;
@@ -175,5 +220,6 @@
   P.SLEEP_LINEAR = SLEEP_LINEAR;
   P.SLEEP_ANGULAR = SLEEP_ANGULAR;
   P.TIME_TO_SLEEP = TIME_TO_SLEEP;
+  P.SLEEP_SETTLE_TOLERANCE = SETTLE_TOLERANCE;
   P.islands = { update: update, beforeStep: beforeStep, wakeIsland: wakeIsland, islandOf: islandOf };
 })(globalThis.SE);

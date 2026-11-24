@@ -292,6 +292,27 @@ suite('physics E02: sleeping', () => {
     near(w.contactForceOn(s[4], 1 / 60).y, 50 * g, 0.02);
   });
 
+  test('a slow-settling cable structure sleeps only once its forces have settled: tension matches the never-sleeping run within 0.1%', () => {
+    // Ring on two rigid cables (50° and 20°) with a 150 kg crate on a rope
+    // below it. The soft joints creep for a while after the bodies look still;
+    // sleeping then would freeze a tension about 1% off equilibrium.
+    function build(sleep) {
+      const w = world(); w.cfg.enableSleep = sleep;
+      const sky = w.add(new P.Body({ type: 'static', shapes: [] }));
+      const ring = w.add(new P.Body({ shapes: [P.circle(0.05)], mass: 2 }));
+      const load = w.add(new P.Body({ position: { x: 0, y: -2 }, shapes: [P.box(0.3, 0.3)], mass: 150 }));
+      const a = 50 * Math.PI / 180, b = 20 * Math.PI / 180;
+      const cA = w.addJoint(new P.DistanceJoint({ bodyA: sky, bodyB: ring, localAnchorA: { x: -2.5 * Math.cos(a), y: 2.5 * Math.sin(a) } }));
+      w.addJoint(new P.DistanceJoint({ bodyA: sky, bodyB: ring, localAnchorA: { x: 3 * Math.cos(b), y: 3 * Math.sin(b) } }));
+      w.addJoint(new P.DistanceJoint({ bodyA: ring, bodyB: load, localAnchorB: { x: 0, y: 0.3 }, rope: true }));
+      w.run(4);
+      return { cA, load };
+    }
+    const on = build(true), off = build(false);
+    ok(on.load.awake === false, 'structure never slept');
+    near(on.cA.tension(), off.cA.tension(), 1e-3);
+  });
+
   test('a ball hitting the sleeping stack wakes the whole island', () => {
     const w = world(); ground(w); const s = stack(w, 5);
     w.run(3);
