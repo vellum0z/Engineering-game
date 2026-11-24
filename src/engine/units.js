@@ -419,7 +419,7 @@
     q.unit.factors.forEach(function (f) {
       if (!f.prefix) return;
       var asUnit = UNITS[f.prefix === 'μ' ? '' : f.prefix];
-      if (asUnit && f.written === f.prefix + f.sym) {
+      if (asUnit && f.prefix !== f.sym && f.written === f.prefix + f.sym) {
         out.push({ written: f.written, asPrefix: PREFIXES[f.prefix].name + UNITS[f.sym].name, asProduct: f.prefix + '·' + f.sym });
       }
     });

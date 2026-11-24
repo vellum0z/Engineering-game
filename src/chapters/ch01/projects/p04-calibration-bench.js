@@ -59,10 +59,10 @@
   // bay = L/9 = 0.916 744 m, s = 7 bays = 6.417 209 m  ->  6.417 m (to the mm)
   // Rounding every step to 3 s.f.: 15.4, 52.7, 68.1, 8.25, 0.917, 6.42 m:
   // 2.8 mm long, and the hole only has ±0.5 mm of play.
-  var CHAIN_RIG = { mode: 'chain', h: CRANE.h, r: CRANE.r, bays: CRANE.bays, k: CRANE.k, sf: 3, keep: 'round', clearance: 1 * MM, pinDia: 25 * MM, markRes: 1 * MM, label: 'splice' };
+  var CHAIN_RIG = { mode: 'chain', h: CRANE.h, r: CRANE.r, bays: CRANE.bays, k: CRANE.k, sf: 3, keep: 'round', clearance: 1 * MM, pinDia: 25 * MM, markRes: 1 * MM, label: 'splice', hideKey: true };
 
   // 7. Splice plate area from the caliper (least count 0.02 mm).
-  var PLATE = { mode: 'caliper', a: 112.463, b: 63.177, res: 0.02, label: 'splice plate' };
+  var PLATE = { mode: 'caliper', a: 112.463, b: 63.177, res: 0.02, label: 'splice plate', hideKey: true };
   var RA = B.vernierRead(PLATE.a, PLATE.res), RB = B.vernierRead(PLATE.b, PLATE.res);
   var AREA = B.propagate('product', [RA.reading, RB.reading], [RA.res, RB.res]);
   var AREA_SF = B.sigFigsJustified(AREA.value, AREA.abs);
@@ -317,7 +317,7 @@
           s.chainMark = function () { return mark; };
           return s.run({ keep: 'round' }).then(function (r) {
             var d = r.detail;
-            var where = 'Drilled at ' + mm(mark, 0) + '; the stay pin arrives at ' + mm(STAY, 1) + ' (' + signedMm(d.error, 1) + ', play ±0.5 mm).';
+            var where = 'Drilled at ' + mm(mark, 0) + '; the pin lands ' + signedMm(-d.error, 1) + ' from the hole centre (play ±0.5 mm).';
             if (r.outcome === 'fits') return where + ' The pin slides home and the stay takes up the boom.';
             return where + (Math.abs(mark - STAY_CHAIN) < 0.6 * MM ? ' That is exactly where the round-every-step sheet put it. Six small roundings, ' + mm(STAY_CHAIN - STAY, 1) + ' of error, and the pin won\'t go.' : ' The pin jams against the edge of the hole.');
           });

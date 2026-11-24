@@ -28,7 +28,8 @@
  *            and the result is written to the figures that uncertainty
  *            justifies.
  *
- * Params (all modes): mode, label.
+ * Params (all modes): mode, label, hideKey (manual mode: keep the exact
+ *            answer off the sheet and readouts so a retry is not given away).
  *   fence:   boards (N), seed, fiveFrac (share of readings that land on an
  *            exact 5 at the dropped digit), rule, sf (cut-list figures, 3),
  *            gapLimit (m, zombie squeeze width), overrunLimit (m),
@@ -700,7 +701,7 @@
       ctx.fillStyle = j < shown ? C.paper : 'rgba(236,226,198,0.25)';
       ctx.fillText(calc.labels[j], 22, yy);
       if (j < shown) {
-        ctx.fillStyle = C.paperDim; ctx.fillText(sig(calc.exactSteps[j], 7), colF, yy);
+        ctx.fillStyle = C.paperDim; ctx.fillText(p.hideKey ? '·····' : sig(calc.exactSteps[j], 7), colF, yy);
         ctx.fillStyle = C.paperDim; ctx.fillText(SE.sigfig.roundSig(calc.roundedSteps[j], p.sf, p.rule).text, colR, yy);
       }
     }
@@ -733,9 +734,9 @@
     }.bind(this));
 
     var lines = [
-      'L      ' + sig(Math.sqrt(p.h * p.h + p.r * p.r), 6) + ' m',
+      'L      ' + (p.hideKey ? '(hidden)' : sig(Math.sqrt(p.h * p.h + p.r * p.r), 6) + ' m'),
       'bolt   node ' + p.k + ' of ' + p.bays,
-      'exact  ' + (calc.exact * 1000).toFixed(2) + ' mm',
+      'exact  ' + (p.hideKey ? '(hidden)' : (calc.exact * 1000).toFixed(2) + ' mm'),
       'chain  ' + (calc.rounded * 1000).toFixed(2) + ' mm',
       'slack  ±' + (p.clearance * 500).toFixed(2) + ' mm'
     ];
@@ -835,8 +836,8 @@
       lines.push('rel RSS  √((ua/a)²+(ub/b)²) = ' + (pr.rel * 100).toFixed(3) + ' %');
       lines.push('rel worst  ua/a + ub/b     = ' + (pr.worstRel * 100).toFixed(3) + ' %');
       lines.push('±' + sig(pr.abs, 2) + ' mm² (RSS)   ±' + sig(pr.worstAbs, 2) + ' mm² (worst)');
-      lines.push('justifies ' + this.just + ' s.f. → A = ' + sig(pr.value, this.just) + ' mm²');
-      lines.push('            = ' + SE.sigfig.formatEng(pr.value * 1e-6, this.just) + ' m²');
+      if (!p.hideKey || (this.result && p.claim === this.just)) lines.push('justifies ' + this.just + ' s.f. → A = ' + sig(pr.value, this.just) + ' mm²');
+      if (!p.hideKey || (this.result && p.claim === this.just)) lines.push('            = ' + SE.sigfig.formatEng(pr.value * 1e-6, this.just) + ' m²');
       if (p.claim != null) lines.push('you wrote ' + p.claim + ' s.f.' + (this.result ? (p.claim === this.just ? '  ✓' : '  ✗') : ''));
     }
     SE.sceneUtil.readout(ctx, 12, Math.max(sy + sh + 44, h - 12 - lines.length * 17 - 12), lines);
@@ -889,9 +890,11 @@
     }
     if (p.mode === 'chain') {
       var c = this.calc;
+      if (p.hideKey) return ['chain error ' + mmS(c.error), 'hole slack ±' + (p.clearance * 500).toFixed(2) + ' mm'];
       return ['exact bolt ' + (c.exact * 1000).toFixed(2) + ' mm', 'rounded chain ' + (c.rounded * 1000).toFixed(2) + ' mm', 'chain error ' + mmS(c.error), 'hole slack ±' + (p.clearance * 500).toFixed(2) + ' mm'];
     }
     var pr = this.prop;
+    if (p.hideKey) return ['RSS ±' + sig(pr.abs, 2) + ' mm²', 'worst ±' + sig(pr.worstAbs, 2) + ' mm²'];
     return ['A = ' + sig(pr.value, this.just) + ' mm² (' + this.just + ' s.f.)', 'RSS ±' + sig(pr.abs, 2) + ' mm²', 'worst ±' + sig(pr.worstAbs, 2) + ' mm²'];
   };
 
