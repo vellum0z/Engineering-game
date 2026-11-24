@@ -26,6 +26,8 @@
       { key: 'material', label: 'Material', choice: SURFACES, def: 'ice' }
     ],
     anchors: { left: { x: -5, y: 0.1 }, right: { x: 5, y: 0.1 } },
+    sizeFor: function (inst, v) { return v.length ? { w: v.length, h: 0.2 } : null; },
+    anchorsFor: function (inst, v) { return v.length ? { left: { x: -v.length / 2, y: 0.1 }, right: { x: v.length / 2, y: 0.1 } } : null; },
     build: function (b) {
       var L = b.si('length'), mat = b.text('material');
       var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), angle: b.inst.angle || 0, label: b.inst.label || mat,

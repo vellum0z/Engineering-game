@@ -112,3 +112,11 @@ suite('yard: push acts where it is clipped', () => {
     near(b.w, -10 * 0.5 * 0.1 / b.I, 1e-4);   // clockwise: torque -r F
   });
 });
+
+suite('yard: surface size follows its length dial', () => {
+  test('a 4 m strip has its ends 2 m either side', () => {
+    const Yd = globalThis.SE.yard, inst = Yd.makeInstance('surface', { dials: { length: '4 m' } });
+    const a = Yd.anchorTable(inst);
+    near(a.right.x, 2); near(a.left.x, -2); near(Yd.sizeOf(inst).w, 4);
+  });
+});
