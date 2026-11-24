@@ -9,7 +9,7 @@
 (function (root) {
   'use strict';
   var SE = root.SE || {};
-  SE.version = '0.1.0';
+  SE.version = '0.2.0';
   SE.chapters = SE.chapters || {};
   SE.scenes = SE.scenes || {};
   root.SE = SE;

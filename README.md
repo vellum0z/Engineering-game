@@ -24,15 +24,15 @@ Keyboard: `F` formula sheet · `C` calculator · `U` unit converter · `D` dimen
 
 ## Two ways to play every act
 
-**Handheld mode** is guided and Socratic. Each idea starts as a situation and a question: what do you think happens? You try it in the simulation, and only then is the principle stated and every equation derived on screen, step by step. Each concept ends with a hands-on job and a free sandbox. Optional **Go deeper** branches go beyond the course (history, the physics behind the idealizations, error propagation, real engineering practice).
+Every level and project is played in the **build yard**, a physics sandbox. You place parts (crates, carts, cables, winches, springs, scales, rams, jibs), type their settings with units ("2.5 kN", "300 lb", "0.45 m"), and press **Run**. The physics engine decides what happens. There are no multiple-choice questions and no answer boxes: a number only matters once it is a setting on a part, and the part does exactly what you typed.
 
-Strong players can take a **Prove it** check at the start of a level to skip explanations they already know. The scored jobs still have to be done.
+**Handheld mode** gives you a small kit of parts and a guide. Each idea follows the same loop: set it up, poke it, watch the rule appear with your own numbers, do a scored job, then free play. Optional **Go deeper** branches go beyond the course (history, the physics behind the idealizations, error propagation, real engineering practice).
 
-**Manual mode** gives you a project brief from the settlement, the sandbox and your tools, and nothing else. You do all the maths; the game checks your numbers against the real physics. Hints exist but only appear if you ask (nudge → method → worked step), and each costs score. Manual briefs include real-world factors beyond the course text, such as gravity at altitude, measurement precision or another planet's gravity, and you have to account for them.
+**Manual mode** gives you a job card from the settlement and the whole parts library, and nothing else. You do all the maths and build it your way; the simulation is the only judge. Hints exist but only appear if you ask (nudge → method → worked step), and each costs score. Manual job cards include real-world factors beyond the course text, such as gravity at altitude, measurement precision or another planet's gravity, and you have to account for them.
 
 ## Scoring
 
-Each answer is checked for its **value**, **units** (dimensions), **significant figures / notation / rounding**, and **method** (correct SI form, dimensionally homogeneous equations). When something is wrong, the game names the kind of error (unit, conversion, prefix, rounding, sig-fig, algebra, concept) and shows its physical consequence. Tasks are graded S/A/B/C, and each chapter shows a mastery percentage and your personal bests. Scores are feedback only and never lock you out of anything.
+A job is signed off when the simulation passes it: the load hovers, the cart parks in the dock, the cable holds. The score then takes off points for hints, failed runs and how close to the edge you built. Where a job asks you to write a setting down (a rating plate, a label, a certificate), that setting is also checked for its **value**, **units**, **significant figures / notation / rounding** and **SI form**. Jobs are graded S/A/B/C, and each chapter shows a mastery percentage and your personal bests. Scores are feedback only and never lock you out of anything.
 
 ## Acts
 
@@ -62,9 +62,11 @@ If your browser blocks storage (some private windows do), the game warns you; ex
 
 ```
 index.html            entry point; script order is load order
-styles/main.css
-src/engine/           units & dimensions, sig figs, answer checker, scoring, saves, UI, runners
-src/engine/scenes/    physics scenes: hoist, track, gate, gravity, scales, haul, bench
+physics-lab.html      physics engine test bench
+styles/               main.css, yard.css
+src/physics/          the physics engine (rigid bodies, joints, cables, breakage, sensors, camera)
+src/yard/             the build yard: dials, parts, the judge, the yard screen, level and project runners
+src/engine/           units & dimensions, sig figs, checker, scoring, saves, UI
 src/chapters/chNN/    one module per chapter: chapter.js, levels/, projects/
 tests/                node tests
 ```
@@ -75,7 +77,7 @@ Run the tests with Node 18 or newer:
 node tests/run.js
 ```
 
-The tests cover the unit parser, dimension checker, sig-fig and rounding rules, scoring, save migration, every scene's physics, and every answer key in the game. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to write levels and projects.
+The tests cover the unit parser, dimension checker, sig-fig and rounding rules, scoring, save migration, the physics engine against textbook results, every yard part, and a reference build for every job in the game (one that must pass and one that must fail), run headless through the same judge the game uses. See [docs/YARD.md](docs/YARD.md) for how to write parts, levels and projects, and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules.
 
 ## Credits
 

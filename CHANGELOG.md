@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-24
+
+### Changed
+- Act I is rebuilt as a physics sandbox. Every level and project is played in the build yard: place parts, type their settings with units, press Run, and the simulation decides. Multiple-choice questions and answer boxes are gone.
+- Handheld levels give a kit, ghost outlines and a guide, and teach each idea by showing it in the simulation before the rule is written with the player's own numbers.
+- Manual projects give a job card and the full parts library; each job is signed off by the simulation.
+- Scoring now judges the build: hints, failed runs and margin, plus the value, units, figures and SI form of any setting a job asks you to write down.
+
+### Added
+- A new physics engine: rigid bodies with a soft-step solver, contact friction, distance, revolute, weld, prismatic, pulley and winch joints, cables and chains with breaking loads, structures, sensors, replay and a camera.
+- The build yard: typed dials with unit checking, a parts library (loads, pushes, cables, chains, springs, sheaves, jibs, winches, counterweights, spring scales, load cells, stopwatches, tapes, pendulums, balances, calipers, gates, rams, tanks, latches, sleds, boards and posts), a gauge strip, and Run, Step and Reset.
+- A physics lab page for trying the engine on its own.
+- Reference builds for every job, checked headless by the tests.
+
 ## [0.1.0] - 2026-11-24
 
 ### Added
