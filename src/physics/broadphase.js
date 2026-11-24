@@ -473,10 +473,18 @@
         else world.emit('contactEnd', { a: A, b: B, fa: fa, fb: fb });
       }
     });
-    // contacts can be left behind if world.remove() dropped a body's pairs
-    if (world.contacts.size > st.pairs.size) {
-      world.contacts.forEach(function (ct, key) { if (!st.pairs.has(key)) world.contacts.delete(key); });
-    }
+    // Solve order. The solver walks world.contacts in Map order, and with
+    // Gauss-Seidel the order matters: pairs come out of the tree roughly in
+    // the order bodies were added, so a stack built bottom-up would always be
+    // solved floor-first, which leaves tall columns and pyramids rocking.
+    // Alternating the direction every step (symmetric Gauss-Seidel) removes
+    // that bias whatever order the level was built in. This also drops
+    // contacts that world.remove() left without a pair.
+    var list = [];
+    st.pairs.forEach(function (pr) { var c = world.contacts.get(pr.key); if (c) list.push(c); });
+    if (st.stamp & 1) list.reverse();
+    world.contacts.clear();
+    for (i = 0; i < list.length; i++) world.contacts.set(list[i].key, list[i]);
     begins.forEach(function (ct) {
       world.emit('contactBegin', { a: ct.fa.body, b: ct.fb.body, fa: ct.fa, fb: ct.fb,
         point: ct.points[0].point, normal: ct.manifold.normal });
