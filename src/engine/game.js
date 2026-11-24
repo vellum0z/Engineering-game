@@ -274,7 +274,7 @@
       var ch = SE.content.chapter(args.chapter);
       var sb = ch && (ch.sandboxes || []).filter(function (s) { return s.id === args.id; })[0];
       if (!sb) return this.show('act', { chapter: args.chapter });
-      var lv = { id: sb.id, chapter: ch.id, title: sb.title, sections: sb.sections || [], intro: sb.text, scene: sb.scene, steps: [{ type: 'sandbox', text: sb.text, prompts: sb.prompts, controls: sb.controls, actions: sb.actions }] };
+      var lv = { sandbox: true, id: sb.id, chapter: ch.id, title: sb.title, sections: sb.sections || [], intro: sb.text, scene: sb.scene, steps: [{ type: 'sandbox', text: sb.text, prompts: sb.prompts, controls: sb.controls, actions: sb.actions }] };
       var r = new SE.Runner(lv);
       this.active = r;
       r.mount(this.main);

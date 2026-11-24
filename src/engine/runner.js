@@ -61,7 +61,7 @@
     this.panel = el('aside', { class: 'panel clipboard', 'aria-live': 'polite' }, [
       el('div', { class: 'clip' }),
       el('div', { class: 'panel-head' }, [
-        el('div', { class: 'panel-kicker', text: 'Handheld · ' + this.level.id + ' · Sections ' + (this.level.sections || []).join(', ') }),
+        el('div', { class: 'panel-kicker', text: (this.level.sandbox ? 'Free sandbox' : 'Handheld · ' + this.level.id) + ((this.level.sections || []).length ? ' · Sections ' + this.level.sections.join(', ') : '') }),
         el('h1', { class: 'panel-title', text: this.level.title }),
         this.progress = el('div', { class: 'step-progress' })
       ]),
@@ -665,6 +665,7 @@
   Runner.prototype.complete = function () {
     var self = this;
     var lv = this.level;
+    if (lv.sandbox) { this.game.show('act', { chapter: lv.chapter }); return; }
     this.archiveCard();
     this.applySideEffects({ unlock: lv.unlocks && lv.unlocks.tools, formula: lv.unlocks && lv.unlocks.formulas, material: lv.unlocks && lv.unlocks.materials });
     var ids = [];
