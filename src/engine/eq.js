@@ -16,7 +16,10 @@
   var SYMBOLS = {
     cdot: '·', times: '×', approx: '≈', ne: '≠', le: '≤', ge: '≥', to: '→', pm: '±',
     Sigma: 'Σ', Delta: 'Δ', mu: 'μ', rho: 'ρ', theta: 'θ', pi: 'π', alpha: 'α', omega: 'ω',
-    infty: '∞', deg: '°', minus: '−', quad: ' ', implies: '⇒', propto: '∝', dot: '·'
+    infty: '∞', deg: '°', minus: '−', quad: ' ', implies: '⇒', propto: '∝', dot: '·',
+    Rightarrow: '⇒', rightarrow: '→', leftarrow: '←', Leftrightarrow: '⇔', equiv: '≡', sim: '∼',
+    ll: '≪', gg: '≫', lambda: 'λ', sigma: 'σ', tau: 'τ', phi: 'φ', epsilon: 'ε', beta: 'β',
+    gamma: 'γ', Omega: 'Ω', circ: '°', prime: '′', qquad: '  '
   };
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -45,7 +48,11 @@
       var c = src[i];
       if (c === '\\') {
         var m = /^\\([A-Za-z]+)/.exec(src.slice(i));
-        if (!m) { out += esc(src[i + 1] || ''); i += 2; continue; }
+        if (!m) {
+          var nx = src[i + 1] || '';
+          out += nx === ',' ? '\u2009' : (nx === ';' || nx === ':') ? '\u2005' : nx === '!' ? '' : esc(nx);
+          i += 2; continue;
+        }
         var name = m[1];
         i += m[0].length;
         if (name === 'frac') {
@@ -60,6 +67,8 @@
         } else if (name === 'hl' || name === 'strike') {
           var g3 = readGroup(src, i); i = g3[1];
           out += '<span class="eq-' + name + '">' + render(g3[0]) + '</span>';
+        } else if (name === 'left' || name === 'right') {
+          // sizing hints only: the bracket that follows is rendered as is
         } else if (SYMBOLS[name]) {
           out += '<span class="eq-sym">' + SYMBOLS[name] + '</span>';
         } else {
