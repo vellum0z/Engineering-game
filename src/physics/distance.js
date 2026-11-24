@@ -126,11 +126,16 @@
   };
 
   DistanceJoint.prototype.warmStart = function () {
+    var world = this.bodyA.world || this.bodyB.world;
+    if (world && this.lineBlockStep === world.stepCount) return;   // the winch warm-starts it
     var g = this.geometry(), imp = this.axial() - (this.explicit ? this.springImpulse : 0);
     P.applyPair(this.bodyA, this.bodyB, g.rA, g.rB, M.scale(g.axis, imp));
   };
 
   DistanceJoint.prototype.solve = function (h, useBias) {
+    // a winch is solving this rope together with its line this step (winch.js)
+    var world = this.bodyA.world || this.bodyB.world;
+    if (world && this.lineBlockStep === world.stepCount) return;
     var A = this.bodyA, B = this.bodyB, g = this.geometry();
     var mass = this.effMass(g);
     if (mass === 0) return;
@@ -193,7 +198,13 @@
 
   // Positive = tension (pulling the ends together), negative = compression.
   DistanceJoint.prototype.tension = function () { return -this.axial() * this.invH; };
-  DistanceJoint.prototype.force = function () { return Math.abs(this.axial()) * this.invH; };
+  DistanceJoint.prototype.force = function () {
+    var F = Math.abs(this.axial()) * this.invH;
+    // a rope a winch solved this step reports the step's largest pull (winch.js)
+    var world = this.bodyA.world || this.bodyB.world;
+    if (world && this.lineBlockStep === world.stepCount && this.linePeak) F = Math.max(F, this.linePeak * this.invH);
+    return F;
+  };
   DistanceJoint.prototype.currentLength = function () { return this.geometry().L; };
   DistanceJoint.prototype.isSlack = function () {
     if (!this.rope) return false;
