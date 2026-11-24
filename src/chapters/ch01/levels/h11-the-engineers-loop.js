@@ -11,8 +11,8 @@
  * pull below the weight stalls, a rope below the load parts, a pull far over
  * the load snatches the rope.
  *
- * Parts used: jib, winch (rigging contract), cable (core), plus three parts
- * that only this level needs, defined at the bottom: h11-tank, h11-hook,
+ * Parts used: jib and winch (rigging), cable (core), plus four parts that
+ * only this level needs, defined at the bottom: h11-tank, h11-hook,
  * h11-sketch and h11-sling.
  */
 (function (SE) {
@@ -53,23 +53,26 @@
   // Jib mast on the ground at x = -8, boom reaching 8 m to the hoist point
   // over the pad at x = 0, 17 m up. The tower deck is 9.0 m up.
   var TIP = { x: 0, y: 17 };
+  var JIB = { x: -8, height: 17.35, reach: 8 };    // the jib's tip sheave hangs 0.35 m under the boom
+  var DRUM = { x: JIB.x + 0.4, y: 0.5 };            // winch drum at the foot of the mast
   var SLING = 1.0;                    // m, hook block to tank lid
   var HOOK_H = 0.5;
   var HOOK_Y = TH + SLING + HOOK_H / 2;            // hook block centre at rest
   var LIFT = 9.2;                     // tank base ends 9.2 m up, just over the deck
-  var STOP = (TIP.y - (HOOK_Y + HOOK_H / 2)) - LIFT; // line out when the winch stops
+  // line out when the winch stops: drum up to the tip sheave, then down to the hook
+  var STOP = Math.hypot(TIP.x - DRUM.x, TIP.y - DRUM.y) + (TIP.y - (HOOK_Y + HOOK_H / 2)) - LIFT;
   var DECK = 9.0;
 
   function scenery() {
     return [
-      { id: 'jib', type: 'jib', x: -8, y: 0, dials: { height: '17 m', reach: '8 m' }, locked: true, label: 'gantry jib' },
+      { id: 'jib', type: 'jib', x: JIB.x, y: 0, dials: { height: JIB.height + ' m', reach: JIB.reach + ' m', facing: 'right' }, locked: true, label: 'gantry jib' },
       { id: 'tower', type: 'block', x: 3.6, y: DECK / 2, dials: { width: '3 m', height: DECK + ' m' }, locked: true, label: 'signal tower' },
       { id: 'deck', type: 'zone', x: 0, y: DECK + TH / 2 + 0.2, dials: { width: '3.2 m', height: (TH + 0.4) + ' m' }, locked: true, label: 'deck level' }
     ];
   }
   function winch(pull, extra) {
-    return Object.assign({ id: 'winch', type: 'winch', a: { part: 'jib', anchor: 'tip' }, b: { part: 'hook', anchor: 'top' },
-      dials: { pull: pull || '5 kN', speed: '0.5 m/s', rating: '400 kN', brake: 'on', stop: STOP.toFixed(2) + ' m' },
+    return Object.assign({ id: 'winch', type: 'winch', a: { part: 'jib', anchor: 'base' }, b: { part: 'hook', anchor: 'top' }, via: { part: 'jib' },
+      dials: { pull: pull || '5 kN', speed: '0.5 m/s', rating: '400 kN', brake: 'on', stop: STOP.toFixed(3) + ' m', route: 'over sheave', parts: '1' },
       locked: true, open: ['pull'], label: 'jib winch' }, extra || {});
   }
   function hook() { return { id: 'hook', type: 'h11-hook', x: 0, y: HOOK_Y, locked: true, label: 'hook block' }; }
@@ -131,7 +134,7 @@
   var LIFT_GOAL = G.all(
     G.noBreaks(),
     stalled,
-    G.holdFor('deck', function (s) { return base(s, 'tank') >= DECK && s.speed('tank') < 0.03; }, 1)
+    G.holdFor('deck', function (s) { return base(s, 'tank') >= DECK; }, 0.25)
   );
 
   SE.content.registerLevel('ch01', {
@@ -238,14 +241,14 @@
           '[\\u{m^2}][\\u{m}] = [\\u{m^3}] \\qquad [\\u{kg/m^3}][\\u{m^3}] + [\\u{kg}] = [\\u{kg}] \\qquad [\\u{kg}][\\u{m/s^2}] = [\\u{N}]',
           'P_{\\t{winch}} = 1.02\\,W \\qquad [\\u{N}] = [\\u{N}]'
         ],
-        text: 'Chain the principles, checking the units at every line. Each one has the same units on both sides, so the algebra can\'t have dropped a term. A formula like $\\frac{\\pi}{4}d^2 + h$ fails at once (m² plus m). But a consistent one can still be wrong: $\\pi d^2 h$ is m³ and **four times too big**, because the base area is π(d/2)². Check the units first because it\'s fast, then the physics.\n\nThe winch dial checks units too. Type a **mass** into its pull dial and it refuses: a winch pulls with a force.'
+        text: 'Chain the principles, checking the units at every line. Each one has the same units on both sides, so the algebra can\'t have dropped a term. A formula like $\\frac{\\pi}{4}d^2 + h$ fails at once (m² plus m). But a consistent one can still be wrong: $\\pi d^2 h$ is m³ and **four times too big**, because the base area is π(d/2)². Check the units first because it\'s fast, then the physics.\n\nThe winch dial checks units too. Type a **mass** into its Max pull dial and it refuses: a winch pulls with a force.'
       },
 
       /* ----------------------------------------------------- phase 4: solve */
       {
         type: 'watch', who: 'hask', kicker: 'Phase 4 of 5 · Solve',
         yard: { design: PROOF_DESIGN, goal: runFor(14, 'tank'), readouts: ['proof.tension', 'tank.lift'] },
-        text: '**Phase 4: solve.** Work out the weight of the tank and water. Keep every digit until the end, then round once.\n\nThe tank is on a **proof chain** that nothing here can break. Select the **jib winch** and set its **pull** to Juno\'s rule, **1.02 × your W**. Then run the governor test.',
+        text: '**Phase 4: solve.** Work out the weight of the tank and water. Keep every digit until the end, then round once.\n\nThe tank is on a **proof chain** that nothing here can break. Select the **jib winch** and set its **Max pull** to Juno\'s rule, **1.02 × your W**. Then run the governor test.',
         goalText: 'The tank lifts off on the proof chain',
         until: function (ctx, type) {
           if (type !== 'result' || !ctx.result) return false;
@@ -300,11 +303,11 @@
         text: function (ctx) {
           return 'The proof chain belongs to the test bench. For the real lift, take **one rope from the rack** and rig it from the bottom of the hook block to the tank lid. Select it to choose which rope it is. The tags are a mess of units:\n\n' +
             ROPES.map(function (r) { return '- ' + r.name + ': **' + r.tag + '**'; }).join('\n') + '\n\n' +
-            'Use the **lightest** rope that survives the lift. The winch is set to ' + (ctx.values.pull ? 'your **' + ctx.values.pull + '**' : 'pull **1.02 × W**') + ', and as the drum starts the rope feels the full pull, not just the weight. Run it: the tank has to end up hanging still at **deck level**.';
+            'Use the **lightest** rope that survives the lift. The winch is set to ' + (ctx.values.pull ? 'your **' + ctx.values.pull + '**' : 'pull **1.02 × W**') + ', and as the drum starts the rope feels the full pull, not just the weight. Run it: the tank has to rise to **deck level**, where the crew swings it across.';
         },
         goal: LIFT_GOAL,
-        timeout: 40,
-        goalText: 'Tank hanging still at deck level, with nothing broken',
+        timeout: 45,
+        goalText: 'Tank lifted to deck level, with nothing broken',
         onFail: function (ctx) {
           var sl = ctx.find('h11-sling');
           if (!sl) return 'Nothing was holding the tank: rig a rope from the hook block to the lid.';
@@ -329,7 +332,7 @@
         },
         success: function (ctx) {
           var sl = ctx.find('h11-sling'), r = sl ? rope(sl.dials.rope) : BEST;
-          var msg = 'The tank is at deck level and the crew is sliding it across. ' + r.name + ' (' + r.tag + ' = ' + kN(r.rating) + ') carried it.';
+          var msg = 'The tank is at deck level and the crew is swinging it across. ' + r.name + ' (' + r.tag + ' = ' + kN(r.rating) + ') carried it.';
           if (r !== BEST) msg += ' It held, but rope C (45 kip = 200 kN) is lighter and still enough.';
           return msg + '\n\nIn one unit the rack reads 150, 160, 200, 250 and 400 kN. The trap was B: "36 000" looks huge until you remember a pound is only 4.448 N.';
         }
@@ -499,64 +502,4 @@
     readouts: function (built) { return [{ key: 'tension', label: 'tension', q: 'force', read: function () { return built.joint.broken ? 0 : Math.max(0, built.joint.tension ? built.joint.tension() : built.joint.force()); } }]; }
   });
 
-  /* ------------------------------------------------ rigging stand-ins */
-  // The jib and winch belong to the rigging parts (src/yard/parts/rigging.js).
-  // Until they are in, these minimal versions follow the same contract
-  // (type names, dials, anchors, readouts) so this level can be built and
-  // tested. They step aside as soon as the real parts are registered.
-  if (!Y.partDef('jib')) {
-    Y.definePart({
-      type: 'jib', name: 'Crane jib', category: 'Rigging', library: false,
-      blurb: 'A fixed mast with a boom. The hoist point is at the boom tip.',
-      size: { w: 1, h: 6 },
-      dials: [{ key: 'height', label: 'Height', q: 'length', def: '6 m', min: 1, max: 60 }, { key: 'reach', label: 'Reach', q: 'length', def: '3 m', min: 0.5, max: 40 }],
-      anchors: { tip: { x: 3, y: 6 }, base: { x: 0, y: 0 } },
-      build: function (b) {
-        var h = b.si('height'), r = b.si('reach');
-        var mast = b.body({ type: 'static', position: b.at({ x: 0, y: h / 2 }), label: b.inst.label || 'jib', shapes: [{ shape: b.P.box(0.2, h / 2), material: 'steel' }] });
-        var boom = b.body({ type: 'static', position: b.at({ x: r / 2, y: h + 0.15 }), label: '', shapes: [{ shape: b.P.box(r / 2 + 0.2, 0.15), material: 'steel' }] });
-        return { body: mast, bodies: [mast, boom], anchors: {
-          tip: { body: boom, local: boom.localPoint(b.at({ x: r, y: h })) },
-          base: { body: mast, local: mast.localPoint(b.at({ x: 0, y: 0 })) } } };
-      }
-    });
-  }
-  if (!Y.partDef('winch')) {
-    Y.definePart({
-      type: 'winch', name: 'Winch', category: 'Rigging', library: false,
-      blurb: 'A motor drum that reels in its line. It pulls up to its rated pull, then stalls.',
-      size: { w: 0.8, h: 0.6 },
-      connector: true,
-      dials: [
-        { key: 'pull', label: 'Pull', q: 'force', def: '5 kN', min: 0 },
-        { key: 'speed', label: 'Speed', q: 'speed', def: '0.3 m/s' },
-        { key: 'rating', label: 'Line breaks at', q: 'force', def: '20 kN', min: 1 },
-        { key: 'brake', label: 'Brake', choice: ['on', 'off'], def: 'on' },
-        { key: 'stop', label: 'Stop at line out', q: 'length', def: '', optional: true }
-      ],
-      build: function (b) {
-        var A = b.end('a'), B = b.end('b');
-        var j = b.joint(new b.P.WinchJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
-          reelSpeed: b.si('speed'), maxPull: b.si('pull'), brake: b.text('brake') === 'on', breakForce: b.si('rating'),
-          minLength: b.si('stop') || 0, label: b.inst.label || 'winch' }));
-        // the drum eases down to the stop (0.25 m/s²), then the brake takes the load
-        var stop = b.si('stop'), v0 = b.si('speed');
-        if (stop != null && v0 > 0) b.on('step', function () {
-          if (j.reelSpeed <= 0) return;
-          var left = j.length - stop;
-          j.reelSpeed = left <= 1e-4 ? 0 : Math.min(v0, Math.sqrt(2 * 0.25 * left) + 0.01);
-        });
-        return { joint: j };
-      },
-      plate: function (inst) { return ['Pull ' + inst.dials.pull, 'Line breaks at ' + inst.dials.rating]; },
-      readouts: function (built) {
-        var j = built.joint;
-        return [
-          { key: 'tension', label: 'tension', q: 'force', read: function () { return j.broken ? 0 : j.lineTension(); } },
-          { key: 'lineOut', label: 'line out', q: 'length', read: function () { return j.lineOut(); } },
-          { key: 'speed', label: 'line speed', q: 'speed', read: function () { return j.speed; } }
-        ];
-      }
-    });
-  }
 })(globalThis.SE);
