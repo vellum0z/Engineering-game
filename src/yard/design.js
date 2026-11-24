@@ -120,7 +120,9 @@
   function build(design, site) {
     var P = SE.phys;
     site = Object.assign({ g: 9.81, floor: 'concrete', floorWidth: 80 }, site || {});
-    var world = new P.World({ gravity: { x: 0, y: -site.g }, substeps: site.substeps || 4 });
+    // breakHysteresis: a rope that snatches tight has a one-step force spike;
+    // a part breaks only when its rating is exceeded for a few steps in a row
+    var world = new P.World({ gravity: { x: 0, y: -site.g }, substeps: site.substeps || 4, breakHysteresis: site.breakHysteresis == null ? 3 : site.breakHysteresis });
     var ground;
     if (site.floor) {
       ground = world.add(new P.Body({ type: 'static', position: { x: 0, y: -0.5 }, label: 'floor', shapes: [{ shape: P.box(site.floorWidth / 2, 0.5), material: site.floor }] }));

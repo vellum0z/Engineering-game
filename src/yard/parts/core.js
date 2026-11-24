@@ -64,7 +64,7 @@
     size: { w: 0.3, h: 0.3 },
     anchors: { eye: { x: 0, y: 0 } },
     build: function (b) {
-      var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: 'hook', shapes: [{ shape: b.P.circle(0.12), sensor: true }] });
+      var body = b.body({ type: 'static', position: b.at({ x: 0, y: 0 }), label: b.inst.label || 'hook', shapes: [{ shape: b.P.circle(0.12), sensor: true }] });
       return { body: body, anchors: { eye: { body: body, local: { x: 0, y: 0 } } } };
     }
   });
