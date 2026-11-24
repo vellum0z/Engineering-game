@@ -144,7 +144,7 @@
       js.wrong++;
       var ctx = { result: r, yard: this.yard };
       fb.appendChild(el('div', { class: 'feedback bad' }, [el('div', { class: 'feedback-head', text: 'Failed the test.' }), el('div', { html: md(r.reason) }),
-        j.onFail ? el('div', { class: 'sim-msg', html: md(j.onFail(ctx) || '') }) : null]));
+        (function () { var t = j.onFail && j.onFail(ctx); return t ? el('div', { class: 'sim-msg', html: md(t) }) : null; })()]));
       SE.game.persist();
       return;
     }

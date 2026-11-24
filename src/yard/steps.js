@@ -229,7 +229,7 @@
       if (!e.pass) {
         SE.ui.clear(fb);
         fb.appendChild(el('div', { class: 'feedback bad' }, [el('div', { class: 'feedback-head', text: 'Not yet.' }), el('div', { html: md(e.reason || '') }),
-          s.onFail ? el('div', { class: 'sim-msg', html: md(val(s.onFail, ctx) || '') }) : null]));
+          (function () { var t = s.onFail && val(s.onFail, ctx); return t ? el('div', { class: 'sim-msg', html: md(t) }) : null; })()]));
         return;
       }
       var score = Y.jobScore(s, { pass: true, state: e.state, hintTier: hintTier, failedRuns: y.failedRuns });
