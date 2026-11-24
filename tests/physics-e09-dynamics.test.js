@@ -266,11 +266,11 @@ suite('e09 dynamics: energy drift limits', () => {
   });
   test('pinned 4-link chain swinging for 10 s: energy within 2% and pins stay together (< 1 mm)', () => {
     // Released straight out sideways. The links share a collision group so
-    // they never hit each other: any energy change is the solver's.
+    // they never hit each other (a negative group never collides with itself): any energy change is the solver's.
     const w = world(), top = fixed(w, 0, 0), Ls = 0.5;
     let prev = top;
     for (let i = 0; i < 4; i++) {
-      const link = w.add(new P.Body({ position: { x: Ls * i + Ls / 2, y: 0 }, shapes: [{ shape: P.box(Ls / 2, 0.02), group: 1 }], mass: 2 }));
+      const link = w.add(new P.Body({ position: { x: Ls * i + Ls / 2, y: 0 }, shapes: [{ shape: P.box(Ls / 2, 0.02), group: -1 }], mass: 2 }));
       w.addJoint(new P.RevoluteJoint({ bodyA: prev, bodyB: link, worldAnchor: { x: Ls * i, y: 0 } }));
       prev = link;
     }

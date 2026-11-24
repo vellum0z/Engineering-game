@@ -68,7 +68,7 @@ function build() {
   w.addJoint(new P.DistanceJoint({ bodyA: beam, bodyB: bob, localAnchorA: { x: 0, y: -0.1 }, rope: true }));
   let prev = beam;
   for (let i = 0; i < 5; i++) {
-    const link = w.add(new P.Body({ position: { x: 6 - 0.2 - i * 0.4, y: 5.9 }, shapes: [{ shape: P.box(0.2, 0.03), group: 3 }], mass: 1 }));
+    const link = w.add(new P.Body({ position: { x: 6 - 0.2 - i * 0.4, y: 5.9 }, shapes: [{ shape: P.box(0.2, 0.03), group: -3 }], mass: 1 }));
     w.addJoint(new P.RevoluteJoint({ bodyA: prev, bodyB: link, worldAnchor: { x: 6 - i * 0.4, y: 5.9 } }));
     prev = link;
   }

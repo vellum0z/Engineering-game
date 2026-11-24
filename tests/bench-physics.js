@@ -61,7 +61,7 @@ const scenes = {
       let prev = beam; const x0 = -chains + 0.5 + 2 * c;
       for (let k = 0; k < per && made < n; k++, made++) {
         // links lie out sideways so the chains swing for the whole run
-        const link = w.add(new P.Body({ position: { x: x0 + 0.2 + 0.4 * k, y: 19.9 }, shapes: [{ shape: P.box(0.2, 0.04), group: c + 1 }], mass: 1 }));
+        const link = w.add(new P.Body({ position: { x: x0 + 0.2 + 0.4 * k, y: 19.9 }, shapes: [{ shape: P.box(0.2, 0.04), group: -(c + 1) }], mass: 1 }));
         w.addJoint(new P.RevoluteJoint({ bodyA: prev, bodyB: link, worldAnchor: { x: x0 + 0.4 * k, y: 19.9 } }));
         prev = link;
       }
