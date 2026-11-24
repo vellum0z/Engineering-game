@@ -115,7 +115,9 @@
     if (d1 <= 0) out.push(pts[1]);
     if (d0 * d1 < 0) {
       var t = d0 / (d0 - d1);
-      out.push({ p: M.lerp(pts[0].p, pts[1].p, t), id: 50 + refIndex + (d0 > 0 ? 0 : 10) });
+      // a clipped point keeps the id of the incident vertex it replaces, so the
+      // id doesn't flip when a vertex sits exactly on a side plane
+      out.push({ p: M.lerp(pts[0].p, pts[1].p, t), id: d0 > 0 ? pts[0].id : pts[1].id });
     }
     return out;
   }
