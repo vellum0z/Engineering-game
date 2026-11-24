@@ -187,8 +187,8 @@
       case 'neg': return '−' + wrap(n.a);
       case 'sum': return n.terms.map(function (t, i) { return (i ? (t.sign < 0 ? ' − ' : ' + ') : (t.sign < 0 ? '−' : '')) + toText(t.node); }).join('');
       case 'mul': return wrap(n.l) + '·' + wrap(n.r);
-      case 'div': return wrap(n.l) + '/' + wrap(n.r);
-      case 'pow': return wrap(n.b) + '^' + wrap(n.e);
+      case 'div': return wrap(n.l) + '/' + (n.r.type === 'mul' || n.r.type === 'div' ? '(' + toText(n.r) + ')' : wrap(n.r));
+      case 'pow': return (n.b.type === 'mul' || n.b.type === 'div' ? '(' + toText(n.b) + ')' : wrap(n.b)) + '^' + wrap(n.e);
       case 'fn': return n.f + '(' + toText(n.a) + ')';
       case 'eq': return toText(n.l) + ' = ' + toText(n.r);
     }
