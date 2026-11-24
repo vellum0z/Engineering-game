@@ -122,7 +122,8 @@
     if (!b || !j || j.broken) return;
     var v = b.v.y, a = m.lastV == null ? 0 : (v - m.lastV) / s.dt;
     m.lastV = v;
-    if (v > 0.1 && Math.abs(a) < 0.02 && s.t > 1) m.steadyT = j.force();
+    // average over the steady window: the tank sways a little on the chain
+    if (v > 0.1 && Math.abs(a) < 0.02 && s.t > 1) { m.sumT = (m.sumT || 0) + j.force(); m.nT = (m.nT || 0) + 1; m.steadyT = m.sumT / m.nT; }
   }
   // goal for "run it and look" steps: run for t seconds, noting the steady tension
   function runFor(t, load) { return function (s) { watchSteady(s, load); return s.t >= t - 1e-9 ? 'pass' : null; }; }
@@ -495,7 +496,9 @@
       var A = b.end('a'), B = b.end('b'), r = rope(b.text('rope'));
       var L = Math.hypot(B.world.x - A.world.x, B.world.y - A.world.y);
       var j = b.joint(new b.P.DistanceJoint({ bodyA: A.body, bodyB: B.body, localAnchorA: A.local, localAnchorB: B.local,
-        rope: true, length: L, breakForce: r.rating, label: b.inst.label || r.name }));
+        // steel wire rope stretches a little (EA about 20 MN), so a snatch builds over a few
+        // hundredths of a second instead of one instant
+        rope: true, length: L, EA: 2e7, breakForce: r.rating, label: b.inst.label || r.name }));
       return { joint: j, rope: r };
     },
     plate: function (inst) { var r = rope(inst.dials.rope); return [r.name, 'Breaks at ' + r.tag]; },
