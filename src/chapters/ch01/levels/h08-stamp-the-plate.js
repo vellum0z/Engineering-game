@@ -11,8 +11,6 @@
  * slide down.
  *
  * Level part (bottom of this file): `h08-governor`, the governed hoist.
- * Until the rigging parts land, a stand-in `jib` with the contract's dials
- * and anchors is registered here only if no `jib` exists yet.
  */
 (function (SE) {
   'use strict';
@@ -34,9 +32,9 @@
 
   /* ------------------------------------------------------------ the rig */
 
-  var JIB = { id: 'jib', type: 'jib', x: 0, y: 0, dials: { height: '7 m', reach: '3 m' }, locked: true, label: 'port crane' };
+  var JIB = { id: 'jib', type: 'jib', x: 0, y: 0, dials: { height: '6 m', reach: '4 m' }, locked: true, label: 'port crane' };
   function load(id, W, label, extra) {
-    return Object.assign({ id: id, type: 'crate', x: 3, y: HANG_Y, dials: { mass: massFor(W) }, locked: true, hide: ['mass'], label: label, plate: ['Weight ' + kN(W)] }, extra || {});
+    return Object.assign({ id: id, type: 'crate', x: 4, y: HANG_Y, dials: { mass: massFor(W) }, locked: true, hide: ['mass'], label: label, plate: ['Weight ' + kN(W)] }, extra || {});
   }
   function governor(dials, open, extra) {
     return Object.assign({ id: 'gov', type: 'h08-governor', a: { part: 'jib', anchor: 'tip' }, b: { part: 'gen', anchor: 'top' },
@@ -44,7 +42,7 @@
       locked: true, open: open || ['hold'], label: 'governed hoist' }, extra || {});
   }
 
-  var CAMERA = { fit: { lo: { x: -2.5, y: -0.5 }, hi: { x: 7.5, y: 8 } } };
+  var CAMERA = { fit: { lo: { x: -2, y: -0.5 }, hi: { x: 8.5, y: 7 } } };
   var SITE = { g: g, floor: 'concrete' };
   var READOUTS = ['gov.tension', 'gov.height'];
 
@@ -52,7 +50,7 @@
   var RIGGED = { parts: [JIB, load('gen', GEN_W, 'generator'), governor()] };
   var STRICT = { parts: [JIB, load('gen', GEN_W, 'generator'), governor({ hold: '2450 N', firmware: 'strict' })] };
   var PALLET = { parts: [JIB, load('gen', PALLET_W, 'pallet'), governor({ hold: '6.359 MN' })] };
-  var TRAILER = { id: 'trailer', type: 'block', x: 3, y: 0.6, dials: { width: '2.4 m', height: '1.2 m' }, locked: true, label: 'trailer bed' };
+  var TRAILER = { id: 'trailer', type: 'block', x: 4, y: 0.6, dials: { width: '2.4 m', height: '1.2 m' }, locked: true, label: 'trailer bed' };
   var LOWER = { parts: [JIB, load('gen', GEN_W, 'generator'), TRAILER,
     governor({ hold: '2450 N', dwell: '3000 ms', lower: '0.25 mm/ms', firmware: 'strict' }, ['hold', 'dwell', 'lower'])] };
 
@@ -92,7 +90,7 @@
       var hit = s.impacts.filter(function (i) { return (i.a === 'gen' || i.b === 'gen') && i.speed > 0.5; })[0];
       return hit ? 'The generator hit the ' + (hit.a === 'trailer' || hit.b === 'trailer' ? 'trailer' : 'ground') + ' at ' + f3(hit.speed) + ' m/s. The crew wants it set down below 0.5 m/s.' : null;
     }),
-    G.restIn('gen', { x0: 2, x1: 4, y0: 1.6, y1: 1.9 }, { maxSpeed: 0.02, hold: 1 }));
+    G.restIn('gen', { x0: 3, x1: 5, y0: 1.6, y1: 1.9 }, { maxSpeed: 0.02, hold: 1 }));
 
   /* ------------------------------------------------------- level helpers */
 
@@ -375,14 +373,20 @@
         var d = drumAt(), h = hookAt(), dx = d.x - h.x, dy = d.y - h.y, r = Math.hypot(dx, dy);
         // the motor pulls the hold tension; a line can't carry more than its rating
         if (hold > rating) {
-          if (world.time === 0) return;        // snaps on the first step, so the judge sees it
+          // a motor pull, not a one-step spike, so no break hysteresis: the
+          // line parts as the drum bites (on the first step, so the judge sees it)
+          if (world.time === 0) return;
           st.mode = 'gone'; st.pull = 0; j.broken = true; world.removeJoint(j);
           world.emit('break', { joint: j, force: hold, torque: 0, reason: 'force', part: null });
           return;
         }
         if (r <= 0.6) { st.mode = 'stop'; st.pull = 0; grip(r); return; }   // hook block at the drum stop
         st.pull = hold;
-        if (B.body.type === 'dynamic' && hold > 0) { B.body.wake && B.body.wake(); B.body.applyForce({ x: hold * dx / r, y: hold * dy / r }, h); }
+        pullAlong();
+      }
+      function pullAlong() {
+        var d = drumAt(), h = hookAt(), dx = d.x - h.x, dy = d.y - h.y, r = Math.hypot(dx, dy);
+        if (B.body.type === 'dynamic' && st.pull > 0 && r > 0) { if (B.body.wake) B.body.wake(); B.body.applyForce({ x: st.pull * dx / r, y: st.pull * dy / r }, h); }
       }
       if (!halt) { apply(); b.on('step', apply); }
       return { joint: j, halt: halt, state: st, hook: B, tension: function () { return j.broken ? 0 : st.mode === 'hold' ? st.pull : Math.max(0, j.lineTension()); } };
@@ -414,25 +418,4 @@
     }
   });
 
-  // Stand-in crane jib with the rigging contract's dials and anchors, used
-  // only until the rigging parts define the real one. x, y is the mast foot;
-  // the tip is `reach` out from the mast at `height`.
-  if (!Y.partDef('jib')) {
-    Y.definePart({
-      type: 'jib', name: 'Crane jib', category: 'Rigging',
-      blurb: 'A fixed mast and boom. Hoists hang from the tip.',
-      size: { w: 3, h: 7 },
-      dials: [
-        { key: 'height', label: 'Height', q: 'length', def: '7 m', min: 1, max: 40 },
-        { key: 'reach', label: 'Reach', q: 'length', def: '3 m', min: 0.5, max: 30 }
-      ],
-      anchors: { tip: { x: 3, y: 7 }, base: { x: 0, y: 0 } },
-      build: function (b) {
-        var H = b.si('height'), R = b.si('reach'), P = b.P;
-        var mast = b.body({ type: 'static', position: b.at({ x: 0, y: H / 2 }), label: 'mast', shapes: [{ shape: P.box(0.15, H / 2), material: 'steel' }] });
-        var boom = b.body({ type: 'static', position: b.at({ x: R / 2, y: H + 0.12 }), label: 'boom', shapes: [{ shape: P.box(R / 2 + 0.15, 0.12), material: 'steel' }] });
-        return { body: mast, bodies: [mast, boom], anchors: { tip: { body: boom, local: boom.localPoint(b.at({ x: R, y: H })) }, base: { body: mast, local: mast.localPoint(b.at({ x: 0, y: 0 })) } } };
-      }
-    });
-  }
 })(globalThis.SE);
