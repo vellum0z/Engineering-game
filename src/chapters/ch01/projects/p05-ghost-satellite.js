@@ -74,7 +74,7 @@
   var W_LB = 190;
   var mSlug = W_LB / G_FPS;                             // 5.9006 slug
   var M_SURV = mSlug * SLUG;                            // 86.09 kg
-  var W_MOON_LB = mSlug * 5.30;                         // 31.27 lb  (SI route: 86.09 x 1.62 / 4.448 = 31.36 lb)
+  var W_MOON_LB = mSlug * 5.32;                         // 31.39 lb  (SI route: 86.09 x 1.62 / 4.448 = 31.36 lb)
   var HOVER_TOL = 0.15, HOVER_T = 4, BAL_TOL = 0.05, BAL_T = 4;
 
   var f3 = function (x) { return D.fmtNum(x, 3); };
@@ -375,7 +375,7 @@
       'The rig sheave is frictionless and light, and the rope doesn\'t stretch. The counterweight has inertia too.',
       'The test mast replays gravity **400 km up**. Up there g is **not** 9.81.',
       'The bench balls are cast steel, 450 kg each, radius 240 mm, **touching**. Its test masses are 40 kg and 65 kg with centres 1.20 m apart.',
-      'The lunar platform\'s site marker is set to the Moon (the placard there says **5.30 ft/s²**). The survivor weighed **190 lb** on the depot scale.'
+      'The lunar platform\'s site marker is set to the Moon (the placard there says **5.32 ft/s²**). The survivor weighed **190 lb** on the depot scale.'
     ],
     yard: yardFor({ site: RIG_SITE, design: RIG, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 9.5 } } } }),
     jobs: [
@@ -455,7 +455,7 @@
         hints: [
           'Clip a **Push** onto the survivor pointing up (90°), lasting the whole test. To hover, it must equal their **weight on the Moon**.',
           'The survivor\'s mass doesn\'t change on the trip. Get it from the Earth weight: $m = W / g = 190 / 32.2$ slug. On the Moon $W_m = m g_m$ with $g_m = 5.30$ ft/s².',
-          '$m = 5.90$ slug, so $W_m = 5.90 \\times 5.30 = 31.3$ lb. Set the jet to **31.3 lb** at 90° for 4 s.'
+          '$m = 5.90$ slug, so $W_m = 5.90 \\times 5.32 = 31.4$ lb. Set the jet to **31.4 lb** at 90° for 4 s.'
         ],
         onFail: function (ctx) {
           var p = ctx.yard && ctx.yard.design.parts.filter(function (q) { return q.type === 'push'; })[0];
@@ -463,7 +463,7 @@
           if (r && r.ok && Math.abs(r.si / (W_LB * LBF) - 1) < 0.02) return 'That is the survivor\'s **Earth** weight. Weight is m g, and g on the Moon is about a sixth of Earth\'s.';
           return '';
         },
-        success: 'Hovering. The survivor weighs about **' + D.fmtNum(W_MOON_LB, 3) + ' lb** on the Moon (' + D.fmtNum(mSlug, 3) + ' slug × 5.30 ft/s²), a sixth of the 190 lb the depot scale showed, because weight is $m g$ and only g changed. Work it in SI from the marker\'s ' + D.fmtNum(gMoonCalc, 4) + ' m/s² and you get ' + D.fmtNum(M_SURV * gMoonCalc / LBF, 3) + ' lb: the course constants are rounded, and the jet doesn\'t mind the difference.'
+        success: 'Hovering. The survivor weighs about **' + D.fmtNum(W_MOON_LB, 3) + ' lb** on the Moon (' + D.fmtNum(mSlug, 3) + ' slug × 5.32 ft/s²), a sixth of the 190 lb the depot scale showed, because weight is $m g$ and only g changed. Work it in SI from the marker\'s ' + D.fmtNum(gMoonCalc, 4) + ' m/s² and you get ' + D.fmtNum(M_SURV * gMoonCalc / LBF, 3) + ' lb: the course constants are rounded, and the jet doesn\'t mind the difference.'
       },
       {
         id: 'P5.balance', label: '**Lunar platform: mass.** The jets are being refuelled. Balance the same survivor over the platform sheave with a counterweight, so they stay within 5 cm for **4 s**.',

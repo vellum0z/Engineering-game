@@ -163,7 +163,7 @@
         text: [
           'The number of **significant figures** in a number is how accurately it is known.',
           '- Every nonzero digit counts: **7302** has four significant figures.',
-          '- Zeros at the **end of a whole number** are ambiguous: **48 600** could have three, four or five. So could the clerk\'s 1200.',
+          '- Trailing zeros on a **whole number** are ambiguous: **48 600** could have three, four or five. So could the clerk\'s 1200.',
           '- **Engineering notation** settles it. Round to the figures you mean, then write the number with a power of ten that is a **multiple of 3**: (10³), (10⁶), (10⁻³), (10⁻⁹). So 48 600 known to three figures is **48.6(10³)**; known to five it is **48.600(10³)**. A prefix does the same job: 48.6 kN, or **1.24 m** instead of 1240 mm.',
           '- Zeros at the **start** of a number less than one only place the decimal point, so they are not significant: **0.004 17** has three figures and is **4.17(10⁻³)**.'
         ].join('\n'),

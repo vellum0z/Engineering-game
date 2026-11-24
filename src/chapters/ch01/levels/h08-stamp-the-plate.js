@@ -295,7 +295,7 @@
         steps: [
           { type: 'say', who: 'hask', text: 'Steps of 1000 line up with how numbers are written in groups of three digits, 7 000 000, so a prefix change is always "move the gap". It also means engineering notation needs only exponents that are multiples of 3, and the number in front always lands between 1 and 1000. Hecto, deca, deci and centi break that pattern, which is why engineers leave them alone.' },
           { type: 'say', who: 'hask', text: 'The full SI list runs much further than Table 1–3: tera (10¹²), peta (10¹⁵), exa (10¹⁸), zetta (10²¹), yotta (10²⁴) up top, and pico, femto, atto, zepto, yocto below. In 2022 the General Conference on Weights and Measures added **ronna** (R, 10²⁷) and **quetta** (Q, 10³⁰), with **ronto** (r) and **quecto** (q) for the small end.' },
-          { type: 'say', who: 'hask', text: 'The **kilogram** is the only base unit with a prefix in its name. The metric system of the 1790s started from the gram, but a gram is too small to make a good physical standard, so the platinum reference that got built was a kilogram. When the base units were chosen, the kilogram was the one with a real artefact behind it, and it kept its prefix. That is why 1000 kg is written 1 Mg, not 1 kkg.' }
+          { type: 'say', who: 'hask', text: 'The **kilogram** is the odd base unit out: its name already carries a prefix. The metric system of the 1790s started from the gram, but a gram is too small to make a good physical standard, so the platinum reference that got built was a kilogram. When the base units were chosen, the kilogram was the one with a real artefact behind it, and it kept its prefix. That is why 1000 kg is written 1 Mg, not 1 kkg.' }
         ]
       },
       {
@@ -303,7 +303,7 @@
         points: [
           'Prefixes G, M, k, m, μ, n are 10⁹, 10⁶, 10³, 10⁻³, 10⁻⁶, 10⁻⁹. Each step moves the decimal point three places: 4 000 000 N = 4000 kN = 4 MN.',
           'A prefix is part of the value. One wrong letter is a factor of 1000, and a literal machine applies it.',
-          'No deca or centi in engineering. The **kilogram** is the only base unit defined with a prefix, so 1000 kg is 1 Mg.',
+          'No deca or centi in engineering. The **kilogram** already has kilo in it, so 1000 kg is written 1 Mg.',
           'A **dot** separates multiplied units (m·s vs ms). An **exponent** applies to the prefix too (mm² = (mm)²).',
           '**No prefix in a denominator**, except kg: kN/m, not N/mm.',
           'Calculate in base units and powers of ten, then re-express with **one** prefix and a number between **0.1 and 1000**.'

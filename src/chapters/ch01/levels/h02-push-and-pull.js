@@ -1,8 +1,7 @@
 /*
  * H2 · Push and Pull: the four basic quantities of mechanics (length, time,
  * mass, force), forces by contact and at a distance, and the three things
- * that completely describe a force: magnitude, direction and point of
- * application. Course section 1.2. Played in the build yard.
+ * that pin a force down: how big, which way, and where it acts. Course section 1.2. Played in the build yard.
  *
  * Most of the level is the yard gate seen from the watchtower (plan view, so
  * the site has no gravity and no floor). The gate swings on a pin at its left
@@ -368,7 +367,7 @@
         points: [
           'The four basic quantities: **length** (position and size), **time** (succession of events; statics doesn\'t depend on it), **mass** (quantity of matter; resists changes in velocity and is attracted by gravity), and **force**.',
           'A force is one body pushing or pulling on another, by **contact** or **at a distance** (gravitational, electrical, magnetic).',
-          'A force is completely described by its **magnitude**, **direction** and **point of application**. Change any one and the effect changes.'
+          'Three things pin a force down: how big (**magnitude**), which way (**direction**) and where it lands (**point of application**). Change any one and the gate does something else.'
         ]
       }
     ]

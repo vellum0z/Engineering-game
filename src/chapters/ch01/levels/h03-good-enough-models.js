@@ -274,7 +274,7 @@
       {
         type: 'reveal', kicker: 'Idealization', title: 'Concentrated force',
         eq: '\\frac{c}{L} \\ll 1 \\quad \\Rightarrow \\quad \\t{treat the load as acting at a point}',
-        text: 'A **concentrated force** stands for a load that is assumed to act at a **single point** on a body. It is a fair model when the area the load acts over is very small compared with the body, like a wheel on a rail (c/L tiny).\n\nSo the three idealizations are:\n\n- **Particle**: mass, negligible size.\n- **Rigid body**: no deformation under load.\n- **Concentrated force**: a load acting at a point.',
+        text: 'A **concentrated force** squeezes a whole load down to **one point** on a body. It is a fair model when the area the load acts over is very small compared with the body, like a wheel on a rail (c/L tiny).\n\nSo the three idealizations are:\n\n- **Particle**: mass, negligible size.\n- **Rigid body**: no deformation under load.\n- **Concentrated force**: a load acting at a point.',
         formula: 'ch01.idealizations'
       },
 
@@ -336,8 +336,8 @@
         points: [
           'Models (idealizations) simplify the theory by dropping details that don\'t change the answer. Run the real thing and the model side by side to check.',
           'A **particle** keeps its mass but is treated as having no size. Fair for a load sliding without turning; not fair once it can tip.',
-          'A **rigid body** does not deform under load, so its material doesn\'t matter to the forces. Steel shelves qualify; a rubber one folds and changes the lever arm.',
-          '**Concentrated forces** are assumed to act at a point on a body. Fair when the loaded area is small (a wheel on a rail); for a wide load, put the point at the load\'s middle.',
+          'A **rigid body** keeps its shape however you load it, so its material doesn\'t matter to the forces. Steel shelves qualify; a rubber one folds and changes the lever arm.',
+          '**Concentrated forces** treat a load as landing on one point. Fair when the loaded area is small (a wheel on a rail); for a wide load, put the point at the load\'s middle.',
           'A deformation can be too small to matter for the forces and still big enough to matter for the fit-up.'
         ]
       }

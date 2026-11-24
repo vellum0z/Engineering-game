@@ -366,7 +366,7 @@
         kicker: 'Newton\'s second law',
         law: 'F = ma \\qquad \\t{(Eq. 1–1)}',
         eq: '1\\u{ N} = 1\\u{ kg} \\times 1\\u{ m/s^2} \\quad \\Rightarrow \\quad k = 1',
-        text: 'We get to choose the size of the force unit, so choose the one that makes k = 1: the force that gives **1 kg** an acceleration of **1 m/s²**. That is the **newton**, a derived unit, 1 N = 1 kg·m/s².\n\nAn unbalanced force **F** on a particle of mass **m** gives it an acceleration **a** in the **same direction** as the force and **proportional** to it. The first law is the special case F = 0, so a = 0.',
+        text: 'We get to choose the size of the force unit, so choose the one that makes k = 1: the force that gives **1 kg** an acceleration of **1 m/s²**. That is the **newton**, a derived unit, 1 N = 1 kg·m/s².\n\nAn unbalanced force **F** on a particle of mass **m** gives it an acceleration **a** that points **along** the force and grows **in step** with it. The first law is the special case F = 0, so a = 0.',
         formula: 'ch01.newton2'
       },
       {
@@ -427,7 +427,7 @@
             'm_B v_B = (' + f3(p.mB) + '\\u{ kg})(' + f3(Math.abs(p.vB)) + '\\u{ m/s}) = ' + f3(p.mB * Math.abs(p.vB)) + '\\u{ kg·m/s}',
             '\\frac{\\Delta(mv)}{\\Delta t} = \\frac{' + f3(p.mB * Math.abs(p.vB)) + '\\u{ kg·m/s}}{' + f3(p.t) + '\\u{ s}} = ' + f3(p.mB * Math.abs(p.vB) / p.t) + '\\u{ N}'];
         },
-        text: 'Newton actually wrote the second law with **linear momentum**, mass times velocity: the unbalanced force on a particle is proportional to the **time rate of change of its momentum**. For a body whose mass doesn\'t change, the m comes straight out of the derivative and you are back at F = ma.\n\nYour two carts left with equal and opposite momenta, and the momentum each one gained, divided by the time the pack fired, is the gauge reading.'
+        text: 'Newton actually wrote the second law with **linear momentum**, mass times velocity: push on a particle and its momentum changes, and **how fast it changes** matches the unbalanced force. For a body whose mass doesn\'t change, the m comes straight out of the derivative and you are back at F = ma.\n\nYour two carts left with equal and opposite momenta, and the momentum each one gained, divided by the time the pack fired, is the gauge reading.'
       },
       {
         type: 'job', id: 'H4.reaction', who: 'hask',
@@ -483,7 +483,7 @@
           'Newton\'s laws hold for a particle measured from a **non-accelerating reference frame**. Learn all three by heart.',
           '**First law**: with no unbalanced force, a particle at rest stays at rest, and a moving particle keeps a constant velocity.',
           '**Second law**: **F = ma** (Eq. 1–1). The acceleration points along the unbalanced force and is proportional to it. Defining the newton as 1 kg·m/s² makes the constant equal to 1.',
-          'With momentum: the unbalanced force is the time rate of change of linear momentum. For a constant mass this is F = ma.',
+          'With momentum: the unbalanced force equals how quickly linear momentum changes, F = d(mv)/dt. For a constant mass this is F = ma.',
           '**Third law**: action and reaction are **equal, opposite and collinear**, and they act on **different bodies**, so they never cancel on one body.'
         ]
       }

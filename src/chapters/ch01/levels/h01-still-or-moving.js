@@ -128,7 +128,7 @@
         teaser: 'Statics was worked out in the ancient world. Dynamics had to wait until the 1600s. The reason is a clock.',
         steps: [
           { type: 'say', who: 'hask', text: 'Statics needs only geometry and force, and you can measure both with a stick, a string and a stone. **Archimedes** (287–212 B.C.) worked out the law of the lever that way. Ancient builders also wrote about pulleys, ramps and wrenches, because their engineering was mostly about building things that stand still.' },
-          { type: 'say', who: 'hask', text: 'Dynamics is about how motion **changes with time**, and for most of history nobody could measure short times well. Try timing a crate falling 2 m with your pulse: from $s = \\frac{1}{2}gt^2$ it takes about 0.64 s, less than one heartbeat. **Galileo Galilei** (1564–1642) got around it with pendulums and by slowing falls down on ramps. Then **Isaac Newton** (1642–1727) wrote down the three laws of motion and the law of gravitation that this whole yard runs on.' }
+          { type: 'say', who: 'hask', text: 'Dynamics is about how motion **changes with time**, and for most of history nobody could measure short times well. Try timing a crate falling 2 m with your pulse: from $s = \\frac{1}{2}gt^2$ it takes about 0.64 s, less than one heartbeat. **Galileo Galilei** (1564–1642) got around it with pendulums and by slowing falls down on ramps. Then **Isaac Newton** (1642–1727) wrote down three laws of motion, plus a law of gravitation, that this whole yard runs on.' }
         ]
       },
       {

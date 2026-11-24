@@ -228,7 +228,7 @@
       {
         type: 'reveal', kicker: 'Table', title: 'Conversion factors',
         eq: '1\\u{ lb} = 4.448\\u{ N} \\qquad 1\\u{ slug} = 14.59\\u{ kg} \\qquad 1\\u{ ft} = 0.3048\\u{ m}',
-        text: 'Inside FPS there is a ladder of its own: **12 in = 1 ft**, **5280 ft = 1 mi**, **1000 lb = 1 kip** (a kilo-pound) and **2000 lb = 1 ton**. The caravan stamps its heavier slings in kips and tons.\n\nThe slug is the FPS unit of mass: the mass that 1 lb accelerates at 1 ft/s². A pound is a **force**, never a mass, in this course.',
+        text: 'Inside FPS there is a ladder of its own: **12 in = 1 ft**, **5280 ft = 1 mi**, **1 kip = 1000 lb** (kip is short for kilo-pound) and **1 ton = 2000 lb**. The caravan stamps its heavier slings in kips and tons.\n\nThe slug is the FPS unit of mass: the mass that 1 lb accelerates at 1 ft/s². A pound is a **force**, never a mass, in this course.',
         formula: 'ch01.table-conv'
       },
       {
