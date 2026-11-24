@@ -14,7 +14,8 @@
  *   rating (N, cable strength), height (m, top of gantry), mode:
  *   'lift' (start on ground, raise to hookHeight) | 'hover' (start in the
  *   air, hold position), hookHeight, scaleReadout (show spring scale),
- *   units ('SI' | 'FPS') for readouts.
+ *   units ('SI' | 'FPS') for readouts, hideKey (manual mode: hide g and W so
+ *   a test run does not hand over the answer).
  */
 (function (SE) {
   'use strict';
@@ -162,7 +163,7 @@
 
   Hoist.prototype.readouts = function () {
     var p = this.p;
-    return ['W = m g = ' + fmtForce(p.mass * p.g, p.units), 'T = ' + fmtForce(this.cableTension, p.units), 'a = ' + this.a.toFixed(3) + ' m/s²'];
+    return [(p.hideKey ? 'W = m g' : 'W = m g = ' + fmtForce(p.mass * p.g, p.units)), 'T = ' + fmtForce(this.cableTension, p.units), 'a = ' + this.a.toFixed(3) + ' m/s²'];
   };
 
   Hoist.prototype.draw = function (ctx, w, h, t) {
@@ -226,12 +227,12 @@
       var ref = Math.max(W, tension, 1);
       var Ls = 70;
       if (!this.broken && tension > 0) D.arrow(ctx, cx, cy, cx, cy - Ls * tension / ref, C.force, 'T = ' + fmtForce(tension, p.units));
-      D.arrow(ctx, cx + 34, cy, cx + 34, cy + Ls * W / ref, C.weight, 'W = ' + fmtForce(W, p.units), { ly: 20 });
+      D.arrow(ctx, cx + 34, cy, cx + 34, cy + Ls * W / ref, C.weight, 'W = ' + (p.hideKey ? '?' : fmtForce(W, p.units)), { ly: 20 });
     }
     // readout panel
     var lines = [
       'load  ' + p.label,
-      'g     ' + p.g.toFixed(4) + ' m/s²',
+      'g     ' + (p.hideKey ? 'local (work it out)' : p.g.toFixed(4) + ' m/s²'),
       'a     ' + (this.a >= 0 ? '+' : '') + this.a.toFixed(3) + ' m/s²',
       'v     ' + (this.v >= 0 ? '+' : '') + this.v.toFixed(2) + ' m/s'
     ];

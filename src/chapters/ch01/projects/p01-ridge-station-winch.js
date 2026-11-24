@@ -92,7 +92,7 @@
   // Run the hover on the ridge hoist with tension T (N) and describe it.
   function hoverTest(ctx, T, units, label) {
     var g = governed(T, W);
-    var s = ctx.setScene('hoist', { mass: M, g: G_SITE, label: label || 'GENERATOR', mode: 'hover', hookHeight: 3, height: 9, rating: 30000, units: units || 'SI' });
+    var s = ctx.setScene('hoist', { mass: M, g: G_SITE, label: label || 'GENERATOR', mode: 'hover', hookHeight: 3, height: 9, rating: 30000, units: units || 'SI', hideKey: true });
     var show = units === 'FPS' ? fmtLb : fmtN;
     return hold(s, g.Teff, 8).then(function (r) {
       if (r.outcome === 'snapped') return 'The cable is rated 30 kN. At ' + show(T) + ' it parted before the governor even settled, and the generator went into the pad.';

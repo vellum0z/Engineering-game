@@ -23,6 +23,8 @@
 (function (SE) {
   'use strict';
   var el, md, inline, btn;
+  function bindUI() { el = SE.ui.el; md = SE.ui.md; inline = SE.ui.inline; btn = SE.ui.button; }
+  if (SE.ui) bindUI();   // manual projects borrow controlsUI before any Runner exists
 
   var EXPLAIN = ['say', 'predict', 'try', 'reveal', 'derive', 'sandbox', 'deeper', 'summary'];
   var WHO = {
@@ -36,7 +38,7 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   function Runner(level, opts) {
-    el = SE.ui.el; md = SE.ui.md; inline = SE.ui.inline; btn = SE.ui.button;
+    bindUI();
     this.level = level;
     this.opts = opts || {};
     this.game = SE.game;
