@@ -7,8 +7,8 @@
  *   P.islands.wakeIsland(world, body) wake a body and everything in its island
  *   P.islands.islandOf(world, body)   the bodies sharing body's island (array)
  *
- * An island is a set of dynamic bodies linked by touching contacts or by
- * joints, found with union-find each step. Static bodies never join an
+ * An island is a set of dynamic bodies linked by contacts (any contact with
+ * a manifold, speculative ones included) or by joints, found with union-find each step. Static bodies never join an
  * island (a floor would otherwise glue the whole level into one island), and
  * neither do kinematic ones; a kinematic body that is moving keeps every
  * island it touches awake.
@@ -17,7 +17,9 @@
  * |w| < SLEEP_ANGULAR (0.5°/s) and every joint and touching contact on it
  * has settled: its force changed by less than SETTLE_TOLERANCE (1e-4)
  * relative to its size since the last step. body.sleepTime counts how long
- * it has been still. When every body in an island has been still for
+ * it has been still; it must also stay within SLEEP_DRIFT (1 mm) and
+ * 0.1° of where it was when the still time started, so slow creep doesn't
+ * count as rest. When every body in an island has been still for
  * TIME_TO_SLEEP (0.5 s), the whole island sleeps: awake = false, v = w = 0.
  * The force check matters for statics: soft joints keep creeping towards
  * equilibrium long after the bodies look still, and a structure must not
@@ -41,9 +43,11 @@
   'use strict';
   var P = SE.phys;
 
-  var SLEEP_LINEAR = 0.01;                     // m/s
+  var SLEEP_LINEAR = 0.01;                    // m/s
   var SLEEP_ANGULAR = 0.5 * Math.PI / 180;     // rad/s
   var TIME_TO_SLEEP = 0.5;                     // s
+  var SLEEP_DRIFT = 0.001;                     // m a body may creep during its still time
+  var SLEEP_DRIFT_ANGLE = 0.1 * Math.PI / 180;   // rad
   var SETTLE_TOLERANCE = 1e-4;                 // relative change in a force per step
   var FORCE_FLOOR = 1;                         // N (or N·m): below this, changes count as absolute
 
@@ -146,7 +150,10 @@
       if (dA && B.type === 'kinematic' && moving(B)) A._keepAwake = true;
       if (dB && A.type === 'kinematic' && moving(A)) B._keepAwake = true;
     }
-    world.contacts.forEach(function (ct) { if (ct.touching) link(ct.fa.body, ct.fb.body, true); });
+    // every contact with a manifold links its bodies, speculative ones too
+    // (as in Box2D 3): a box resting a hair above the one below is still
+    // part of the stack, and must not sleep on top of a moving body
+    world.contacts.forEach(function (ct) { link(ct.fa.body, ct.fb.body, true); });
     world.joints.forEach(function (j) { if (j.bodyA && j.bodyB) link(j.bodyA, j.bodyB, true); });
 
     // forces still changing keep their bodies awake (sleeping ones are frozen
@@ -187,7 +194,14 @@
       if (b.awake !== false) {
         var still = b.allowSleep !== false && !b._keepAwake && !b._unsettled &&
           b.v.x * b.v.x + b.v.y * b.v.y < linTol * linTol && Math.abs(b.w) < angTol;
-        b.sleepTime = still ? b.sleepTime + dt : 0;
+        // slow creep (a tall soft column rocking at a few mm/s) is under the
+        // speed limits, so a body must also stay put while its still time runs
+        var an = b._sleepAnchor;
+        if (still && an && (Math.abs(b.c.x - an.x) > SLEEP_DRIFT || Math.abs(b.c.y - an.y) > SLEEP_DRIFT ||
+            Math.abs(b.angle - an.a) > SLEEP_DRIFT_ANGLE)) still = false;
+        if (still && b.sleepTime > 0 && an) b.sleepTime += dt;
+        else if (still) { b.sleepTime = dt; b._sleepAnchor = { x: b.c.x, y: b.c.y, a: b.angle }; }
+        else { b.sleepTime = 0; b._sleepAnchor = null; }
       }
       var root = find(b);
       var g = groups.get(root.id);

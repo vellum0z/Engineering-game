@@ -281,11 +281,11 @@ suite('physics E02: sleeping', () => {
   const asleep = bs => bs.every(b => b.awake === false);
   const awake = bs => bs.every(b => b.awake !== false);
 
-  test('a 5-crate stack dropped with 5 cm gaps falls asleep within 3 s, stands within 5 mm of plumb', () => {
+  test('a 5-crate stack dropped with 5 cm gaps falls asleep within 4 s (once its contact forces settle), stands within 5 mm of plumb', () => {
     const w = world(); ground(w); const s = stack(w, 5);
     let t = null;
-    w.run(3, 1 / 60, () => { if (t == null && asleep(s)) t = w.time; });
-    ok(t != null, 'still awake after 3 s: ' + s.map(b => b.sleepTime.toFixed(2)).join(','));
+    w.run(4, 1 / 60, () => { if (t == null && asleep(s)) t = w.time; });
+    ok(t != null, 'still awake after 4 s: ' + s.map(b => b.sleepTime.toFixed(2)).join(','));
     console.log('    E02 stack asleep at t = ' + t.toFixed(2) + ' s');
     s.forEach((b, i) => { near(b.c.y, 0.5 + i, 0.02); near(b.c.x, 0, 5e-3); eq(b.v.x, 0); eq(b.w, 0); });
     // contact force still reads correctly while asleep: the top crate's net contact force is its weight
@@ -315,7 +315,7 @@ suite('physics E02: sleeping', () => {
 
   test('a ball hitting the sleeping stack wakes the whole island', () => {
     const w = world(); ground(w); const s = stack(w, 5);
-    w.run(3);
+    w.run(5);
     ok(asleep(s), 'stack not asleep');
     const ball = w.add(new P.Body({ position: { x: -3, y: 4.5 }, velocity: { x: 12, y: 0 }, shapes: [P.circle(0.25)], mass: 20 }));
     let woke = null;
@@ -365,7 +365,7 @@ suite('physics E02: sleeping', () => {
   test('waking one crate of a sleeping stack wakes all of it; a separate stack stays asleep', () => {
     const w = world(); ground(w);
     const s1 = stack(w, 3), s2 = [crate(w, 5, 0.5, 50), crate(w, 5, 1.5, 50)];
-    w.run(2);
+    w.run(5);
     ok(asleep(s1) && asleep(s2), 'not asleep');
     s1[2].applyImpulse({ x: 1, y: 0 });
     w.step(1 / 60);
