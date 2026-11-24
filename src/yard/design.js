@@ -193,6 +193,13 @@
     return list;
   }
 
+  // Parts in the manual-mode library: every registered part that doesn't opt
+  // out (library: false), optionally limited to an act (def.act <= unlocked act).
+  function library(unlocks) {
+    var act = (unlocks && unlocks.act) || Infinity;
+    return Object.keys(PARTS).filter(function (t) { var d = PARTS[t]; return d.library !== false && (d.act || 1) <= act; });
+  }
+
   function clone(design) { return JSON.parse(JSON.stringify(design)); }
 
   SE.yard.definePart = definePart;
@@ -205,5 +212,6 @@
   SE.yard.resolveEnd = resolveEnd;
   SE.yard.anchorsOf = anchorsOf;
   SE.yard.cloneDesign = clone;
+  SE.yard.library = library;
   SE.yard.rot = rot;
 })(globalThis.SE);

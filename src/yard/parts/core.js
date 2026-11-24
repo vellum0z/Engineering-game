@@ -145,7 +145,7 @@
 
   // A fixed block: buffer stop, wall, dock edge. Static, so nothing moves it.
   Y.definePart({
-    type: 'block', name: 'Buffer block', category: 'Site',
+    type: 'block', name: 'Buffer block', category: 'Site', library: false,
     blurb: 'A concrete block set in the ground. Anything that hits it stops hard.',
     size: { w: 0.6, h: 1.2 },
     dials: [{ key: 'width', label: 'Width', q: 'length', def: '0.6 m', min: 0.05 }, { key: 'height', label: 'Height', q: 'length', def: '1.2 m', min: 0.05 }],
@@ -157,7 +157,7 @@
 
   // A marked target area (a dock, a landing pad). A sensor: nothing hits it.
   Y.definePart({
-    type: 'zone', name: 'Target zone', category: 'Site',
+    type: 'zone', name: 'Target zone', category: 'Site', library: false,
     blurb: 'A painted area. Jobs often ask for a load to end up here.',
     size: { w: 3, h: 1.5 },
     dials: [{ key: 'width', label: 'Width', q: 'length', def: '3 m', min: 0.1 }, { key: 'height', label: 'Height', q: 'length', def: '1.5 m', min: 0.1 }],

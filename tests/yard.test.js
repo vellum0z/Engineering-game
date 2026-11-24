@@ -76,3 +76,27 @@ suite('yard: Act I jobs have working reference solutions', () => {
     });
   });
 });
+
+suite('yard: Act I manual jobs have working reference solutions', () => {
+  const ch = SE.content.chapter('ch01');
+  ch.projects.filter(p => p.yard).forEach(p => {
+    let design = p.yard.design || { parts: [] };
+    p.jobs.forEach(j => {
+      if (j.design) design = j.design;
+      const start = design;
+      test(p.id + ' ' + j.id + ': reference build passes, the start does not', () => {
+        const sol = (p.solutions || {})[j.id];
+        ok(sol, 'no reference solution for ' + j.id);
+        const site = (j.yard && j.yard.site) || p.yard.site, timeout = j.timeout || 30;
+        ok(!Y.judge({ design: start, site, goal: j.goal, timeout }).pass, 'passes with nothing built');
+        [].concat(sol).forEach((build, k) => {
+          const d = Y.cloneDesign(start);
+          (build.add || []).forEach(q => d.parts.push(Y.makeInstance(q.type, q)));
+          Object.keys(build.set || {}).forEach(id => Object.assign(d.parts.find(q => q.id === id).dials, build.set[id]));
+          const r = Y.judge({ design: d, site, goal: j.goal, timeout });
+          ok(r.pass === (build.pass !== false), 'solution ' + k + ': ' + (r.reason || 'passed but should fail'));
+        });
+      });
+    });
+  });
+});

@@ -167,7 +167,9 @@
   };
   Yard.prototype.finish = function (v) {
     this.mode = 'done';
-    if (this.stepper) this.stepper.pause();
+    // a failed run keeps going a little so the player sees what happened
+    this.lingerUntil = v.pass ? 0 : this.state.t + (this.opts.linger == null ? 2 : this.opts.linger);
+    if (this.stepper && v.pass) this.stepper.pause();
     if (!v.pass) this.failedRuns++;
     this.lastResult = { pass: v.pass, reason: v.reason || '', time: this.state.t, state: this.state, failedRuns: this.failedRuns, runs: this.runs };
     SE.audio && SE.audio.play && SE.audio.play(v.pass ? 'good' : 'bad');
@@ -176,6 +178,11 @@
   };
   // Advance real time (called each animation frame).
   Yard.prototype.tick = function (seconds) {
+    if (this.mode === 'done' && this.stepper && !this.stepper.paused) {
+      this.stepper.advance(seconds);
+      if (this.built.world.time >= this.lingerUntil) this.stepper.pause();
+      return this;
+    }
     if (this.mode !== 'run' || !this.stepper || this.stepper.paused) return;
     var self = this, n = 0;
     // step one at a time so the goal sees every step

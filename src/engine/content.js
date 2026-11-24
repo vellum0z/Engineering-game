@@ -41,6 +41,7 @@
   function registerProject(chId, def) {
     var ch = ensure(chId);
     def.chapter = chId; def.kind = 'project';
+    if (def.jobs && !def.deliverables) def.deliverables = def.jobs;   // yard projects: jobs are the deliverables
     if (ch.projectMap[def.id]) ch.projects.splice(ch.projects.indexOf(ch.projectMap[def.id]), 1);
     ch.projectMap[def.id] = def;
     ch.projects.push(def);
@@ -96,7 +97,7 @@
       (lv.proveIt || []).forEach(function (s) { (s.inputs || []).forEach(function (inp) { out.push({ where: lv.id + '/prove/' + s.id + '/' + inp.key, input: inp }); }); });
     });
     ch.projects.forEach(function (p) {
-      (p.deliverables || []).forEach(function (d) { out.push({ where: p.id + '/' + d.id, input: d }); });
+      (p.deliverables || []).forEach(function (d) { if (d.spec) out.push({ where: p.id + '/' + d.id, input: d }); });
     });
     return out;
   }
