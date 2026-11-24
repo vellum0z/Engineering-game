@@ -29,7 +29,7 @@ Each answer is checked for its **value**, **units** (dimensions), **significant 
 
 | Act | Region | Chapter | Status |
 |---|---|---|---|
-| I | Rustline Depot | 1 · General Principles | In development |
+| I | Rustline Depot | 1 · General Principles | Playable: 11 handheld levels, 6 manual projects |
 | II | The Pylon Fields | 2 · Force Vectors | Planned |
 | III | Hangman's Rigging | 3 · Equilibrium of a Particle | Planned |
 | IV | Lever Row | 4 · Force System Resultants | Planned |

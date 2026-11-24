@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-11-24
 
 ### Added
 - Game engine: unit and dimension parser with SI prefix rules, significant-figure and rounding checker, answer checker that classifies errors, scoring with S/A/B/C grades, and a versioned save system with export and import.
