@@ -8,7 +8,7 @@
  *   w.step(1 / 60);
  *
  * Step order (Box2D 3 "soft step"):
- *   1. broadphase (sort and sweep on x) and narrowphase -> contact manifolds,
+ *   1. broadphase (dynamic AABB trees) and narrowphase -> contact manifolds,
  *      matched to last step's contacts so their impulses warm-start
  *   2. prepare contacts and joints for substep h = dt / substeps
  *   3. for each substep: integrate velocities, warm start, solve with soft
@@ -51,7 +51,8 @@
       jointDampingRatio: def.jointDampingRatio || 2,
       maxPushVelocity: def.maxPushVelocity || 3,
       restitutionThreshold: def.restitutionThreshold || 1,
-      maxLinearSpeed: def.maxLinearSpeed || 400
+      maxLinearSpeed: def.maxLinearSpeed || 400,
+      enableSleep: def.enableSleep !== false
     };
     this.bodies = [];
     this.joints = [];
