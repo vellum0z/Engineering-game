@@ -4,7 +4,8 @@
  *   var b = new SE.phys.Body({
  *     type: 'dynamic' | 'static' | 'kinematic',
  *     position: {x, y}, angle, velocity: {x, y}, angularVelocity,
- *     shapes: [shape | { shape, material, friction, restitution, density, sensor }],
+ *     shapes: [shape | { shape, material, friction, muS, muK, restitution, density, sensor,
+ *                        rollingResistance, tangentSpeed }],
  *     material: 'steel',            // default for shapes that don't set one
  *     mass: 250,                     // optional: overrides density-derived mass (keeps the centroid)
  *     fixedRotation: false, linearDamping: 0, angularDamping: 0, gravityScale: 1,
@@ -47,7 +48,13 @@
         density: f.density != null ? f.density : mat.density,
         friction: f.friction != null ? f.friction : mat.friction,
         restitution: f.restitution != null ? f.restitution : mat.restitution,
-        sensor: !!f.sensor, group: f.group || 0, body: null
+        sensor: !!f.sensor, group: f.group || 0, body: null,
+        // static / kinetic friction: the fixture's own values, else the
+        // material's (only when the fixture didn't override `friction`)
+        muS: f.muS != null ? f.muS : (f.friction == null && mat.muS != null ? mat.muS : null),
+        muK: f.muK != null ? f.muK : (f.friction == null && mat.muK != null ? mat.muK : null),
+        rollingResistance: f.rollingResistance != null ? f.rollingResistance : (mat.rollingResistance || 0),
+        tangentSpeed: f.tangentSpeed || 0
       };
     });
     var self = this;
