@@ -105,6 +105,12 @@ suite('physics E10: JSON scenes', () => {
     w.addJoint(new P.DistanceJoint({ bodyA: anchor, bodyB: c, localAnchorA: { x: 2, y: 0 }, localAnchorB: { x: 0, y: 0.25 }, rope: true, length: 2.2 }));
     w.addJoint(new P.RevoluteJoint({ bodyA: a, bodyB: b, worldAnchor: { x: -1, y: 4 }, collideConnected: true }));
     w.addJoint(new P.WeldJoint({ bodyA: c, bodyB: d, worldAnchor: { x: 2.5, y: 4 }, angularStiffness: 500, angularDamping: 5, breakTorque: 1e5 }));
+    if (P.PulleyJoint) {
+      const e = w.add(new P.Body({ position: { x: -4, y: 3 }, shapes: [P.circle(0.2)], mass: 12 }));
+      const f = w.add(new P.Body({ position: { x: 4, y: 3 }, shapes: [P.circle(0.2)], mass: 8 }));
+      w.addJoint(new P.PulleyJoint({ bodyA: e, bodyB: f, groundAnchorA: { x: -4, y: 7 }, groundAnchorB: { x: 4, y: 7 }, ratio: 1.5, EA: 1e5 }));
+      w.addJoint(new P.WinchJoint({ bodyA: anchor, localAnchorA: { x: 1, y: 0 }, bodyB: f, via: { body: anchor, local: { x: 3, y: 0 } }, parts: 2, reelSpeed: 0.2, maxPull: 400, accel: 1 }));
+    }
     return w;
   }
 

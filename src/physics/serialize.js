@@ -275,7 +275,7 @@
   // Joint types that exist when this file loads. length and referenceAngle
   // are saved explicitly: their constructors would otherwise recompute them
   // from wherever the bodies happen to be.
-  if (P.DistanceJoint && !jointTypes.distance) registerJointType('distance', P.DistanceJoint, ['length', 'rope', 'hertz', 'dampingRatio', 'stiffness', 'damping']);
+  if (P.DistanceJoint && !jointTypes.distance) registerJointType('distance', P.DistanceJoint, ['length', 'rope', 'hertz', 'dampingRatio', 'stiffness', 'damping', 'minLength', 'maxLength', 'EA', 'motorSpeed', 'maxMotorForce']);
   if (P.RevoluteJoint && !jointTypes.revolute) registerJointType('revolute', P.RevoluteJoint, []);
   if (P.WeldJoint && !jointTypes.weld) registerJointType('weld', P.WeldJoint, ['referenceAngle', 'angularStiffness', 'angularDamping']);
 
