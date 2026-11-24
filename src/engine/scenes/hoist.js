@@ -138,6 +138,32 @@
     }
   };
 
+  // Sandbox controls: change the load, the local g and the winch tension,
+  // then run the winch to see what that tension does.
+  Hoist.prototype.controls = function () {
+    var p = this.p;
+    var W = p.mass * p.g;
+    return [
+      { key: 'mass', label: 'Load mass', min: 10, max: 2000, step: 10, value: p.mass, unit: 'kg' },
+      { key: 'g', label: 'Local g', min: 1.6, max: 9.9, step: 0.01, value: p.g, unit: 'm/s²' },
+      { key: 'tension', label: 'Winch tension', min: 0, max: Math.max(1000, Math.round(W * 2)), step: 1, value: this.T || p.governor || Math.round(W), unit: 'N' },
+      { key: 'run', label: 'Run the winch ▸', type: 'button' }
+    ];
+  };
+
+  Hoist.prototype.set = function (key, value) {
+    var p = this.p;
+    if (key === 'mass') { p.mass = value; p.label = value + ' kg'; this.reset(); }
+    else if (key === 'g') { p.g = value; this.reset(); }
+    else if (key === 'tension') { p.governor = value; }
+    else if (key === 'run') { this.run(p.governor != null ? p.governor : p.mass * p.g); }
+  };
+
+  Hoist.prototype.readouts = function () {
+    var p = this.p;
+    return ['W = m g = ' + fmtForce(p.mass * p.g, p.units), 'T = ' + fmtForce(this.cableTension, p.units), 'a = ' + this.a.toFixed(3) + ' m/s²'];
+  };
+
   Hoist.prototype.draw = function (ctx, w, h, t) {
     var p = this.p, cam = this.cam;
     D.backdrop(ctx, w, h, t);
