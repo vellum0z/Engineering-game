@@ -270,19 +270,16 @@ suite('yard parts: winch near its limits', () => {
     ok(hi - lo < 0.002, 'moved ' + (hi - lo) + ' m');
     near(r.state.read('w.tension'), W, 0.002);
   });
-  // Known engine issue: a light body between two stiff lines under a heavy load
-  // (mass ratio ~450:1) makes the soft line constraint far too stretchy, so the
-  // winch saw-tooths at its cap and the load never lifts. Logged, not failed,
-  // until the engine fixes it (set RIGGING_STRICT=1 to fail on it).
-  test('a 40 kg hook block between the winch and the 18 t load still lifts it (known engine issue)', () => {
+  // A light body between two lines under a heavy load (mass ratio ~450:1).
+  test('a 40 kg hook block between the winch and the 18 t load still lifts it', () => {
     const hookBlock = [crate('hk', 0.2, 2.5, '40 kg'),
       part('cable', { id: 'sl', a: { part: 'hk', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rating: '1 MN' } })];
     const parts = lift({ pull: '185 kN' }, hookBlock);
     parts[2].b = { part: 'hk', anchor: 'top' };
     const r = Y.judge({ design: { parts }, timeout: 11, goal: G.after(10) });
     const rose = r.state.pos('tank').y - 0.5;
-    try { ok(rose > 1, 'tank rose ' + rose.toFixed(3) + ' m in 10 s with a 40 kg hook block (expected about 4 m)'); }
-    catch (e) { console.log('  known issue (engine winch/soft line, mass ratio): ' + e.message); if (process.env.RIGGING_STRICT) throw e; }
+    ok(rose > 1, 'tank rose ' + rose.toFixed(3) + ' m in 10 s with a 40 kg hook block (expected about 4 m)');
+    near(r.state.read('sl.tension'), r.state.read('w.tension'), 0.01);
   });
   test('it slows into the stop, so the load never flies up off a slack line', () => {
     let slack = 0;
