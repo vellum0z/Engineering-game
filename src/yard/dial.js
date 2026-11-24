@@ -59,6 +59,9 @@
     }
     if (!p.unitText) return { ok: false, error: 'Add a unit: this dial takes ' + Q.examples + '.' };
     if (!U.dimsEqual(p.dims, Q.dims)) {
+      if (q === 'mass' && U.dimsEqual(p.dims, QUANTITIES.force.dims)) {
+        return { ok: false, error: 'In FPS units the pound (lb) is a force, not a mass. Mass is in slugs: m = W / g. This is a mass dial (' + Q.examples + ').' };
+      }
       var nm = U.dimsName(p.dims);
       return { ok: false, error: (nm ? 'That is ' + (/^[aeiou]/.test(nm) ? 'an ' : 'a ') + nm : 'That unit is a different kind of quantity') + ', but this is ' + (/^[aeiou]/.test(Q.name) ? 'an ' : 'a ') + Q.name + ' dial (' + Q.examples + ').' };
     }

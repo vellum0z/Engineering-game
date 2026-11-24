@@ -9,6 +9,7 @@
  *     size: { w: 1, h: 1 },                 // m, for the bin icon, hit test and ghosts
  *     dials: [{ key: 'mass', label: 'Mass', q: 'mass', def: '120 kg', locked }],
  *     anchors: { top: { x: 0, y: 0.5 } },   // named points in the part frame, m
+ *     sizeFor(inst, values), anchorsFor(inst, values)   // optional: size/anchors that follow the dials
  *     connector: false,                     // true: joins two anchors (inst.a, inst.b)
  *     onePerDesign: false,
  *     build: function (b) { ... },          // see the builder below
@@ -64,6 +65,18 @@
     return def;
   }
   function partDef(type) { return PARTS[type] || null; }
+  // Size and anchors of an instance: parts sized by their dials define
+  // sizeFor(inst, values) / anchorsFor(inst, values); others use the fixed tables.
+  function sizeOf(inst) {
+    var d = PARTS[inst.type]; if (!d) return { w: 1, h: 1 };
+    if (d.sizeFor) { try { return d.sizeFor(inst, readDials(inst).values) || d.size; } catch (e) { return d.size; } }
+    return d.size;
+  }
+  function anchorTable(inst) {
+    var d = PARTS[inst.type]; if (!d) return {};
+    if (d.anchorsFor) { try { return d.anchorsFor(inst, readDials(inst).values) || d.anchors; } catch (e) { return d.anchors; } }
+    return d.anchors;
+  }
   function partTypes() { return Object.keys(PARTS); }
 
   var nextId = 1;
@@ -92,6 +105,8 @@
         else values[dl.key] = txt;
         return;
       }
+      if (dl.text && !dl.q) dl.q = 'text';     // { text: true } is shorthand for q: 'text'
+      if (dl.q === 'text' && dl.optional && (txt == null || String(txt).trim() === '')) { values[dl.key] = ''; return; }
       if (dl.optional && (txt == null || String(txt).trim() === '')) { values[dl.key] = null; return; }
       var r = D.parse(txt, dl.q);
       if (!r.ok) { errors.push({ part: inst.id, key: dl.key, label: dl.label, error: r.error }); return; }
@@ -134,7 +149,10 @@
           body.userData = Object.assign({}, bd.userData || {}, { part: inst.id });
           tagged.bodies.push(body); return body;
         },
-        joint: function (j) { world.addJoint(j); j.userData = Object.assign({}, j.userData || {}, { part: inst.id }); tagged.joints.push(j); return j; },
+        joint: function (j) {
+          // a part tied to the yard itself must still rest on the floor
+          if (j.bodyA === ground || j.bodyB === ground) j.collideConnected = true;
+          world.addJoint(j); j.userData = Object.assign({}, j.userData || {}, { part: inst.id }); tagged.joints.push(j); return j; },
         end: function (which) { return resolveEnd(out, inst[which], inst.id + '.' + which); },
         on: function (type, fn) { world.on(type, fn); }
       };
@@ -147,8 +165,9 @@
       if (!built.body && built.bodies.length === 1) built.body = built.bodies[0];
       if (!built.anchors) {
         built.anchors = {};
-        if (built.body) Object.keys(def.anchors).forEach(function (k) {
-          built.anchors[k] = { body: built.body, local: built.body.localPoint(b.at(def.anchors[k])) };
+        var table = def.anchorsFor ? (def.anchorsFor(inst, dials.values) || def.anchors) : def.anchors;
+        if (built.body) Object.keys(table).forEach(function (k) {
+          built.anchors[k] = { body: built.body, local: built.body.localPoint(b.at(table[k])) };
         });
       }
       out.parts[inst.id] = built;
@@ -185,8 +204,9 @@
     (design.parts || []).forEach(function (inst) {
       var def = PARTS[inst.type];
       if (!def || def.connector) return;
-      Object.keys(def.anchors).forEach(function (k) {
-        var r = rot(inst.angle || 0, def.anchors[k]);
+      var table = anchorTable(inst);
+      Object.keys(table).forEach(function (k) {
+        var r = rot(inst.angle || 0, table[k]);
         list.push({ part: inst.id, anchor: k, x: inst.x + r.x, y: inst.y + r.y });
       });
     });
@@ -213,5 +233,7 @@
   SE.yard.anchorsOf = anchorsOf;
   SE.yard.cloneDesign = clone;
   SE.yard.library = library;
+  SE.yard.sizeOf = sizeOf;
+  SE.yard.anchorTable = anchorTable;
   SE.yard.rot = rot;
 })(globalThis.SE);
