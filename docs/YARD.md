@@ -70,7 +70,7 @@ Rules for parts:
 | `chain` | connector | `size` (6 to 16 mm, grade 80), `length` (empty = taut) | `tension` | |
 | `spring` | connector | `k`, `rest` (empty = as built), `rating`, `damping` light/none | `force` (+ = tension), `stretch` | |
 | `sheave` | static wheel | `size` (diameter) | | `rim` |
-| `jib` | static mast and boom, origin at the mast foot | `height`, `reach`, `facing` right/left | | `tip` (the tip sheave), `base` (drum mount) |
+| `jib` | static mast and boom, origin at the mast foot; its size and anchors follow the dials (`sizeFor`, `anchorsFor`) | `height`, `reach`, `facing` right/left | | `tip` (the tip sheave), `base` (drum mount) |
 | `counterweight` | load | `mass`, `cast` kg/lb (the unit on the side) | `speed` (vertical) | `top`, `left`, `right`, `bottom` |
 
 What each one does in the engine:
@@ -86,7 +86,7 @@ A `winch` or a `cable` has a `route` dial:
 - `direct`: the line runs straight from end `a` to end `b`.
 - `over sheave`: the line runs from `a` to the nearest sheave to end `b` (a `sheave` part, or the tip of a `jib`), then down to `b`. With no sheave in the yard the build is refused with a reason.
 
-A level can name the sheave instead: `{ type: 'winch', via: { part: 'jibA' }, ... }`. That wins over the dial. Sheaves are frictionless points at their hub, so the tension is the same all along the line: a sheave turns a pull, it doesn't change its size.
+A level can name the sheave instead: `{ type: 'winch', via: { part: 'jibA' }, ... }`. That wins over the dial. Sheaves are frictionless, so the tension is the same all along the line: a sheave turns a pull, it doesn't change its size. Each run leaves the wheel at its rim tangent point (worked out when the run starts, with the wheel on the inside of the bend), so a load hung under one edge of the wheel hangs straight down. Two loads under opposite rims make an Atwood machine. A winch's falls leave at the hook-side tangent.
 
 The winch's `parts` dial is the number of falls between the sheave and the hook (a block and tackle). The hook carries `parts` × line tension and rises at speed / `parts`, so a winch too weak for a direct lift can manage it with a tackle.
 
