@@ -2,73 +2,140 @@
  * H2 · Push and Pull: the four basic quantities of mechanics (length, time,
  * mass, force), forces by contact and at a distance, and the three things
  * that completely describe a force: magnitude, direction and point of
- * application. Course section 1.2.
+ * application. Course section 1.2. Played in the build yard.
  *
- * Most of the level runs on the yard gate (gate scene, mode 'gate'). The
- * gate turns about its hinge when the player's push and the horde's push
- * don't balance; the scene does that with torques, but moments are not
- * taught until Chapter 4, so the level only ever states the gate's rule in
- * words: "your push times its distance from the hinge, counted square to
- * the gate, against the horde's push times its distance".
+ * Most of the level is the yard gate seen from the watchtower (plan view, so
+ * the site has no gravity and no floor). The gate swings on a pin at its left
+ * end. The horde leans on it from outside with a fixed push; the player bolts
+ * a hydraulic ram between the footing slab and any ring on the gate, so they
+ * choose where the ram acts, which way it points and how hard it pushes.
+ * Moments are not taught until Chapter 4, so the level never names them: the
+ * gate is the judge, and the words stay "how far from the hinge" and "how
+ * square to the gate".
+ *
+ * Gate numbers: 3 m, 120 kg, 40 N·m of hinge friction, starts 20° ajar
+ * (opened inward). The jamb stops it at closed. Hitting the jamb faster than
+ * 2.5 m/s at the tip cracks the latch.
+ *   Demo horde: 350 N at ring a4, 2.0 m from the hinge (350 x 2.0 = 700 N·m).
+ *   With a 300 N ram square on, it needs more than 700 / 300 = 2.33 m, plus the
+ *   hinge friction, so only the end ring (3.0 m) clearly wins.
+ *   Job horde: 0.42 kN at 2.0 m (840 N·m). The ram tops out at 0.6 kN, so
+ *   it has to sit well out from the hinge even square on; near the hinge it
+ *   can't win. At the latch bracket (ring a5, 2.5 m) square on it needs a bit more
+ *   than 840 / 2.5 = 336 N, and above roughly 480 N the gate slams.
  */
 (function (SE) {
   'use strict';
-
+  var Y = SE.yard, G = Y.goals;
   var DEG = Math.PI / 180;
+  var f3 = function (x) { return Y.dial.fmtNum(x, 3); };
 
-  // The yard gate: 3 m of welded steel, 120 kg, hinged on the left post.
-  // The horde has already shoved it 20 degrees ajar.
-  var GATE = { mode: 'gate', L: 3, mass: 120, angle0: 20, friction: 40, openAngle: 80, slamSpeed: 2.5, zombies: 5 };
-  function gate(extra) { return { type: 'gate', params: Object.assign({}, GATE, extra || {}) }; }
+  var AJAR = 20;            // deg, how far open the gate starts
+  var SLAM = 2.5;           // m/s at the tip: the latch rating
+  var RAM_MAX = 600;        // N, the job ram's pump limit
 
-  // Teaching setup for the first predictions: the horde leans 400 N at 2.00 m,
-  // which turns the gate with 400 x 2.00 = 800 N.m. Hask's crew always
-  // pushes 300 N.
-  var DEMO = { H: 400, dh: 2, F: 300, d: 2.9, theta: 90 };
-
-  function outcomeText(o) {
-    return {
-      opened: '**the gate burst open**',
-      closed: '**the gate swung shut**',
-      slammed: '**the gate slammed shut hard enough to crack the latch**',
-      held: '**the gate held where it was**'
-    }[o] || o;
+  // ----------------------------------------------------------- the gate yard
+  function gateParts(hordeForce) {
+    return [
+      { id: 'footing', type: 'zone', x: 2.25, y: -2.4, dials: { width: '6.5 m', height: '2.6 m' }, locked: true, label: 'ram footing (bolt the ram base here)' },
+      { id: 'gate', type: 'gate', x: 0, y: 0, angle: -AJAR * DEG, dials: { width: '3 m', mass: '120 kg', friction: '40 N*m' }, locked: true, label: 'yard gate' },
+      { id: 'jamb', type: 'block', x: 3.05, y: 0.22, dials: { width: '0.3 m', height: '0.3 m' }, locked: true, label: 'jamb' },
+      { id: 'horde', type: 'push', a: { part: 'gate', anchor: 'a4' }, dials: { force: hordeForce, angle: '-90 deg', time: '600 s', start: '0 s' }, locked: true, label: 'the horde' }
+    ];
   }
+  var GATE = {
+    site: { g: 0, floor: null },
+    camera: { fit: { lo: { x: -1.5, y: -4 }, hi: { x: 6, y: 2 } } },
+    poke: false,
+    design: { parts: gateParts('350 N') }
+  };
+  var JOB_DESIGN = { parts: gateParts('0.42 kN') };
+  function gateYard(extra) { return Object.assign({ design: GATE.design, site: GATE.site, camera: GATE.camera }, extra || {}); }
 
-  // Run several pushes one after another on a fresh gate and report each.
-  function runSeries(ctx, base, cases) {
-    var lines = [];
-    return cases.reduce(function (p, c) {
-      return p.then(function () {
-        var s = ctx.setScene('gate', Object.assign({}, GATE, base, c.set));
-        ctx.hud(['Crew push: ' + c.label]);
-        return s.run({ duration: 4 }).then(function (r) { lines.push('- ' + c.label + ': ' + outcomeText(r.outcome) + '.'); });
-      });
-    }, Promise.resolve()).then(function () { ctx.hud([]); return 'Measured, same 300 N push each time:\n\n' + lines.join('\n'); });
-  }
-
-  function cart(id, m, x, label) { return { id: id, m: m, x: x, v: 0, mu: 0, muS: 0, label: label, kind: 'cart' }; }
-  var CARTS = {
-    type: 'track',
-    params: { surface: 'rail', length: 30, trail: true, showVectors: true, bodies: [cart('heavy', 160, 4, 'loaded 160 kg'), cart('light', 40, 10, 'empty 40 kg')] }
+  // The side-on yard for gravity and the two carts.
+  var SPUR = {
+    site: { g: 9.81, floor: 'concrete' },
+    camera: { fit: { lo: { x: -1, y: -1 }, hi: { x: 26, y: 6 } } },
+    design: { parts: [
+      { id: 'heavy', type: 'cart', x: 2, y: 0.25, dials: { mass: '160 kg' }, locked: true, label: 'loaded cart' },
+      { id: 'light', type: 'cart', x: 8, y: 0.25, dials: { mass: '40 kg' }, locked: true, label: 'empty cart' }
+    ] }
   };
 
-  // ------------------------------------------------------------ the spec card
-  /*
-   * H2.spec numbers. The horde leans 0.42 kN on the gate 2.10 m out from the
-   * hinge: 420 x 2.10 = 882 N.m. The jack can only be bolted to the latch
-   * bracket, 0.40 m in from the free end of the 3.00 m gate, so
-   *   d = 3.00 - 0.40 = 2.60 m from the hinge,
-   * and it must push square to the gate face, theta = 90 deg, so all of it
-   * counts. To match the horde:
-   *   F x 2.60 = 882  ->  F = 882 / 2.60 = 339.23 N  ->  339 N (0.339 kN).
-   * Check: 339 x 2.60 = 881.4 N.m, short of 882 by 0.6 N.m, far inside the
-   * hinge's 40 N.m of stiffness, so the gate holds still.
-   */
-  var SPEC = { H: 420, dh: 2.1, Lgate: 3, inset: 0.4 };
-  var SPEC_D = SPEC.Lgate - SPEC.inset;            // 2.60 m
-  var SPEC_F = SPEC.H * SPEC.dh / SPEC_D;          // 339.23 N
-  var SPEC_THETA = 90 * DEG;                       // square to the gate
+  // ------------------------------------------------------------ geometry
+  // Where a ram meets the gate and how square it is to the gate face, from a
+  // fresh build of the design (so it is the as-placed geometry, not the end
+  // of the last run).
+  //   -> { d: m from the hinge, theta: deg from the gate face (90 = square), F: N }
+  function ramOnGate(design, ram) {
+    if (!ram || !ram.a || !ram.b) return null;
+    var onA = ram.a.part === 'gate', onB = ram.b.part === 'gate';
+    if (onA === onB) return null;
+    var gate = design.parts.filter(function (p) { return p.id === 'gate'; })[0];
+    if (!gate) return null;
+    var built = Y.build({ parts: design.parts.filter(function (p) { return !Y.partDef(p.type).connector; }) }, GATE.site), P, Q;
+    try { P = Y.resolveEnd(built, onA ? ram.a : ram.b).world; Q = Y.resolveEnd(built, onA ? ram.b : ram.a).world; }
+    catch (e) { return null; }
+    var ga = gate.angle || 0, ux = Math.cos(ga), uy = Math.sin(ga);
+    var rx = P.x - Q.x, ry = P.y - Q.y, L = Math.hypot(rx, ry);
+    if (L < 1e-6) return null;
+    var c = Math.abs((rx * ux + ry * uy) / L);
+    var F = Y.dial.parse(ram.dials.force, 'force');
+    return { d: Math.hypot(P.x - gate.x, P.y - gate.y), theta: Math.acos(Math.min(1, c)) / DEG, F: F.ok ? F.si : NaN };
+  }
+  function theRam(ctx) { return ctx.all('ram').filter(function (r) { return ramOnGate(ctx.design, r); })[0] || null; }
+
+  // What the gate did in a finished run.
+  function outcome(state) {
+    var a = state.read('gate.angle') / DEG;
+    var hit = state.impacts.filter(function (i) { return (i.a === 'gate' && i.b === 'jamb') || (i.a === 'jamb' && i.b === 'gate'); })
+      .reduce(function (m, i) { return Math.max(m, i.speed); }, 0);
+    if (hit > SLAM) return { kind: 'slammed', hit: hit, a: a };
+    if (a >= AJAR - 1) return { kind: 'closed', hit: hit, a: a };
+    if (a < -8) return { kind: 'opened', hit: hit, a: a };
+    return { kind: 'held', hit: hit, a: a };
+  }
+  var SAY = {
+    opened: 'the horde won and **the gate swung open**',
+    closed: 'the gate **swung shut** and stayed shut',
+    slammed: 'the gate **slammed** into the jamb and cracked the latch',
+    held: 'the gate **barely moved**: still ajar, still a gap'
+  };
+  function runLine(r) {
+    return '- **' + f3(r.F) + ' N** at **' + r.d.toFixed(1) + ' m** from the hinge, **' + Math.round(r.theta) + '°** to the gate: ' + SAY[r.kind] +
+      (r.kind === 'slammed' ? ' (' + r.hit.toFixed(1) + ' m/s at the tip)' : '') + '.';
+  }
+  // Log each finished run with the ram that made it, under ctx.values[key].
+  function logRun(ctx, key) {
+    var ram = theRam(ctx), g = ram && ramOnGate(ctx.design, ram);
+    var list = ctx.values[key] = ctx.values[key] || [];
+    if (!g || !ctx.result || !ctx.result.state) return list;
+    var o = outcome(ctx.result.state);
+    list.push({ d: g.d, theta: g.theta, F: g.F, kind: o.kind, hit: o.hit, a: o.a });
+    return list;
+  }
+
+  // ------------------------------------------------------------- the job
+  var jobGoal = G.all(
+    G.never(function (s) {
+      var over = Object.keys(s.built.parts).filter(function (id) { var p = s.built.parts[id]; return p.def.type === 'ram' && p.values.force > RAM_MAX + 1e-6; });
+      return over.length ? 'That ram\'s pump tops out at 0.6 kN. The crew can\'t set it any higher.' : null;
+    }),
+    G.never(function (s) {
+      var hit = s.impacts.filter(function (i) { return (i.a === 'gate' && i.b === 'jamb') || (i.a === 'jamb' && i.b === 'gate'); })[0];
+      return hit && hit.speed > SLAM ? 'The gate slammed into the jamb at ' + hit.speed.toFixed(1) + ' m/s and cracked the latch (rated 2.5 m/s).' : null;
+    }),
+    G.never(function (s) { return s.read('gate.angle') < -8 * DEG ? 'The horde won. The gate swung wide open.' : null; }),
+    function (s) {
+      var a = s.read('gate.angle'), w = s.body('gate').w;
+      s.peak('tip', w * 3);
+      return s.held('shut', a >= (AJAR - 1) * DEG && Math.abs(w) < 0.02, 2) ? true : undefined;
+    }
+  );
+
+  function ramAt(anchor, base, force) {
+    return { type: 'ram', a: { part: 'footing', local: { x: base.x - 2.25, y: base.y + 2.4 } }, b: { part: 'gate', anchor: anchor }, dials: { force: force, stroke: '1.5 m', retract: '1 m' } };
+  }
 
   SE.content.registerLevel('ch01', {
     id: 'H2', order: 2, title: 'Push and Pull',
@@ -84,146 +151,162 @@
       'Tell forces by **contact** from forces **at a distance**',
       'Describe a force completely: **magnitude**, **direction** and **point of application**'
     ],
-    scene: gate(DEMO),
-    proveIt: [
+    yard: GATE,
+    // Reference builds for the scored job (checked by tests/yard.test.js).
+    solutions: {
+      'H2.gate': [
+        // latch bracket, square on, 0.45 kN: closes gently and stays shut
+        { add: [ramAt('a5', { x: 2.5, y: -2 }, '0.45 kN')] },
+        // the end ring, square on, 0.35 kN: also fine
+        { add: [ramAt('a6', { x: 3, y: -2 }, '0.35 kN')] },
+        // right by the hinge: the most the pump makes isn't nearly enough
+        { pass: false, add: [ramAt('a1', { x: 0.5, y: -2 }, '0.6 kN')] },
+        // far ring but leaning along the gate: most of the push goes into the pin
+        { pass: false, add: [ramAt('a6', { x: 0.5, y: -1.7 }, '0.45 kN')] },
+        // far ring, square on, flat out: slams
+        { pass: false, add: [ramAt('a6', { x: 3, y: -2 }, '0.6 kN')] },
+        // right spot and direction, but the pump can't be set past its limit
+        { pass: false, add: [ramAt('a1', { x: 0.5, y: -2 }, '2 kN')] },
+        // a slip of a prefix: 450 mN instead of 450 N does nothing
+        { pass: false, add: [ramAt('a5', { x: 2.5, y: -2 }, '450 mN')] }
+      ]
+    },
+    steps: [
       {
-        id: 'H2.prove-spec',
-        text: 'A gate holds when your push, square to it, times its distance from the hinge matches the horde\'s push times *its* distance. The horde gives **770 N·m** that way. Your jack is bolted **2.40 m** from the hinge and pushes square on. How hard must it push?',
-        inputs: [{
-          key: 'F', label: 'Jack push', placeholder: 'e.g. 0.25 kN',
-          // 770 / 2.40 = 320.83 N -> 321 N
-          spec: { value: 770 / 2.4, unit: 'N', sf: 3, form: 'si' }, answer: '321 N',
-          wrong: [{ input: '32.7 kg', kind: 'concept' }]
-        }]
+        type: 'say', who: 'hask',
+        text: 'This is the gate from the watchtower, looking straight down. The hinge pin is on the left, the jamb on the right. The orange arrow is the horde: **350 N**, leaning on the gate **2 m** out from the hinge.\n\nFirst, see what that does with nobody pushing back.'
       },
       {
-        id: 'H2.prove-dir',
-        text: 'Same jack, same 500 N, but now it pushes straight **along** the gate toward the hinge pin. How much of that push turns the gate?',
-        inputs: [{ key: 'F', label: 'Turning part of the push', placeholder: 'e.g. 120 N', spec: { value: 0, unit: 'N', sf: null }, answer: '0 N' }]
-      }
-    ],
-    steps: [
+        type: 'watch', who: 'hask',
+        yard: gateYard({ bin: [], goal: G.after(5) }),
+        text: 'Press **▶ Run** and watch the gate.',
+        goalText: 'Run it once',
+        until: function (ctx, type) { return type === 'result' && !!ctx.result; },
+        after: function (ctx) { return 'In five seconds the gate swung to **' + Math.round(AJAR - ctx.result.state.read('gate.angle') / DEG) + '°** open. A push, from one body on another, changed how the gate moves. That is what a **force** is.'; }
+      },
       // ---------------------------------------------- point of application
       {
-        type: 'predict', who: 'hask',
-        scene: gate(DEMO),
-        hud: ['Horde: 400 N, 2.00 m from the hinge', 'Crew: 300 N, square to the gate'],
-        q: 'The horde leans **400 N** on the gate. Rook can push **300 N**, square to the gate, and not a newton more. The gate is 3 m long, hinge on the left.\n\nWhere should he push so the gate shuts?',
-        choices: [
-          { t: 'Right beside the hinge, where the gate is strongest.', why: 'Strong, yes, but a push next to the hinge barely turns anything. It mostly squeezes the hinge pin.' },
-          { t: 'In the middle. It splits the difference.', why: 'Better, but the horde still wins. They\'re leaning at 2 m out; Rook in the middle is only 1.5 m out.' },
-          { t: 'Out at the far edge, by the latch.', correct: true, why: 'Right. The farther from the hinge you push, the more a push turns the gate. Same 300 N, completely different result.' },
-          { t: 'Doesn\'t matter. 300 N is 300 N.', why: 'That\'s the trap. Watch the runs: the same 300 N does three different things.' }
-        ],
-        run: function (ctx) {
-          return runSeries(ctx, DEMO, [
-            { label: 'at 0.30 m (by the hinge)', set: { d: 0.3 } },
-            { label: 'at 1.50 m (middle)', set: { d: 1.5 } },
-            { label: 'at 2.90 m (far edge)', set: { d: 2.9 } }
-          ]);
+        type: 'build', who: 'hask', kicker: 'Where it pushes',
+        yard: gateYard({ bin: [{ type: 'ram', count: 1, dials: { force: '300 N', stroke: '1.5 m', retract: '1 m' }, fixed: ['force', 'stroke', 'retract'], label: 'crew ram, 300 N' }], goal: G.after(6) }),
+        text: 'Here\'s a hydraulic ram that pushes **300 N** and not a newton more. Click a spot on the **footing** for its base, then a **ring on the gate** for its rod. Keep it roughly square to the gate.\n\nRun it with the rod on a ring **near the hinge**, then move it (Remove, place it again) to the **end ring** and run again. The horde is pushing 350 N, more than the ram, so the size alone can\'t decide this.',
+        goalText: 'One run near the hinge (1 m or less), one at the end (2.5 m or more)',
+        until: function (ctx, type) {
+          var list = type === 'result' ? logRun(ctx, 'point') : (ctx.values.point || []);
+          var near = list.some(function (r) { return r.d <= 1.01; }), far = list.some(function (r) { return r.d >= 2.49; });
+          if (near && far) return true;
+          if (type === 'result' && !theRam(ctx)) return 'The ram needs one end on the footing and the other on a ring of the gate.';
+          return list.length ? (near ? 'Now try a ring **at the far end** of the gate.' : 'Now try a ring **close to the hinge**.') : false;
         },
-        reveal: 'Same size of push, same direction, different spot, different outcome. Where a force acts, its **point of application**, is part of what the force *is*.'
+        hint: 'The small rings on the gate are every 0.5 m from the hinge. A base straight below the ring keeps the ram square on.',
+        after: function (ctx) { return 'Your runs:\n\n' + ctx.values.point.map(runLine).join('\n') + '\n\nSame push, same direction, different spot, different result. Where a force acts, its **point of application**, is part of what the force *is*.'; }
       },
       // ---------------------------------------------------------- direction
       {
-        type: 'predict', who: 'hask',
-        scene: gate(DEMO),
-        hud: ['Horde: 400 N, 2.00 m from the hinge', 'Crew: 300 N at the far edge, 2.90 m'],
-        q: 'Rook is at the far edge now, still pushing **300 N**. The yard is muddy and he wants to brace at an easier angle. Which way of pushing still shuts the gate?',
-        choices: [
-          { t: 'Square on, straight against the gate face.', correct: true, why: 'Yes. Every newton of a square-on push goes into turning the gate.' },
-          { t: 'Along the gate, shoving toward the hinge post.', why: 'That push goes straight down the gate into the hinge pin. It turns nothing at all.' },
-          { t: 'Slanted at 30° to the gate face.', why: 'Only part of a slanted push turns the gate. At 30° it\'s half, and half isn\'t enough here.' },
-          { t: 'All of them, as long as it\'s 300 N.', why: 'Direction changes what a push does. Watch: same 300 N, same spot, three outcomes.' }
-        ],
-        run: function (ctx) {
-          return runSeries(ctx, DEMO, [
-            { label: 'square on (θ = 90°)', set: { theta: 90 } },
-            { label: 'along the gate toward the hinge (θ = 180°)', set: { theta: 180 } },
-            { label: 'slanted (θ = 30°)', set: { theta: 30 } }
-          ]);
+        type: 'build', who: 'hask', kicker: 'Which way it pushes',
+        yard: gateYard({ bin: [{ type: 'ram', count: 1, dials: { force: '300 N', stroke: '1.5 m', retract: '1 m' }, fixed: ['force', 'stroke', 'retract'], label: 'crew ram, 300 N' }], goal: G.after(6) }),
+        text: 'Keep the rod on the **end ring**. This time move the **base** around the footing, so the ram leans along the gate instead of pushing square on. Run one ram **nearly square** (more than 60° to the gate) and one **leaning hard** (less than 30°).',
+        goalText: 'End ring: one run nearly square, one leaning hard',
+        until: function (ctx, type) {
+          var list = type === 'result' ? logRun(ctx, 'dir') : (ctx.values.dir || []);
+          var end = list.filter(function (r) { return r.d >= 2.49; });
+          var sq = end.some(function (r) { return r.theta > 60; }), lean = end.some(function (r) { return r.theta < 30; });
+          if (sq && lean) return true;
+          if (list.length && !end.length) return 'Put the rod on the **end ring** for this one.';
+          return end.length ? (sq ? 'Now slide the base sideways so the ram **leans along** the gate, under 30°.' : 'Now put the base straight below the ring, **nearly square on**.') : false;
         },
-        reveal: 'Size and spot weren\'t enough: the **direction** of a push decides how much of it does the job. A force needs a direction as well as a size.'
+        hint: 'To lean the ram, put its base far over to the left on the footing, close to the gate line, and the rod on the end ring.',
+        after: function (ctx) { return 'Your runs:\n\n' + ctx.values.dir.map(runLine).join('\n') + '\n\nSame size, same spot, different **direction**, different result. A push that leans along the gate mostly shoves the hinge pin, and only the part of it square to the gate swings the gate.'; }
       },
       // ---------------------------------------------------------- magnitude
       {
-        type: 'try', who: 'hask',
-        scene: gate(DEMO),
-        hud: ['Horde: 400 N, 2.00 m from the hinge', 'Crew: square on at 2.90 m'],
-        text: 'Spot and direction are fixed now: far edge, square on. Set the **size** of Rook\'s push and press **Push ▸**. Shut the gate *without* slamming it: hit the jamb too fast and the latch cracks.',
-        controls: ['F'],
-        actions: [{
-          label: 'Push ▸',
-          run: function (ctx) {
-            var s = ctx.scene, p = s.p;
-            p.d = 2.9; p.theta = 90;
-            return s.run({ duration: 6 }).then(function (r) {
-              var tip = r.detail.tipSpeed != null ? ' Tip speed at the jamb: **' + Math.abs(r.detail.tipSpeed).toFixed(2) + ' m/s** (latch rated 2.5 m/s).' : '';
-              return 'Push of **' + p.F + ' N**: ' + outcomeText(r.outcome) + '.' + (r.outcome === 'opened' || r.outcome === 'held' ? '' : tip);
-            });
-          }
-        }],
-        goalText: 'Shut the gate gently, without slamming it',
-        goal: function (ctx) { var r = ctx.scene && ctx.scene.result; return !!r && r.outcome === 'closed'; },
-        after: 'Too little and the gate stays ajar or the horde wins; too much and it slams. The window sits roughly between 290 N and 410 N here. The **magnitude** is the third part of the description.'
-      },
-      {
-        type: 'reveal', kicker: 'Principle', title: 'What makes a force', hud: [],
-        eq: '\\t{force} = \\t{magnitude} + \\t{direction} + \\t{point of application}',
-        text: 'A **force** is a push or a pull that one body exerts on another. You\'ve just seen that changing any one of these three changes what the force does, and that knowing all three tells you everything about it:\n\n- **Magnitude**: how big (newtons).\n- **Direction**: which way it acts.\n- **Point of application**: where on the body it acts.\n\nLeave any one off a work order and the crew is guessing.',
-        formula: 'ch01.force'
-      },
-      // ---------------------------------------- contact vs at a distance
-      {
-        type: 'say', who: 'hask',
-        text: 'Rook\'s hands touch the gate. That\'s a force by **contact**. But some forces need no touching at all. The Earth pulls on every crate in this yard from thousands of kilometres away, and magnets and electric charges reach across gaps too. Those act **at a distance**.'
-      },
-      {
-        type: 'classify', id: 'H2.contact',
-        text: 'Contact, or at a distance?',
-        bins: ['Contact', 'At a distance'],
-        items: [
-          { t: 'The tow rope dragging a sled across the yard', bin: 'Contact', why: 'The rope is tied to the sled and pulls on it directly.' },
-          { t: 'The scrapyard electromagnet lifting a steel plate before it touches it', bin: 'At a distance', why: 'Magnetic force crosses the air gap.' },
-          { t: 'The weight of a crate sitting on the dock', bin: 'At a distance', why: 'Weight is the Earth\'s gravity pulling on the crate. Nothing touches it to make that pull.', hint: 'Weight: what is doing the pulling, and is it touching the crate?' },
-          { t: 'Wind flapping the tarp on the watchtower', bin: 'Contact', why: 'Moving air is matter pressing on the tarp\'s surface. Contact, even though you can\'t see it.', hint: 'Wind is air. Is air touching the tarp?' },
-          { t: 'A lodestone swinging the needle of Juno\'s compass', bin: 'At a distance', why: 'Magnetism again: the stone never touches the needle.' },
-          { t: 'Your hand bearing down on the winch lever', bin: 'Contact', why: 'Hand on steel.' }
-        ]
-      },
-      // ------------------------------------------------------------- mass
-      {
-        type: 'predict', who: 'hask',
-        scene: CARTS,
-        q: 'Two carts on the spur, frictionless bearings: one **empty** at 40 kg, one **loaded** at 160 kg. Each gets exactly the same **80 N** push for 3 seconds, then coasts.\n\nWhich one is moving faster at the end?',
-        choices: [
-          { t: 'Same speed. Same push, same time.', why: 'The push was the same, but the carts weren\'t. Look at the speeds.' },
-          { t: 'The empty cart.', correct: true, why: 'Right. The loaded cart has four times the mass and picks up a quarter of the speed. More matter fights a change in velocity harder.' },
-          { t: 'The loaded cart. It has more momentum behind it.', why: 'It ends up with the same momentum as the empty cart, but at a much lower speed. Look at the measured speeds.' }
-        ],
-        run: function (ctx) {
-          var s = ctx.scene;
-          // 80 N for 3 s: empty a = 80/40 = 2 m/s^2 -> 6 m/s; loaded a = 80/160
-          // = 0.5 m/s^2 -> 1.5 m/s. Timed pushes switch off at 3 s, so the
-          // speeds read afterwards are the coasting speeds.
-          var push = [{ id: 'light', F: 80, duration: 3 }, { id: 'heavy', F: 80, duration: 3 }];
-          return s.run({ pushes: push, duration: 3, settle: false }).then(function () {
-            var vl = s.body('light').v, vh = s.body('heavy').v;
-            return 'Measured once the push stopped: empty cart **' + vl.toFixed(2) + ' m/s**, loaded cart **' + vh.toFixed(2) + ' m/s**.';
-          });
+        type: 'build', who: 'hask', kicker: 'How hard it pushes',
+        yard: gateYard({ bin: [{ type: 'ram', count: 1, dials: { force: '300 N', stroke: '1.5 m', retract: '1 m' }, fixed: ['stroke', 'retract'], label: 'crew ram' }], goal: G.after(6) }),
+        text: 'Now the force dial is yours. Bolt the ram square on at the **end ring** or the latch bracket next to it. Set its **force** and shut the gate *gently*: if the tip hits the jamb faster than **2.5 m/s**, the latch cracks.\n\nTry one that\'s too much as well, so you see it.',
+        goalText: 'A gentle close, and one run that slams',
+        until: function (ctx, type) {
+          var list = type === 'result' ? logRun(ctx, 'mag') : (ctx.values.mag || []);
+          var good = list.some(function (r) { return r.kind === 'closed'; }), slam = list.some(function (r) { return r.kind === 'slammed'; });
+          if (good && slam) return true;
+          if (good) return 'That\'s a clean close. Now push **much harder** and watch what happens.';
+          if (slam) return 'Too hard. Back the force off until it closes without slamming.';
+          return list.length ? 'Not shut yet. Push a little harder.' : false;
         },
-        reveal: '**Mass** is a measure of how much matter a body has. It shows up two ways: it **resists changes in velocity** (what you just saw), and it is what **gravity pulls on**, so two masses attract each other. Both come back in a few levels, in Newton\'s laws and in weight.'
+        hint: 'Square on at the end ring, around **300 N** closes it gently. **1 kN** will certainly slam it.',
+        after: function (ctx) { return 'Your runs:\n\n' + ctx.values.mag.map(runLine).join('\n') + '\n\nToo little and the horde wins, too much and the latch cracks. The **magnitude** is the third thing you have to get right.'; }
+      },
+      {
+        type: 'reveal', kicker: 'Principle', title: 'What makes a force',
+        eq: '\\t{force} = \\t{magnitude} + \\t{direction} + \\t{point of application}',
+        text: 'A **force** is a push or a pull that one body exerts on another. You changed one of these three at a time, and every change changed what the gate did. Knowing all three tells you everything about a force:\n\n- **Magnitude**: how big (newtons).\n- **Direction**: which way it acts.\n- **Point of application**: where on the body it acts.\n\nLeave any one off a work order and the crew is guessing.',
+        formula: 'ch01.force'
       },
       // ------------------------------------------------------------- time
       {
-        type: 'predict', who: 'hask',
-        q: 'Maddy stacked the salvage shelf in ten minutes this morning. Pell would have taken all afternoon to stack the identical shelf with the identical crates in the identical places.\n\nOnce it\'s finished and standing, does the time it took change whether the shelf holds?',
-        choices: [
-          { t: 'Yes. Rushed work is weaker.', why: 'Rushed work can mean *mistakes*, but that\'s a different shelf. With every crate in the same place, the forces are the same.' },
-          { t: 'No. Once it stands still, only the forces on it right now matter.', correct: true, why: 'Exactly. Nothing in the shelf\'s balance depends on the clock.' },
-          { t: 'Only if it was stacked very fast.', why: 'Speed matters while things are moving. Once everything sits still, the history drops out.' }
-        ],
-        reveal: '**Time** is the order in which events happen. Statics problems don\'t depend on it, because nothing is changing. Time matters as soon as things move and speed up, which is **dynamics**.'
+        type: 'watch', who: 'hask', kicker: 'Does the clock matter?',
+        yard: {
+          keep: true,
+          goal: function (s) {
+            if (s.t >= 5 && s.memo.p5 == null) { s.memo.p5 = s.read('gate.pinForce'); s.memo.a5 = s.read('gate.angle'); }
+            if (s.t >= 25) { s.memo.p25 = s.read('gate.pinForce'); s.memo.a25 = s.read('gate.angle'); return true; }
+          }
+        },
+        text: 'Leave your gentle ram where it is (set it back to a gentle force if the last run slammed). Run it again, and this time let it go for **25 s**. Watch the **pin force** gauge once the gate is shut.',
+        goalText: 'A 25 s run with the gate shut',
+        until: function (ctx, type) {
+          if (type !== 'result' || !ctx.result || !ctx.result.state.memo.p25) return false;
+          var m = ctx.result.state.memo;
+          return m.a5 >= (AJAR - 1) * DEG ? true : 'The gate wasn\'t shut by 5 s. Set the ram to a gentle closing force and run it again.';
+        },
+        after: function (ctx) {
+          var m = ctx.result.state.memo;
+          return 'Pin force at **5 s**: **' + f3(m.p5) + ' N**. At **25 s**: **' + f3(m.p25) + ' N**. Twenty seconds went by and nothing changed, because nothing was moving.\n\n**Time** is the order in which events happen. A problem where everything sits still doesn\'t depend on it, which is why statics never needs a clock. Time matters as soon as things move and speed up, as the gate did while it swung.';
+        }
+      },
+      // ---------------------------------------- contact vs at a distance
+      {
+        type: 'build', who: 'hask', kicker: 'Touching, or not',
+        yard: { design: SPUR.design, site: SPUR.site, camera: SPUR.camera, bin: [{ type: 'crate', count: 1, dials: { mass: '20 kg' } }], goal: G.after(2) },
+        text: 'Back to ground level, side on. The ram touched the gate to push it. That is a force by **contact**.\n\nPlace the **crate** up in the air, well above the floor, and run it. Nothing in the yard touches it.',
+        goalText: 'A crate dropped from 2 m or higher',
+        until: function (ctx, type) {
+          var c = ctx.find('crate');
+          if (!c) return false;
+          if (c.y < 2) return 'Put it higher: drag it up so it starts at least 2 m above the floor.';
+          if (type !== 'result' || !ctx.result) return false;
+          var p = ctx.result.state.pos(c.id);
+          return p && p.y < c.y - 1 ? true : false;
+        },
+        after: 'It fell, with nothing touching it. The Earth pulled on it from a distance. Gravity acts **at a distance**, and so do electric and magnetic forces: a scrapyard electromagnet grabs a steel plate across an air gap, and a lodestone swings a compass needle without touching it. Everything else you\'ll build with (ropes, rams, hands, wind on a tarp, water on a dam) acts by **contact**.'
+      },
+      // ------------------------------------------------------------- mass
+      {
+        type: 'build', who: 'hask', kicker: 'What mass does',
+        yard: { design: SPUR.design, site: SPUR.site, camera: SPUR.camera,
+          bin: [{ type: 'push', count: 2, dials: { force: '80 N', angle: '0 deg', time: '3 s', start: '0 s' }, fixed: ['force', 'angle', 'time', 'start'], label: '80 N for 3 s' }],
+          goal: G.after(4) },
+        text: 'Two carts on greased rollers: one **empty** at 40 kg, one **loaded** at 160 kg. Clip one of the identical pushes (**80 N for 3 s**) to each cart, and run it.',
+        goalText: 'Both carts pushed, and run',
+        until: function (ctx, type) {
+          var on = function (id) { return ctx.all('push').some(function (p) { return p.a && p.a.part === id; }); };
+          if (!(on('heavy') && on('light'))) return ctx.all('push').length ? 'Each cart needs its own push.' : false;
+          return type === 'result' && !!ctx.result;
+        },
+        after: function (ctx) {
+          var s = ctx.result.state;
+          return 'Coasting speeds after the push: empty cart **' + f3(s.vel('light').x) + ' m/s**, loaded cart **' + f3(s.vel('heavy').x) + ' m/s**. Four times the mass, a quarter of the speed.';
+        }
+      },
+      {
+        type: 'rule', title: 'Mass resists a change in velocity',
+        law: 'v = \\frac{F\\,t}{m}',
+        eq: function (ctx) {
+          var s = ctx.result.state;
+          return [
+            '\\t{empty: } \\frac{(80\\u{ N})(3\\u{ s})}{40\\u{ kg}} = 6\\u{ m/s} \\quad (\\t{measured } ' + f3(s.vel('light').x) + '\\u{ m/s})',
+            '\\t{loaded: } \\frac{(80\\u{ N})(3\\u{ s})}{160\\u{ kg}} = 1.5\\u{ m/s} \\quad (\\t{measured } ' + f3(s.vel('heavy').x) + '\\u{ m/s})'
+          ];
+        },
+        text: '**Mass** is the quantity of matter in a body. You just saw one of the two ways it shows up: it **resists changes in velocity**, so the same push changes a heavy body\'s speed less. The other way is that mass is what gravity pulls on, so any two masses attract each other. That is the crate you dropped. Both come back soon, in Newton\'s laws and in weight.'
       },
       {
         type: 'reveal', kicker: 'Definitions', title: 'The four basic quantities',
@@ -231,145 +314,60 @@
         table: {
           head: ['Quantity', 'What it describes', 'Where you met it here'],
           rows: [
-            ['Length', 'where a point is, and how big a body is', 'how far from the hinge Rook pushed'],
-            ['Time', 'the succession of events', 'the shelf: statics doesn\'t need it, dynamics does'],
+            ['Length', 'where a point is, and how big a body is', 'how far from the hinge you bolted the ram'],
+            ['Time', 'the succession of events', 'the shut gate: 5 s or 25 s, same pin force'],
             ['Mass', 'quantity of matter: resists changes in velocity, and is attracted by gravity', 'the empty and loaded carts'],
-            ['Force', 'what one body does to another when it shoves or tugs it, by touch or across empty space', 'Rook versus the horde']
+            ['Force', 'one body pushing or pulling on another, by contact or at a distance', 'your ram against the horde, and the falling crate']
           ]
         }
       },
       {
-        type: 'classify', id: 'H2.quantities',
-        text: 'Which basic quantity is each of these about?',
-        bins: ['Length', 'Time', 'Mass', 'Force'],
-        items: [
-          { t: 'The 2.60 m from the hinge to the latch bracket', bin: 'Length', why: 'A distance locating a point.' },
-          { t: 'The order the bolts went into the gate frame', bin: 'Time', why: 'A succession of events.' },
-          { t: 'How hard it is to get the loaded cart rolling', bin: 'Mass', why: 'Resistance to a change in velocity.' },
-          { t: 'The horde\'s 420 N lean on the gate', bin: 'Force', why: 'A push, by contact.' },
-          { t: 'The Earth\'s pull on a crate', bin: 'Force', why: 'Weight is a force (gravity, at a distance). The crate\'s *mass* is what the pull acts on.', hint: 'A pull is a force, even when it\'s gravity doing it.' },
-          { t: 'The width of the gap the dead are squeezing through', bin: 'Length', why: 'Size of something.' }
+        type: 'deeper', title: 'When the point of application stops mattering',
+        teaser: 'Two cases where you can relax the "where" part of a force: particles, and sliding a force along its own line.',
+        steps: [
+          { type: 'say', who: 'hask', text: 'If a body is small compared with everything around it, you can treat it as a **particle**: all its mass at one point. Then every force on it acts at that same point, and "point of application" has nothing left to tell you. Only magnitude and direction remain. That\'s why the next levels can treat a crate on a long cable as a dot.' },
+          { type: 'say', who: 'hask', text: 'For a rigid body there\'s a second shortcut. A force can slide anywhere along its own **line of action** without changing how the whole body moves or balances. That\'s the **principle of transmissibility**. Try it in free play: move the ram\'s base farther back along the same line, so the ram is longer but pushes the same ring the same way. The gate can\'t tell the difference.\n\nIt only covers the outside effect. Inside the body it matters: pull one end of a bar and it stretches, push the other end along the same line and it squashes. Real bodies aren\'t perfectly rigid, and that difference is the subject of strength of materials.' }
         ]
       },
       // ---------------------------------------------------- scored job
       {
-        type: 'task', id: 'H2.spec', who: 'juno',
-        scene: gate({ H: SPEC.H, dh: SPEC.dh, angle0: 20, F: 0, d: SPEC_D, theta: 90 }),
-        hud: ['Horde: 0.42 kN at 2.10 m from the hinge', 'Jack bracket: 0.40 m in from the free end of the 3.00 m gate'],
-        title: 'Spec card for the gate jack',
+        type: 'job', id: 'H2.gate', who: 'juno',
+        yard: gateYard({ design: JOB_DESIGN, bin: [{ type: 'ram', count: 1, dials: { force: '0.2 kN', stroke: '1.5 m', retract: '1 m' }, fixed: ['stroke', 'retract'], label: 'night-shift ram, 0.6 kN max' }] }),
         text: [
-          'Juno, on the radio: "Night shift is bolting the hydraulic jack to the yard gate. They\'ll set it **exactly** to what you write on the card, nothing more, so fill in all of it."',
-          '- The horde leans **0.42 kN** square on the gate, **2.10 m** out from the hinge.',
-          '- The jack only fits the latch bracket, **0.40 m in from the free end** of the 3.00 m gate.',
-          '- Gate rule: with a push square to the gate, the gate holds when **your push × its distance from the hinge** equals the **horde\'s push × its distance**. Pushing at a slant only counts part of the push.',
-          'Spec the jack\'s push so it just holds the gate: its **magnitude**, its **direction** as the angle from the gate face, and its **point of application** as the distance from the hinge.'
+          'Juno, on the radio: "More of them now. They\'re leaning **0.42 kN** on the gate, still 2 m out from the hinge. Night shift has one ram left, and its pump tops out at **0.6 kN**."',
+          'Bolt the ram where you like and set its force. Shut the gate **without cracking the latch** (tip under 2.5 m/s at the jamb) and keep it shut.'
         ].join('\n\n'),
-        inputs: [
-          {
-            key: 'F', label: 'Magnitude', placeholder: 'e.g. 0.250 kN',
-            // 420 x 2.10 / 2.60 = 339.23 N -> 339 N (see SPEC above)
-            spec: { value: SPEC_F, unit: 'N', sf: 3, form: 'si', mistakes: [
-              { ratio: SPEC.H / SPEC_F, kind: 'concept', msg: 'That\'s the horde\'s own push. The jack sits farther from the hinge than the horde does, so it needs less.' },
-              { ratio: (SPEC.H * SPEC.dh / SPEC.inset) / SPEC_F, kind: 'concept', msg: 'You used 0.40 m, the distance from the free end. The rule needs the distance from the hinge.' }
-            ] },
-            answer: '339 N',
-            wrong: [{ input: '339', kind: 'unit' }, { input: '34.6 kg', kind: 'concept' }, { input: '0.420 kN', kind: 'concept' }, { input: '2.21 kN', kind: 'concept' }]
-          },
-          {
-            key: 'theta', label: 'Direction (angle from the gate face)', placeholder: 'e.g. 45°',
-            spec: { value: SPEC_THETA, unit: 'deg', sf: null, tol: 0.01, mistakes: [
-              { test: function (r) { return Math.abs(r) < 1e-6 || Math.abs(Math.abs(r) - 2) < 1e-6; }, kind: 'concept', msg: 'At 0° or 180° the jack pushes along the gate, straight into the hinge pin. None of that push turns the gate.' }
-            ] },
-            answer: '90°',
-            wrong: [{ input: '90', kind: 'unit' }, { input: '0°', kind: 'concept' }, { input: '180°', kind: 'concept' }]
-          },
-          {
-            key: 'd', label: 'Point of application (distance from the hinge)', placeholder: 'e.g. 1.75 m',
-            // 3.00 - 0.40 = 2.60 m
-            spec: { value: SPEC_D, unit: 'm', sf: null, mistakes: [
-              { ratio: SPEC.inset / SPEC_D, kind: 'concept', msg: 'That\'s measured from the free end. The point of application here is measured from the hinge.' }
-            ] },
-            answer: '2.60 m',
-            wrong: [{ input: '0.40 m', kind: 'concept' }]
-          }
-        ],
-        hints: [
-          'Three blanks, three parts of a force. Two of them come almost straight from the brief. Which two?',
-          'Point: the bracket is 0.40 m in from the *free* end of a 3.00 m gate, so measure from the hinge. Direction: square on means 90° to the face. Magnitude: use the gate rule, horde push × horde distance = jack push × jack distance, with the push in newtons.',
-          '$d = 3.00 - 0.40 = 2.60\\u{ m}$, $\\theta = 90°$, and $F \\times 2.60 = 420 \\times 2.10 = 882$, so $F = 882 / 2.60 = 339\\u{ N}$ (0.339 kN).'
-        ],
-        consequence: function (ctx, a) {
-          // The crew sets the jack to exactly what was written. A blank or
-          // unreadable entry means they have nothing to go on for that part.
-          var notes = [];
-          var F = a.F.si, th = a.theta.si, d = a.d.si;
-          if (F == null || a.F.result.parts.units === false) { notes.push('No usable magnitude on the card, so the jack wasn\'t pressurised at all.'); F = 0; }
-          if (th == null || a.theta.result.parts.units === false) { notes.push('No usable direction, so the crew mounted the jack along the gate, pointing at the hinge.'); th = Math.PI; }
-          if (d == null || a.d.result.parts.units === false) { notes.push('No usable point of application, so the crew bolted the jack where it was easiest, right by the hinge.'); d = 0.1; }
-          F = Math.max(0, Math.min(2000, F));
-          if (d > SPEC.Lgate) { notes.push('That point is off the end of the gate, so the crew bolted it at the free end.'); d = SPEC.Lgate; }
-          d = Math.max(0, d);
-          var thDeg = th / DEG;
-          var s = ctx.setScene('gate', Object.assign({}, GATE, { H: SPEC.H, dh: SPEC.dh, angle0: 20, F: F, d: d, theta: thDeg }));
-          var turning = F * Math.sin(th) * d;
-          return s.run({ duration: 5 }).then(function (r) {
-            var head = 'Jack set to **' + Math.round(F) + ' N** at **' + Math.round(thDeg) + '°**, **' + d.toFixed(2) + ' m** from the hinge: it counts for **' + Math.round(turning) + ' N·m** against the horde\'s **' + Math.round(SPEC.H * SPEC.dh) + ' N·m**. ';
-            var msg = {
-              opened: 'The horde won. The gate swung wide and the dead poured into the yard.',
-              held: 'The gate stopped dead and stayed put. The horde can lean all night.',
-              closed: 'The gate swung shut. It holds, but you\'ve specced more jack than the job needs.',
-              slammed: 'The gate slammed into the jamb and cracked the latch. Way too much push.'
-            }[r.outcome];
-            return (notes.length ? notes.join(' ') + '\n\n' : '') + head + msg;
-          });
+        goalText: 'Gate shut and still for 2 s, latch intact',
+        goal: jobGoal,
+        timeout: 20,
+        onFail: function (ctx) {
+          var ram = theRam(ctx), g = ram && ramOnGate(ctx.design, ram);
+          return g ? 'Your ram: **' + f3(g.F) + ' N**, **' + g.d.toFixed(1) + ' m** from the hinge, **' + Math.round(g.theta) + '°** to the gate.' : 'The ram needs one end on the footing and the other on a ring of the gate.';
         },
-        explain: 'All three parts were needed. Get the size wrong and the horde wins or the latch cracks. Put the jack in the wrong place, or point it the wrong way, and the same push does far less. That\'s why a force is only fully described by **magnitude, direction and point of application**.'
-      },
-      {
-        type: 'sandbox', hud: [],
-        scene: gate({ H: 400, dh: 2, F: 300, d: 2.9, theta: 90 }),
-        text: 'The gate is yours. Drag on the gate to place a push (where you press is the point, the drag sets size and direction), or use the sliders, then press **Push ▸**.',
-        controls: ['F', 'd', 'theta', 'H', 'dh'],
-        prompts: [
-          'Push along the gate toward the hinge at 2000 N. What happens?',
-          'Halve the distance from the hinge. How much bigger must the push be to keep up?',
-          'Find the slant angle where 300 N at the far edge stops winning against 400 N at 2 m.'
+        hints: [
+          'Think about all three parts of the ram\'s force. Near the hinge even 0.6 kN won\'t win, and a ram leaning along the gate wastes most of its push.',
+          'Square on at the latch bracket (2.5 m from the hinge), the horde\'s 0.42 kN at 2 m needs a bit more than 0.42 × 2 / 2.5 = **0.336 kN** to win. Much more than that and the gate picks up too much speed.',
+          'Base straight below the ring 2.5 m out, rod on that ring, force **0.45 kN**.'
         ],
-        actions: [{
-          label: 'Push ▸',
-          run: function (ctx) {
-            var p = ctx.scene.p;
-            return ctx.scene.run({ duration: 6 }).then(function (r) {
-              return p.F + ' N at ' + p.theta + '°, ' + p.d.toFixed(2) + ' m from the hinge: ' + outcomeText(r.outcome) + '.';
-            });
-          }
-        }]
+        margin: function (s) { return Math.round(Math.min(10, Math.max(0, s.peakOf('tip') - 1) * 5)); },
+        success: 'Shut, latched and quiet. You had to choose all three: **where** the ram pushes, **which way**, and **how hard**. Get any one wrong and the same ram either loses to the horde or cracks the latch.'
       },
-      // ------------------------------------------------------------ deeper
       {
-        type: 'deeper', title: 'When the point of application stops mattering',
-        teaser: 'Two cases where you can relax the "where" part of a force: particles, and sliding a force along its own line.',
-        steps: [
-          {
-            type: 'say', who: 'hask',
-            text: 'If a body is small compared with everything around it, you can treat it as a **particle**: all its mass at one point. Then every force on it acts at that same point, and "point of application" has nothing left to tell you. Only magnitude and direction remain. That\'s why the next levels can treat a crate on a long cable as a dot.'
-          },
-          {
-            type: 'predict', who: 'hask',
-            q: 'A rope pulls the gate tip in a fixed direction. Rook swaps it for a rope twice as long, tied to the same point and pulled along the **same line** with the same force. Does the gate behave differently?',
-            choices: [
-              { t: 'Yes, a longer rope gives more leverage.', why: 'Leverage depends on how far the *line* of the pull passes from the hinge. The line hasn\'t moved.' },
-              { t: 'No. Same force along the same line, same effect on the gate.', correct: true, why: 'Right. For a rigid body, a force can slide anywhere along its line of action without changing the body\'s motion. This is the **principle of transmissibility**.' }
-            ],
-            reveal: 'Transmissibility only covers the *outside* effect: how the whole rigid body moves or balances. Inside the body it does matter: pulling the end of a bar puts it in tension; pushing the other end along the same line squashes it instead. Real bodies are not perfectly rigid, and that difference is the subject of strength of materials.'
-          }
+        type: 'free', who: 'hask',
+        yard: gateYard({ bin: [{ type: 'ram', count: 3, dials: { force: '300 N', stroke: '1.5 m', retract: '1 m' } }, { type: 'push', count: 3 }], goal: null }),
+        text: 'The gate is yours. Rams bolt from the footing to a ring; pushes clip straight onto a ring of the gate (0° pushes right, 90° pushes up the screen).',
+        prompts: [
+          'Push straight along the gate toward the hinge with 2 kN. What happens?',
+          'Halve the distance from the hinge. How much bigger must the ram\'s push be to keep up?',
+          'Move a ram\'s base back along the same line so the ram is longer. Does the gate notice?',
+          'Find the lean where 300 N at the end ring stops beating the horde.'
         ]
       },
       {
         type: 'summary',
         points: [
           'The four basic quantities: **length** (position and size), **time** (succession of events; statics doesn\'t depend on it), **mass** (quantity of matter; resists changes in velocity and is attracted by gravity), and **force**.',
-          'A force is one body shoving or tugging on another, by **touching** it or **across a gap** (gravitational, electrical, magnetic).',
+          'A force is one body pushing or pulling on another, by **contact** or **at a distance** (gravitational, electrical, magnetic).',
           'A force is completely described by its **magnitude**, **direction** and **point of application**. Change any one and the effect changes.'
         ]
       }
