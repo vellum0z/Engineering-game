@@ -386,7 +386,7 @@
           '- **2 · Tabulate** the data and draw any diagrams to a large scale (the table and the sketch).\n' +
           '- **3 · Apply** the relevant principles in mathematical form, keeping every equation dimensionally homogeneous (V, ρV, mg).\n' +
           '- **4 · Solve** the equations and report the answer to no more than **3 s.f.** (177 kN).\n' +
-          '- **5 · Judge** the answer with technical judgment and common sense (a dozen cars, inside the box).\n\n' +
+          '- **5 · Judge** the answer: does it make physical sense, and would you bet a life on it (a dozen cars, inside the box).\n\n' +
           'Work neatly. A tidy page makes for tidy thinking, and the other way round.',
         formula: 'ch01.procedure'
       },
@@ -405,7 +405,7 @@
           { t: 'Statics only deals with bodies that are completely at rest.', bin: 'False', why: 'Constant velocity counts too. The test is a = 0, not v = 0.' },
           { t: 'Treating the tank as a particle keeps its mass but ignores its size.', bin: 'True', why: 'That\'s the particle idealization.' },
           { t: 'A rigid body bends a little under load, just not much.', bin: 'False', why: 'A rigid body doesn\'t deform at all. Real bodies do, and that\'s for deformable-body mechanics.' },
-          { t: 'A force is a push or a pull of one body on another.', bin: 'True', why: 'By contact, or at a distance like gravity.' },
+          { t: 'A force is one body shoving or tugging on another.', bin: 'True', why: 'By contact, or at a distance like gravity.' },
           { t: 'A concentrated force is spread evenly over the whole surface it touches.', bin: 'False', why: 'A concentrated force is taken to act at a **point**, which is fair when the contact area is small compared with the body.' },
           { t: 'Action and reaction act on the same body, so they cancel out.', bin: 'False', why: 'Newton\'s third law: they are equal, opposite and collinear, but they act on **different** bodies.' },
           { t: 'With no unbalanced force, a moving particle keeps going in a straight line at constant speed.', bin: 'True', why: 'Newton\'s first law.' },

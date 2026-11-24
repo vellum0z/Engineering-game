@@ -167,7 +167,7 @@
       {
         type: 'reveal', kicker: 'Principle', title: 'Dimensional homogeneity',
         eq: 's = v t + \\frac{1}{2}a t^{2}',
-        text: 'Every equation that describes a physical process must be **dimensionally homogeneous**: each term is expressed in the **same units**. Only then can the terms be added once numbers go in.\n\nHere *s* is in m, *v* in m/s, *t* in s and *a* in m/s², and each of the three terms comes out in metres.\n\nThe workshop now has a **dimension checker** (key **d**). It reads an equation and the units of each symbol, and lays the terms out side by side.',
+        text: 'An equation that models something real has to be **dimensionally homogeneous**: every term carries the **same units**. Only then can the terms be added once numbers go in.\n\nHere *s* is in m, *v* in m/s, *t* in s and *a* in m/s², and each of the three terms comes out in metres.\n\nThe workshop now has a **dimension checker** (key **d**). It reads an equation and the units of each symbol, and lays the terms out side by side.',
         formula: 'ch01.homogeneity',
         unlock: 'dimcheck'
       },
@@ -221,7 +221,7 @@
             ] }
           }
         ],
-        outro: '**Important point.** Algebra on an equation can be checked, *in part*, by making sure it is still dimensionally homogeneous after each step.'
+        outro: '**Important point.** After every algebra step, check the equation is still dimensionally homogeneous. It cannot catch every slip, but it catches a lot of them.'
       },
       {
         type: 'task', id: 'H9.brake', who: 'hask', title: 'Stop on the line',

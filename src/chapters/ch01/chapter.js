@@ -35,7 +35,7 @@
   F({ id: 'ch01.idealizations', group: G1, title: 'Idealizations', note: '**Particle**: mass, negligible size. **Rigid body**: particles stay a fixed distance apart, so no deformation. **Concentrated force**: load acting at a point, when the loaded area is small compared with the body.' });
   F({ id: 'ch01.newton1', group: G1, title: 'Newton\'s first law', note: 'With no unbalanced force, a particle at rest stays at rest and a moving particle keeps a constant velocity (straight line, constant speed). Valid in a non-accelerating reference frame.' });
   F({ id: 'ch01.newton2', group: G1, title: 'Newton\'s second law', eq: 'F = ma', tag: '1–1', note: 'Unbalanced force → acceleration in the same direction, proportional to the force. Equivalently, force = rate of change of linear momentum, $F = \\frac{d(mv)}{dt}$.' });
-  F({ id: 'ch01.newton3', group: G1, title: 'Newton\'s third law', note: 'Action and reaction between two particles are **equal, opposite and collinear**, and they act on *different* bodies.' });
+  F({ id: 'ch01.newton3', group: G1, title: 'Newton\'s third law', note: 'When two particles push or pull on each other, the two forces have the **same size**, point **opposite ways** along the **same line**, and each acts on a *different* body.' });
 
   F({ id: 'ch01.gravitation', group: G2, title: 'Law of gravitation', eq: 'F = G\\frac{m_1 m_2}{r^2}', tag: '1–2', note: '$G = 66.73(10^{-12})\\u{ m^3/(kg·s^2)}$, *r* = distance between the particles (centre to centre).' });
   F({ id: 'ch01.weight', group: G2, title: 'Weight', eq: 'W = mg, \\quad g = \\frac{GM_e}{r^2}', tag: '1–3', note: 'Weight depends on *r*, so it is not absolute. Engineering uses the **standard location**: sea level, 45° latitude.' });

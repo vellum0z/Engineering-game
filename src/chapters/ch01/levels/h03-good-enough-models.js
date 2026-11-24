@@ -309,7 +309,7 @@
         type: 'summary',
         points: [
           'Models (idealizations) simplify the theory by dropping details that don\'t change the answer.',
-          'A **particle** has a mass but a size that can be neglected. Its geometry drops out of the analysis.',
+          'A **particle** keeps its mass but is treated as having no size, so its shape drops out of the analysis.',
           'A **rigid body** does not deform under load: its particles stay a fixed distance apart, so its material doesn\'t matter. Real steel structures deform so little that this is usually fair.',
           '**Concentrated forces** are assumed to act at a point on a body. That is fair when the loaded area is small compared with the body (c/L small, like a wheel on a rail).',
           'Check the model before you trust it: rubber is not rigid, and a long line of sandbags is not a point load.'

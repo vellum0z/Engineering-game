@@ -279,7 +279,7 @@
       {
         type: 'reveal', id: 'H5.standard', kicker: 'Convention', title: 'The standard location',
         eq: 'g = 9.81\\u{ m/s^2} \\quad \\t{(sea level, 45° latitude)}',
-        text: 'Because *g* depends on *r*, an engineer in the mountains and one at the coast would get slightly different weights for the same crate. To keep calculations comparable, most engineering work uses *g* measured at **sea level and 45° latitude**, the **standard location**.\n\n**Important point.** **Mass** is a measure of the amount of matter and does not change from one location to another. **Weight** is the Earth\'s gravitational pull on that mass, and its magnitude depends on the elevation where the mass is.'
+        text: 'Because *g* depends on *r*, an engineer in the mountains and one at the coast would get slightly different weights for the same crate. To keep calculations comparable, most engineering work uses *g* measured at **sea level and 45° latitude**, the **standard location**.\n\n**Important point.** **Mass** counts how much stuff a body holds, and it is the same wherever you take it. **Weight** is the Earth\'s gravitational pull on that mass, and its magnitude depends on the elevation where the mass is.'
       },
       {
         type: 'classify', id: 'H5.mass-weight', who: 'hask',

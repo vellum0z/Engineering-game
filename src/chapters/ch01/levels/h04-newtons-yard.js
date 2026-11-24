@@ -169,7 +169,7 @@
       {
         type: 'reveal', kicker: 'Newton\'s first law', title: 'Rest and steady motion are the same state',
         eq: '\\Sigma F = 0 \\quad \\implies \\quad v = \\t{constant}',
-        text: 'A particle originally at rest, or moving in a straight line with constant velocity, tends to **stay that way** as long as it is not subjected to an **unbalanced force**.\n\nForces can still act. What matters is whether they cancel. A sled with two equal ropes pulling opposite ways is in exactly the same state as a sled with no ropes at all: equilibrium, the a = 0 case you met in Still or Moving.',
+        text: 'A particle that sits still keeps sitting, and one cruising in a straight line at steady speed keeps cruising: it **stays that way** until the forces on it stop cancelling, that is, until it feels an **unbalanced force**.\n\nForces can still act. What matters is whether they cancel. A sled with two equal ropes pulling opposite ways is in exactly the same state as a sled with no ropes at all: equilibrium, the a = 0 case you met in Still or Moving.',
         formula: 'ch01.newton1'
       },
 
@@ -237,7 +237,7 @@
       {
         type: 'reveal', kicker: 'Newton\'s second law', title: 'Unbalanced force makes acceleration',
         eq: 'F = ma', tag: '1–1',
-        text: 'A particle acted on by an unbalanced force **F** gets an acceleration **a** in the **same direction** as the force, with a magnitude directly **proportional** to it. For a particle of mass *m*, F = ma.\n\nThe first law is the special case F = 0, so a = 0.',
+        text: 'Put an unbalanced force **F** on a particle and it speeds up along the **line and sense of that force**, and the acceleration **a** grows in **proportion** to it. For a particle of mass *m*, F = ma.\n\nThe first law is the special case F = 0, so a = 0.',
         formula: 'ch01.newton2'
       },
       {
@@ -312,7 +312,7 @@
       {
         type: 'reveal', kicker: 'Newton\'s third law', title: 'Forces come in pairs',
         eq: 'F_{A \\t{ on } B} = -F_{B \\t{ on } A}',
-        text: 'The mutual forces of action and reaction between two particles are **equal** in magnitude, **opposite** in direction and **collinear** (they act along the same line).\n\nThey act on **different bodies**. That is why they never cancel each other out: one is on the survivor\'s cart and the other is on the ore cart. To find what a single body does, count only the forces acting **on that body**.',
+        text: 'When two particles push or pull on each other, the two forces are **equal** in size, point in **opposite** directions and lie on **one line** (collinear).\n\nThey act on **different bodies**. That is why they never cancel each other out: one is on the survivor\'s cart and the other is on the ore cart. To find what a single body does, count only the forces acting **on that body**.',
         formula: 'ch01.newton3'
       },
       {

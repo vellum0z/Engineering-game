@@ -23,8 +23,8 @@
   // Givens printed on the scorched plates (legacy units, as found)
   var SWL_KGF = 3180;           // safe working load, kgf
   var TRAVEL_CM = 735;          // hook travel, cm
-  var ENC_STEP_UM = 684;        // encoder: cable paid out per tick, μm
-  var ENC_TICK_MS = 43.0;       // encoder tick period, ms
+  var ENC_STEP_UM = 527;        // encoder: cable paid out per tick, μm
+  var ENC_TICK_MS = 38.0;       // encoder tick period, ms
   var STIFF_N_PER_MM = 48.6;    // cable spring rate, N/mm
   var BRAKE_KGF_CM2 = 70.5;     // brake accumulator pressure, kgf/cm²
   var BRAKE_DELAY_MS = 2416;    // brake set time, ms
@@ -32,7 +32,7 @@
   // Answer values in SI base units
   var SWL = SWL_KGF * G0;                                    // 31 185.147 N
   var TRAVEL = TRAVEL_CM / 100;                              // 7.35 m
-  var CREEP = (ENC_STEP_UM * 1e-6) / (ENC_TICK_MS * 1e-3);   // 0.015 907 m/s
+  var CREEP = (ENC_STEP_UM * 1e-6) / (ENC_TICK_MS * 1e-3);   // 0.013 868 m/s
   var STIFF = STIFF_N_PER_MM * 1000;                         // 48 600 N/m
   var BRAKE_P = BRAKE_KGF_CM2 * G0 / 1e-4;                   // 6 913 688 Pa
   var DELAY = BRAKE_DELAY_MS / 1000;                         // 2.416 s
@@ -214,20 +214,20 @@
         id: 'P3.creep',
         label: '**Creep speed** for setting loads down, from the encoder log.',
         placeholder: 'e.g. 22.1 mm/s',
-        // v = 684 μm / 43.0 ms = 684(10⁻⁶) m / 43.0(10⁻³) s = 15.907(10⁻³) m/s → 15.9 mm/s.
+        // v = 527 μm / 38.0 ms = 527(10⁻⁶) m / 38.0(10⁻³) s = 13.868(10⁻³) m/s → 13.9 mm/s.
         // The prefix goes on the numerator only: mm/s, not μm/ms.
         spec: { value: CREEP, unit: 'm/s', sf: 3, form: 'si' },
-        answer: '15.9 mm/s',
+        answer: '13.9 mm/s',
         wrong: [
-          { input: '15.9 μm/ms', kind: 'form' },
-          { input: '0.0159 m/s', kind: 'form' },
-          { input: '15.9 m/s', kind: 'prefix' },
-          { input: '15.9 μm/s', kind: 'prefix' }
+          { input: '13.9 μm/ms', kind: 'form' },
+          { input: '0.0139 m/s', kind: 'form' },
+          { input: '13.9 m/s', kind: 'prefix' },
+          { input: '13.9 μm/s', kind: 'prefix' }
         ],
         hints: [
           'Speed is distance over time. Can a label keep a prefix under the fraction bar?',
           'Rewrite both prefixes as powers of ten, divide in base units, then put one prefix back on the numerator.',
-          '684(10⁻⁶) m ÷ 43.0(10⁻³) s = 15.9(10⁻³) m/s = **15.9 mm/s**.'
+          '527(10⁻⁶) m ÷ 38.0(10⁻³) s = 13.9(10⁻³) m/s = **13.9 mm/s**.'
         ],
         consequence: function (ctx, a) {
           var f = read(a);

@@ -133,11 +133,11 @@
 
   // H8.combos: unit combinations, each written as "1 <unit>" so the value is
   // fixed and only the form is in play.
-  var C_RAMP = 1e3 / 1e-3;          // 1 kN/ms = 10^6 N/s = 1 MN/s
-  var C_GAIN = 1e3 / (1 * 1e-6);    // 1 kN/(kg·μs) = 10^9 N/(kg·s) = 1 GN/(kg·s)
-  var C_STIFF = 1 / 1e-3;           // 1 N/mm = 10^3 N/m = 1 kN/m
-  var C_ARM = 1e-3 * 1e3;           // 1 mm·Mg = 10^-3 m · 10^3 kg = 1 m·kg
-  var C_GAP = 1e-6 * 1e3;           // 1 μkm = 10^-6 · 10^3 m = 10^-3 m = 1 mm
+  var C_RAMP = 1e6 / 1e3;           // 1 MN/ks = 10^3 N/s = 1 kN/s
+  var C_GAIN = 1e-3 / (1 * 1e-9);   // 1 mN/(kg·ns) = 10^6 N/(kg·s) = 1 MN/(kg·s)
+  var C_STIFF = 1e3 / 1e-3;         // 1 kN/mm = 10^6 N/m = 1 MN/m
+  var C_ARM = 1e6 * 1e-6;           // 1 Mm·mg = 10^6 m · 10^-6 kg = 1 m·kg
+  var C_GAP = 1e-9 * 1e3;           // 1 nkm = 10^-9 · 10^3 m = 10^-6 m = 1 μm
 
   // H8.prefix-range: one prefix, number between 0.1 and 1000.
   var R_BOLLARD = 38470e3;          // 38 470 kN = 38.47 MN -> 38.5 MN
@@ -176,12 +176,12 @@
         ]
       },
       {
-        id: 'H8.prove-combo', text: 'Rewrite each in correct SI form (the number stays 1): **1 GN·μm** and **1 Mg/mm**.',
+        id: 'H8.prove-combo', text: 'Rewrite each in correct SI form (the number stays 1): **1 MN·nm** and **1 Gg/km**.',
         inputs: [
-          // 1 GN·μm = 10^9 N · 10^-6 m = 10^3 N·m = 1 kN·m
-          { key: 'M', label: '1 GN·μm', placeholder: 'e.g. 1 kN·m', spec: { value: 1e3, unit: 'N·m', sf: null, form: 'si' }, answer: '1 kN·m', wrong: [{ input: '1 GN·μm', kind: 'form' }] },
-          // 1 Mg/mm = 10^3 kg / 10^-3 m = 10^6 kg/m = 1 Gg/m
-          { key: 'D', label: '1 Mg/mm', placeholder: 'e.g. 1 Gg/m', spec: { value: 1e6, unit: 'kg/m', sf: null, form: 'si' }, answer: '1 Gg/m', wrong: [{ input: '1 Mg/mm', kind: 'form' }] }
+          // 1 MN·nm = 10^6 N · 10^-9 m = 10^-3 N·m = 1 mN·m
+          { key: 'M', label: '1 MN·nm', placeholder: 'e.g. 1 mN·m', spec: { value: 1e-3, unit: 'N·m', sf: null, form: 'si' }, answer: '1 mN·m', wrong: [{ input: '1 MN·nm', kind: 'form' }] },
+          // 1 Gg/km = 10^6 kg / 10^3 m = 10^3 kg/m = 1 Mg/m
+          { key: 'D', label: '1 Gg/km', placeholder: 'e.g. 1 Mg/m', spec: { value: 1e3, unit: 'kg/m', sf: null, form: 'si' }, answer: '1 Mg/m', wrong: [{ input: '1 Gg/km', kind: 'form' }] }
         ]
       },
       {
@@ -206,7 +206,7 @@
         type: 'reveal', kicker: 'Table 1–3', title: 'SI prefixes',
         eq: '4\\ 000\\ 000\\ \\u{N} = 4000\\ \\u{kN} = 4\\ \\u{MN}',
         table: { head: ['Multiple', 'Exponential', 'Prefix', 'Symbol'], rows: [['1 000 000 000', '10⁹', 'giga', 'G'], ['1 000 000', '10⁶', 'mega', 'M'], ['1 000', '10³', 'kilo', 'k'], ['0.001', '10⁻³', 'milli', 'm'], ['0.000 001', '10⁻⁶', 'micro', 'μ'], ['0.000 000 001', '10⁻⁹', 'nano', 'n']] },
-        text: 'When a number gets very large or very small, a **prefix** on the unit carries the size instead. Each step in the table is a factor of 1000, so each one moves the decimal point **three places**: 4 000 000 N = 4000 kN = 4 MN, and 0.005 m = 5 mm.\n\nThe metric system also has **deca** (10) and **centi** (0.01), but SI practice in engineering avoids them, apart from a few area and volume measurements (you will still see cm² on old drawings).\n\nOne oddity: the **kilogram** is the only base unit whose name already carries a prefix. The gram is the thing the prefixes attach to, so 1000 kg is a **megagram**, Mg, not a "kilo-kilogram".',
+        text: 'When a number gets very large or very small, a **prefix** on the unit carries the size instead. Each step in the table is a factor of 1000, so each one moves the decimal point **three places**: 7 000 000 N = 7000 kN = 7 MN, and 0.003 m = 3 mm.\n\nThe metric system also has **deca** (10) and **centi** (0.01), but SI practice in engineering avoids them, apart from a few area and volume measurements (you will still see cm² on old drawings).\n\nOne oddity: the **kilogram** is the only base unit whose name already carries a prefix. The gram is the thing the prefixes attach to, so 1000 kg is a **megagram**, Mg, not a "kilo-kilogram".',
         formula: 'ch01.table-prefix'
       },
       {
@@ -318,14 +318,14 @@
         text: 'Strict firmware: will each label pass, or halt the crane?',
         bins: ['Passes', 'Halts'],
         items: [
-          { t: '1 Mm/s', bin: 'Passes', why: 'One prefix, in the numerator. (1 m/μs written properly.)' },
-          { t: '1 m/μs', bin: 'Halts', why: 'Prefix in the denominator. 1 m/μs = 10⁶ m/s = 1 Mm/s.' },
-          { t: '1 Mg/kN', bin: 'Halts', why: 'Two prefixes, one in the denominator. 10³ kg / 10³ N = 1 kg/N.' },
+          { t: '1 Mm/s', bin: 'Passes', why: 'One prefix, in the numerator. (1 mm/ns written properly.)' },
+          { t: '1 mm/ns', bin: 'Halts', why: 'Prefix in the denominator. 10⁻³ m / 10⁻⁹ s = 10⁶ m/s = 1 Mm/s.' },
+          { t: '1 Gg/MN', bin: 'Halts', why: 'Two prefixes, one in the denominator. 10⁶ kg / 10⁶ N = 1 kg/N.' },
           { t: '1 kg/N', bin: 'Passes', why: 'kg is the one prefixed unit allowed anywhere.' },
-          { t: '1 mN/μs', bin: 'Halts', why: 'Prefix in the denominator. 10⁻³ N / 10⁻⁶ s = 10³ N/s = 1 kN/s.' },
-          { t: '1 Ms/g', bin: 'Passes', why: 'One prefix, numerator. Equal to 1 ks/mg = 10⁹ s/kg, which you could also write 1 Gs/kg.' },
-          { t: '1 km·μN', bin: 'Halts', why: 'Two prefixes. 10³ m · 10⁻⁶ N = 10⁻³ m·N = 1 mm·N.' },
-          { t: '1 μN/s²', bin: 'Passes', why: 'One prefix, numerator. (1 N/ks² = 1 N / 10⁶ s² = 10⁻⁶ N/s².)' },
+          { t: '1 μN/ms', bin: 'Halts', why: 'Prefix in the denominator. 10⁻⁶ N / 10⁻³ s = 10⁻³ N/s = 1 mN/s.' },
+          { t: '1 ks/g', bin: 'Passes', why: 'One prefix, numerator. Equal to 1 s/mg = 10³ s/g, which you could also write 1 Ms/kg.' },
+          { t: '1 Mm·nN', bin: 'Halts', why: 'Two prefixes. 10⁶ m · 10⁻⁹ N = 10⁻³ m·N = 1 mm·N.' },
+          { t: '1 mN/s²', bin: 'Passes', why: 'One prefix, numerator. (1 kN/ks² = 10³ N / 10⁶ s² = 10⁻³ N/s².)' },
           { t: '45 cm', bin: 'Halts', why: 'centi is not used in engineering. Write 450 mm or 0.450 m.' }
         ]
       },
@@ -334,21 +334,21 @@
         title: 'Rewrite the controller\'s setup plates',
         text: 'The controller builds its line-pull set point from five setup plates. Each was stamped in a form the strict firmware refuses. Rewrite each one in correct SI form. The value is fixed by the conversion, so the number stays **1**.\n\nIf any label still breaks a rule, the firmware halts. If you change a value, that factor goes into the line pull.',
         inputs: [
-          // 1 kN/ms = 10^3 N / 10^-3 s = 10^6 N/s = 1 MN/s
-          { key: 'ramp', label: 'Tension ramp: 1 kN/ms', placeholder: 'e.g. 1 MN/s', spec: { value: C_RAMP, unit: 'N/s', sf: null, form: 'si' }, answer: '1 MN/s', wrong: [{ input: '1 kN/ms', kind: 'form' }, { input: '1 kN/s', kind: 'prefix' }] },
-          // 1 kN/(kg·μs) = 10^3 N / (kg · 10^-6 s) = 10^9 N/(kg·s) = 1 GN/(kg·s)
-          { key: 'gain', label: 'Governor gain: 1 kN/(kg·μs)', placeholder: 'e.g. 1 GN/(kg·s)', spec: { value: C_GAIN, unit: 'N/(kg·s)', sf: null, form: 'si' }, answer: '1 GN/(kg·s)', wrong: [{ input: '1 MN/(kg·s)', kind: 'prefix' }] },
-          // 1 N/mm = 1 N / 10^-3 m = 10^3 N/m = 1 kN/m
-          { key: 'stiff', label: 'Cable stiffness: 1 N/mm', placeholder: 'e.g. 1 kN/m', spec: { value: C_STIFF, unit: 'N/m', sf: null, form: 'si' }, answer: '1 kN/m', wrong: [{ input: '1 N/mm', kind: 'form' }, { input: '1 mN/m', kind: 'prefix' }] },
-          // 1 mm·Mg = 10^-3 m · 10^3 kg = 1 m·kg
-          { key: 'arm', label: 'Counterweight moment arm: 1 mm·Mg', placeholder: 'e.g. 1 m·kg', spec: { value: C_ARM, unit: 'm·kg', sf: null, form: 'si' }, answer: '1 m·kg', wrong: [{ input: '1 mm·Mg', kind: 'form' }, { input: '1 m·g', kind: 'prefix' }] },
-          // 1 μkm = 10^-6 · 10^3 m = 10^-3 m = 1 mm (two stacked prefixes collapse to one)
-          { key: 'gap', label: 'Brake gap: 1 μkm', placeholder: 'e.g. 1 mm', spec: { value: C_GAP, unit: 'm', sf: null, form: 'si' }, answer: '1 mm', wrong: [{ input: '1 μkm', kind: 'form' }, { input: '1 μm', kind: 'prefix' }] }
+          // 1 MN/ks = 10^6 N / 10^3 s = 10^3 N/s = 1 kN/s
+          { key: 'ramp', label: 'Tension ramp: 1 MN/ks', placeholder: 'e.g. 1 kN/s', spec: { value: C_RAMP, unit: 'N/s', sf: null, form: 'si' }, answer: '1 kN/s', wrong: [{ input: '1 MN/ks', kind: 'form' }, { input: '1 MN/s', kind: 'prefix' }] },
+          // 1 mN/(kg·ns) = 10^-3 N / (kg · 10^-9 s) = 10^6 N/(kg·s) = 1 MN/(kg·s)
+          { key: 'gain', label: 'Governor gain: 1 mN/(kg·ns)', placeholder: 'e.g. 1 MN/(kg·s)', spec: { value: C_GAIN, unit: 'N/(kg·s)', sf: null, form: 'si' }, answer: '1 MN/(kg·s)', wrong: [{ input: '1 GN/(kg·s)', kind: 'prefix' }] },
+          // 1 kN/mm = 10^3 N / 10^-3 m = 10^6 N/m = 1 MN/m
+          { key: 'stiff', label: 'Cable stiffness: 1 kN/mm', placeholder: 'e.g. 1 MN/m', spec: { value: C_STIFF, unit: 'N/m', sf: null, form: 'si' }, answer: '1 MN/m', wrong: [{ input: '1 kN/mm', kind: 'form' }, { input: '1 N/m', kind: 'prefix' }] },
+          // 1 Mm·mg = 10^6 m · 10^-6 kg = 1 m·kg
+          { key: 'arm', label: 'Counterweight moment arm: 1 Mm·mg', placeholder: 'e.g. 1 m·kg', spec: { value: C_ARM, unit: 'm·kg', sf: null, form: 'si' }, answer: '1 m·kg', wrong: [{ input: '1 Mm·mg', kind: 'form' }, { input: '1 m·g', kind: 'prefix' }] },
+          // 1 nkm = 10^-9 · 10^3 m = 10^-6 m = 1 μm (two stacked prefixes collapse to one)
+          { key: 'gap', label: 'Brake gap: 1 nkm', placeholder: 'e.g. 1 um', spec: { value: C_GAP, unit: 'm', sf: null, form: 'si' }, answer: '1 μm', wrong: [{ input: '1 nkm', kind: 'form' }, { input: '1 mm', kind: 'prefix' }] }
         ],
         hints: [
           'Turn every prefix into its power of ten, combine them, then choose one prefix for the numerator. kg is the only prefix allowed below the line.',
-          'kN/ms: 10³ / 10⁻³ = 10⁶, so mega. N/mm: 1 / 10⁻³ = 10³ on the N. μkm: 10⁻⁶ · 10³ = 10⁻³ m. mm·Mg: 10⁻³ m · 10⁶ g = 10³ g·m, and 10³ g is a kg.',
-          '1 MN/s, 1 GN/(kg·s), 1 kN/m, 1 m·kg, 1 mm.'
+          'MN/ks: 10⁶ / 10³ = 10³, so kilo. kN/mm: 10³ / 10⁻³ = 10⁶ on the N. nkm: 10⁻⁹ · 10³ = 10⁻⁶ m. Mm·mg: 10⁶ m · 10⁻³ g = 10³ g·m, and 10³ g is a kg.',
+          '1 kN/s, 1 MN/(kg·s), 1 MN/m, 1 m·kg, 1 μm.'
         ],
         consequence: function (ctx, a) {
           return controller(ctx, a, [{ key: 'ramp', trueSI: C_RAMP }, { key: 'gain', trueSI: C_GAIN }, { key: 'stiff', trueSI: C_STIFF }, { key: 'arm', trueSI: C_ARM }, { key: 'gap', trueSI: C_GAP }]);
@@ -432,7 +432,7 @@
         type: 'deeper', title: 'Powers of a thousand, and a kilogram with a prefix',
         teaser: 'Why steps of 1000, how far the table really goes, and why the kilogram is the odd one out.',
         steps: [
-          { type: 'say', who: 'hask', text: 'Steps of 1000 line up with how numbers are written in groups of three digits, 4 000 000, so a prefix change is always "move the gap". It also means engineering notation needs only exponents that are multiples of 3, and the number in front always lands between 1 and 1000. Hecto, deca, deci and centi break that pattern, which is why engineers leave them alone.' },
+          { type: 'say', who: 'hask', text: 'Steps of 1000 line up with how numbers are written in groups of three digits, 7 000 000, so a prefix change is always "move the gap". It also means engineering notation needs only exponents that are multiples of 3, and the number in front always lands between 1 and 1000. Hecto, deca, deci and centi break that pattern, which is why engineers leave them alone.' },
           { type: 'say', who: 'hask', text: 'The full SI list runs much further than Table 1–3: tera (10¹²), peta (10¹⁵), exa (10¹⁸), zetta (10²¹), yotta (10²⁴) up top, and pico, femto, atto, zepto, yocto below. In 2022 the General Conference on Weights and Measures added **ronna** (R, 10²⁷) and **quetta** (Q, 10³⁰), with **ronto** (r) and **quecto** (q) for the small end, mostly because data storage and the mass of planets were running off the end of the list.' },
           { type: 'predict', who: 'hask', q: 'The kilogram is the only base unit with a prefix in its name. Why?', choices: [
             { t: 'Because the gram was defined first, and the practical standard that got built was a 1 kg block.', correct: true, why: 'Yes. The 1790s metric system started from the gram (a cubic centimetre of water), but a gram is too small to make a good physical standard, so the platinum reference was a kilogram. When the base units were chosen, the kilogram was the one with a real artefact, so it became the base unit and kept its prefix. Since 2019 it is defined by the Planck constant instead.' },

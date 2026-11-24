@@ -152,7 +152,7 @@
         type: 'reveal', kicker: 'Definition', title: 'SI units',
         scene: { type: 'scales', params: { mode: 'compare', mass: 1, k: 400, capacity: 60, units: 'SI', label: '1 kg' } },
         eq: '1\\u{ N} = (1\\u{ kg})(1\\u{ m/s^2}) \\quad \\implies \\quad \\u{N} = \\u{kg·m/s^2}',
-        text: 'The **International System** (SI) keeps the **meter** (m), the **second** (s) and the **kilogram** (kg) as base units. Force is derived: one **newton** (N) is the force that gives a 1 kg mass an acceleration of 1 m/s².\n\nImportant point: in SI the newton is a **derived** unit; m, s and kg are **base** units.',
+        text: 'The **International System** (SI) keeps the **meter** (m), the **second** (s) and the **kilogram** (kg) as base units. Force is derived: one **newton** (N) is the push that speeds 1 kg up by 1 m/s every second.\n\nImportant point: in SI the newton is a **derived** unit; m, s and kg are **base** units.',
         formula: 'ch01.base-units'
       },
       {
@@ -163,11 +163,11 @@
           { eq: 'g = 9.80665\\u{ m/s^2} \\quad \\t{(measured, standard location)}', why: 'Sea level, latitude 45°.' },
           { eq: 'W = m g \\quad (g = 9.81\\u{ m/s^2})', tag: '1–4', why: 'For calculations we use 9.81, which is plenty for three significant figures.' },
           {
-            eq: '1\\u{ kg} \\\to\ W = (1)(9.81) = 9.81\\u{ N}', why: 'One kilogram weighs 9.81 N.',
-            ask: { q: 'So what does a **2 kg** body weigh?', choices: [
-              { t: '2 N', why: 'That treats kilograms as if they were newtons. Mass and weight are different quantities.' },
-              { t: '19.62 N', correct: true, why: '(2)(9.81) = 19.62 N.' },
-              { t: '0.204 N', why: 'That divides by g instead of multiplying.' }
+            eq: '1\\u{ kg} \\quad\\to\\quad W = (1)(9.81) = 9.81\\u{ N}', why: 'One kilogram weighs 9.81 N.',
+            ask: { q: 'So what does a **5 kg** body weigh?', choices: [
+              { t: '5 N', why: 'That treats kilograms as if they were newtons. Mass and weight are different quantities.' },
+              { t: '49.05 N', correct: true, why: '(5)(9.81) = 49.05 N.' },
+              { t: '0.510 N', why: 'That divides by g instead of multiplying.' }
             ] }
           }
         ],
@@ -190,7 +190,7 @@
           { eq: 'W = m g \\quad \\implies \\quad m = \\frac{W}{g}', why: 'Solve for mass.' },
           { eq: 'm = \\frac{W}{g} \\quad (g = 32.2\\u{ ft/s^2})', tag: '1–5', why: 'Standard g in feet per second squared.' },
           {
-            eq: 'W = 32.2\\u{ lb} \\\to\ m = \\frac{32.2}{32.2} = 1\\u{ slug}', why: 'A body weighing 32.2 lb has a mass of one slug.',
+            eq: 'W = 32.2\\u{ lb} \\quad\\to\\quad m = \\frac{32.2}{32.2} = 1\\u{ slug}', why: 'Whatever weighs 32.2 lb on Earth carries exactly one slug of mass.',
             ask: { q: 'A crate weighs **96.6 lb**. Its mass?', choices: [
               { t: '96.6 slug', why: 'Pounds measure force in FPS, not mass. You still have to divide by g.' },
               { t: '3.00 slug', correct: true, why: '96.6 / 32.2 = 3.00 slug.' },
@@ -336,7 +336,7 @@
         points: [
           'Length, time, mass and force are tied by $F = ma$, so only **three** units can be chosen freely (**base units**). The fourth is **derived**.',
           '**SI**: m, s, kg are base; the **newton** is derived, N = kg·m/s², the force that gives 1 kg an acceleration of 1 m/s².',
-          'Weight in SI: $W = mg$ with g = 9.81 m/s² (measured 9.806 65). 1 kg weighs 9.81 N; 2 kg weighs 19.62 N.',
+          'Weight in SI: $W = mg$ with g = 9.81 m/s² (measured 9.806 65). 1 kg weighs 9.81 N; 5 kg weighs 49.05 N.',
           '**FPS**: ft, s, lb are base; the **slug** is derived, slug = lb·s²/ft. Mass from weight: $m = W/g$ with g = 32.2 ft/s²; 32.2 lb is 1 slug.',
           'A spring scale reads force, so mark it in newtons (or pounds). A balance compares masses.'
         ]

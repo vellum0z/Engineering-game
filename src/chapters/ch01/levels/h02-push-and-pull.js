@@ -234,7 +234,7 @@
             ['Length', 'where a point is, and how big a body is', 'how far from the hinge Rook pushed'],
             ['Time', 'the succession of events', 'the shelf: statics doesn\'t need it, dynamics does'],
             ['Mass', 'quantity of matter: resists changes in velocity, and is attracted by gravity', 'the empty and loaded carts'],
-            ['Force', 'a push or pull of one body on another, by contact or at a distance', 'Rook versus the horde']
+            ['Force', 'what one body does to another when it shoves or tugs it, by touch or across empty space', 'Rook versus the horde']
           ]
         }
       },
@@ -369,7 +369,7 @@
         type: 'summary',
         points: [
           'The four basic quantities: **length** (position and size), **time** (succession of events; statics doesn\'t depend on it), **mass** (quantity of matter; resists changes in velocity and is attracted by gravity), and **force**.',
-          'A force is a push or pull of one body on another, by **contact** or **at a distance** (gravitational, electrical, magnetic).',
+          'A force is one body shoving or tugging on another, by **touching** it or **across a gap** (gravitational, electrical, magnetic).',
           'A force is completely described by its **magnitude**, **direction** and **point of application**. Change any one and the effect changes.'
         ]
       }
