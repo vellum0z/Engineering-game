@@ -220,7 +220,7 @@
       ]);
       ch.levels.forEach(function (lv, i) {
         var ls = st.levels[lv.id] || {};
-        var ids = []; SE.content.walkSteps(lv.steps, function (s) { if ((s.type === 'task' || s.type === 'classify') && s.required !== false && !s.deeper) ids.push(s.id); });
+        var ids = []; SE.content.walkSteps(lv.steps, function (s) { if ((s.type === 'task' || s.type === 'classify' || s.type === 'job') && s.required !== false && !s.deeper) ids.push(s.id); });
         var m = SE.scoring.mastery(ids, self.save.bests);
         hcol.appendChild(el('button', { class: 'level-row' + (ls.done ? ' done' : ''), onclick: function () { self.show('level', { chapter: ch.id, id: lv.id }); } }, [
           el('span', { class: 'level-id', text: lv.id }),

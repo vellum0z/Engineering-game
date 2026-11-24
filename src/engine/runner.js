@@ -677,7 +677,7 @@
     this.archiveCard();
     this.applySideEffects({ unlock: lv.unlocks && lv.unlocks.tools, formula: lv.unlocks && lv.unlocks.formulas, material: lv.unlocks && lv.unlocks.materials });
     var ids = [];
-    SE.content.walkSteps(lv.steps, function (s) { if ((s.type === 'task' || s.type === 'classify') && s.required !== false && !s.deeper) ids.push(s.id); });
+    SE.content.walkSteps(lv.steps, function (s) { if ((s.type === 'task' || s.type === 'classify' || s.type === 'job') && s.required !== false && !s.deeper) ids.push(s.id); });
     var m = SE.scoring.mastery(ids, this.save.bests);
     this.lvState.done = true;
     this.lvState.mastery = Math.max(this.lvState.mastery || 0, m);

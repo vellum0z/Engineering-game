@@ -75,7 +75,7 @@
     var ids = [];
     if (opts.mode !== 'manual') ch.levels.forEach(function (lv) {
       walkSteps(lv.steps, function (s) {
-        if ((s.type === 'task' || s.type === 'classify') && s.id && s.required !== false && !s.deeper) ids.push(s.id);
+        if ((s.type === 'task' || s.type === 'classify' || s.type === 'job') && s.id && s.required !== false && !s.deeper) ids.push(s.id);
       });
     });
     if (opts.mode !== 'handheld') ch.projects.forEach(function (p) {
