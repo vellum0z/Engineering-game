@@ -72,7 +72,7 @@
   // A hand/ram push on a part's centre: force F in direction θ for t seconds.
   Y.definePart({
     type: 'push', name: 'Push', category: 'Forces',
-    blurb: 'A steady push on whatever it is clipped to, for as long as you set. 0° pushes right, 90° pushes up.',
+    blurb: 'A steady push at the point where it is clipped on, for as long as you set. 0° pushes right, 90° pushes up.',
     size: { w: 0.8, h: 0.4 },
     attach: true,        // clips onto one part (inst.a = { part })
     dials: [
@@ -89,14 +89,17 @@
       var world = b.world, eps = 1e-9;
       // forces act for the next step: push during [t0, t0 + T)
       function active() { var t = world.time; return t >= t0 - eps && t < t0 + T - eps; }
-      function apply() { if (active() && body.type === 'dynamic') body.applyForce(vec, body.c); }
+      // acts at the clip point (an anchor or the clicked spot; the centre of mass for a bare { part })
+      var local = end.local;
+      function point() { return body.worldPoint(local); }
+      function apply() { if (active() && body.type === 'dynamic') body.applyForce(vec, point()); }
       apply();
       b.on('step', apply);
-      return { body: null, bodies: [], target: body, vector: vec, active: active };
+      return { body: null, bodies: [], target: body, vector: vec, active: active, point: point };
     },
     draw: function (ctx, cam, built) {
       if (!built.target || !built.active()) return;
-      var c = built.target.c, F = built.vector, L = Math.hypot(F.x, F.y);
+      var c = built.point(), F = built.vector, L = Math.hypot(F.x, F.y);
       if (!L) return;
       var s = cam.worldToScreen(c), ux = F.x / L, uy = -F.y / L, len = 46;
       ctx.save(); ctx.strokeStyle = '#ffb347'; ctx.fillStyle = '#ffb347'; ctx.lineWidth = 3;
@@ -135,7 +138,7 @@
     type: 'speedo', name: 'Speed gauge', category: 'Measure',
     blurb: 'Clip it to a part to read its speed along the ground.',
     size: { w: 0.5, h: 0.5 },
-    connector: true, attach: true,
+    connector: true, attach: true, attachCentre: true,
     build: function (b) {
       var end = b.end('a');
       return { target: end.body, gauge: new b.P.sensors.Speedometer(end.body, { component: 'x' }) };

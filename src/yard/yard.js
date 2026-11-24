@@ -541,16 +541,23 @@
   // Which end does a click mean? an anchor ring, a part, or (ropes) a point on the ground/site
   Yard.prototype.endAt = function (p, d) {
     var a = this.nearestAnchor(p);
-    if (a && !d.attach) return { part: a.part, anchor: a.anchor };
+    if (a && d.attach) {
+      // a click nearer the part's centre of mass than the anchor means the centre
+      var ap = this.built.parts[a.part], cb = ap && ap.body;
+      if (cb && Math.hypot(cb.c.x - p.x, cb.c.y - p.y) < Math.hypot(a.x - p.x, a.y - p.y)) return { part: a.part };
+    }
+    if (a) return { part: a.part, anchor: a.anchor };
     var id = this.partAt(p);
     if (id && Y.partDef(this.inst(id).type).connector) id = null;
     if (id) {
-      if (d.attach) return { part: id };
+      if (d.attach && d.attachCentre) return { part: id };
+      if (d.attach && bp0(this, id) && Math.hypot(bp0(this, id).c.x - p.x, bp0(this, id).c.y - p.y) < 8 / this.cam.zoom) return { part: id };
       var bp = this.built.parts[id];
       if (bp && bp.body) { var loc = bp.body.localPoint(p); return { part: id, local: { x: Math.round(loc.x * 100) / 100, y: Math.round(loc.y * 100) / 100 } }; }
     }
     return null;
   };
+  function bp0(y, id) { var bp = y.built.parts[id]; return bp && bp.body; }
   Yard.prototype.ghostFor = function (type, p) {
     var gs = (this.opts.ghosts || []).filter(function (g) { return g.type === type && !g.filled; });
     var best = null, bd = 1.5;

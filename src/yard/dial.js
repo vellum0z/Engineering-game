@@ -15,6 +15,8 @@
  *   SE.yard.dial.QUANTITIES[q] = { dims, si: 'N', examples: 'N, kN, lb' }
  *
  * A dial with q 'number' takes a plain number (a count, a ratio, μ).
+ * A dial with q 'text' takes any non-empty text (a formula, a part id);
+ * b.si(key) then returns the text itself.
  */
 (function (SE) {
   'use strict';
@@ -35,7 +37,8 @@
     pressure:  { dims: d(-1, 1, -2),  si: 'Pa',    name: 'pressure',      examples: 'Pa, kPa, MPa, psi' },
     moment:    { dims: d(2, 1, -2),   si: 'N·m',   name: 'moment',        examples: 'N·m, kN·m, lb·ft' },
     energy:    { dims: d(2, 1, -2),   si: 'J',     name: 'energy',        examples: 'J, kJ' },
-    density:   { dims: d(-3, 1, 0),   si: 'kg/m^3', name: 'density',      examples: 'kg/m^3' }
+    density:   { dims: d(-3, 1, 0),   si: 'kg/m^3', name: 'density',      examples: 'kg/m^3' },
+    text:      { dims: null,          si: '',      name: 'text',          examples: 'text' }
   };
 
   function parse(text, q) {
@@ -43,6 +46,7 @@
     if (!Q) throw new Error('unknown dial quantity ' + q);
     var raw = String(text == null ? '' : text).trim();
     if (!raw) return { ok: false, error: 'Type a value' + (Q.si ? ' with its unit, e.g. ' + Q.examples.split(',')[0] : '') + '.' };
+    if (q === 'text') return { ok: true, si: raw, text: raw, q: 'text' };
     if (q === 'number' || !q) {
       var n = U.parseNumberPrefix(raw);
       if (!n || n.rest.trim()) return { ok: false, error: 'Type a plain number, e.g. 0.4.' };

@@ -100,3 +100,15 @@ suite('yard: Act I manual jobs have working reference solutions', () => {
     });
   });
 });
+
+suite('yard: push acts where it is clipped', () => {
+  test('a push clipped off-centre turns a free plank (torque = r × F)', () => {
+    const SE_ = globalThis.SE, Yd = SE_.yard;
+    const d = { parts: [Yd.makeInstance('crate', { id: 'c', x: 0, y: 5, dials: { mass: '10 kg' } }),
+      Yd.makeInstance('push', { a: { part: 'c', local: { x: 0, y: 0.5 } }, dials: { force: '10 N', time: '0.1 s' } })] };
+    const r = Yd.judge({ design: d, site: { g: 0, floor: null }, goal: Yd.goals.after(0.1), timeout: 1 });
+    const b = r.state.body('c');
+    near(b.v.x, 0.1, 1e-6);            // F t / m
+    near(b.w, -10 * 0.5 * 0.1 / b.I, 1e-4);   // clockwise: torque -r F
+  });
+});
