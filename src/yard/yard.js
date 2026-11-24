@@ -136,6 +136,7 @@
       this.stepper = new SE.phys.Stepper(this.built.world, { dt: 1 / 60, maxSteps: 8 });
       this.stepper.timeScale = this.timeScale || 1;
       this.runs++;
+      this.acc = 0;
       this.mode = 'run';
       this.placing = null;
       this.emit('run', { runs: this.runs });
@@ -184,13 +185,16 @@
       return this;
     }
     if (this.mode !== 'run' || !this.stepper || this.stepper.paused) return;
-    var self = this, n = 0;
-    // step one at a time so the goal sees every step
-    var before = this.built.world.stepCount;
-    this.stepper.advance(seconds);
-    n = this.built.world.stepCount - before;
-    if (n > 0) this.afterStep();
-    if (this.state && this.state.t >= (this.goal ? this.timeout : 600)) { if (!this.goal) this.pause(); }
+    var self = this, dt = this.stepper.dt || 1 / 60;
+    // step one at a time so the goal sees every step, even at 4x
+    this.acc = (this.acc || 0) + seconds * (this.stepper.timeScale || 1);
+    var n = 0, maxSteps = 8 * Math.max(1, this.stepper.timeScale || 1);
+    while (this.acc >= dt - 1e-12 && this.mode === 'run' && n < maxSteps) {
+      this.stepper.stepOnce(); this.acc -= dt; n++;
+      this.afterStep();
+    }
+    if (n >= maxSteps) this.acc = 0;           // too slow to keep up: run slower instead of spiralling
+    if (this.state && !this.goal && this.state.t >= 600) this.pause();
     return self;
   };
 
@@ -248,7 +252,7 @@
     var pts = (this.design.parts || []).filter(function (p) { var d = Y.partDef(p.type); return d && !d.connector; });
     (this.opts.ghosts || []).forEach(function (g) { pts.push(g); });
     pts.forEach(function (p) {
-      var d = Y.partDef(p.type), w = (p.w || (d && d.size.w) || 1) / 2, h = (p.h || (d && d.size.h) || 1) / 2;
+      var d = Y.partDef(p.type), sz = d && p.id ? Y.sizeOf(p) : (d ? d.size : { w: 1, h: 1 }), w = (p.w || sz.w || 1) / 2, h = (p.h || sz.h || 1) / 2;
       lo.x = Math.min(lo.x, p.x - w); hi.x = Math.max(hi.x, p.x + w);
       lo.y = Math.min(lo.y, p.y - h); hi.y = Math.max(hi.y, p.y + h + 1);
     });
@@ -503,7 +507,7 @@
   Yard.prototype.restOnFloor = function (inst) {
     var d = Y.partDef(inst.type);
     if (!this.site || this.site.floor === null || d.category === 'Site') return;
-    var h = (d.size.h || 1) / 2;
+    var h = ((inst.id ? Y.sizeOf(inst) : d.size).h || 1) / 2;
     if (inst.y < h) inst.y = h;
   };
 
