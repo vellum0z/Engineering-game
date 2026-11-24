@@ -74,7 +74,7 @@ suite('physics: contact and statics', () => {
   test('sliding to a stop: distance v²/(2μg) (within 3%)', () => {
     const w = world(); ground(w);
     const b = w.add(new P.Body({ position: { x: 0, y: 0.5 }, velocity: { x: 5, y: 0 }, shapes: [{ shape: P.box(0.5, 0.5), friction: 0.5 }], mass: 100 }));
-    w.bodies[0].fixtures[0].friction = 0.5;
+    const gf = w.bodies[0].fixtures[0]; gf.friction = gf.muS = gf.muK = 0.5;
     w.run(3);
     near(b.c.x, 25 / (2 * 0.5 * g), 0.03);
   });

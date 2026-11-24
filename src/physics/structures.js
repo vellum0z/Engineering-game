@@ -81,6 +81,11 @@
  * force(), torque(), reaction() and anchors; their own solve() is empty.
  * Removing a link (breakage does) takes its rows out on the next step.
  *
+ * Saving: each structure keeps `def`, a JSON copy of its build definition
+ * (ground left out), and its solver and links are flagged `internal` /
+ * part-of-structure, so a scene file can store the call instead of the
+ * bodies and joints it made.
+ *
  * Supports: 'fixed' welds to ground, 'pin' holds a point, 'roller' holds a
  * point only along `normal` (default: the beam's normal, or straight up for
  * a truss) and leaves it free to slide and turn. P.LineSupport is the same
@@ -351,7 +356,17 @@
     if (def.ground) return def.ground;
     return world.add(new P.Body({ type: 'static', position: M.v(0, 0), label: 'ground' }));
   }
-  function finish(world, s, links) {
+  // The build definition without the ground body, so a scene file can save
+  // a structure as the call that made it and rebuild it.
+  function plainDef(def) {
+    var o = {};
+    Object.keys(def).forEach(function (k) { if (k !== 'ground') o[k] = def[k]; });
+    var mat = def.material;
+    if (mat && typeof mat === 'object') o.material = mat.name;
+    return JSON.parse(JSON.stringify(o));
+  }
+  function finish(world, s, links, def) {
+    s.def = plainDef(def);
     links.forEach(function (l) { world.addJoint(l); });
     s.solver = world.addJoint(new StructureSolver(s, links, world));
     (world.structures = world.structures || []).push(s);
@@ -439,7 +454,7 @@
       var at = s.pointAt(x); at.body.applyForce(ld.F, at.point);
       return ld;
     };
-    return finish(world, s, links);
+    return finish(world, s, links, def);
   }
 
   /* ----------------------------------------------------------------- truss */
@@ -524,7 +539,7 @@
       m.broken = true;
       m.pins.forEach(function (j) { j.broken = true; world.removeJoint(j); });
     };
-    return finish(world, s, links);
+    return finish(world, s, links, def);
   }
 
   P.section = section;
