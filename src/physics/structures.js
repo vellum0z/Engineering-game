@@ -397,7 +397,7 @@
     var EI = E * sec.I, kBend = EI / dx, kAx = E * sec.A / dx, kSh = KAPPA * G * sec.A / dx;
     var mSeg = (def.massPerLength != null ? def.massPerLength : mat.density * sec.A) * dx;
     var zeta = def.damping != null ? def.damping : 0.02;
-    var group = def.group || ++groupSeq;
+    var group = def.group || -(++groupSeq);   // negative: parts of one structure never collide with each other
     var limits = { moment: mat.yield * sec.S, axial: mat.yield * sec.A, shear: mat.yield / Math.sqrt(3) * sec.A / 1.5 };
     var s = { kind: 'beam', label: def.label || 'beam', material: mat, section: sec, length: L, dx: dx, EI: EI,
       segments: N, start: p0, end: p1, axis: u, normal: n, limits: limits, bodies: [], links: [], supports: [] };
@@ -464,7 +464,7 @@
     var A = def.area || 1e-3;
     var I = def.I != null ? def.I : A * A / (4 * Math.PI);       // solid round bar
     var depth = def.depth || Math.sqrt(4 * A / Math.PI);
-    var group = def.group || ++groupSeq;
+    var group = def.group || -(++groupSeq);   // negative: parts of one structure never collide with each other
     var s = { kind: 'truss', label: def.label || 'truss', material: mat, area: A, I: I,
       nodes: [], members: [], supports: [] };
     var pts = def.nodes.map(function (p) { return M.v(p.x, p.y); });

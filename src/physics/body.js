@@ -5,16 +5,21 @@
  *     type: 'dynamic' | 'static' | 'kinematic',
  *     position: {x, y}, angle, velocity: {x, y}, angularVelocity,
  *     shapes: [shape | { shape, material, friction, muS, muK, restitution, density, sensor,
- *                        rollingResistance, tangentSpeed }],
+ *                        rollingResistance, tangentSpeed, filter: { category, mask, group } }],
  *     material: 'steel',            // default for shapes that don't set one
  *     mass: 250,                     // optional: overrides density-derived mass (keeps the centroid)
  *     fixedRotation: false, linearDamping: 0, angularDamping: 0, gravityScale: 1,
- *     label, userData
+ *     allowSleep: true, label, userData
  *   });
  *
  * The body origin is `position`; the solver works on the centre of mass `c`.
  * Forces added with applyForce act for one step and are then cleared;
  * body.lastApplied lists the ones that acted during the last step.
+ * Applying a force, torque or impulse, or moving the body with setTransform,
+ * wakes it (and, through islands.js, everything it is resting on).
+ * Fixture filters default to { category: 1, mask: 0xFFFFFFFF, group: 0 };
+ * see broadphase.js for the rules. A plain `group` on a shape is the same as
+ * filter.group.
  */
 (function (SE) {
   'use strict';
@@ -43,18 +48,20 @@
     this.gravityScale = def.gravityScale == null ? 1 : def.gravityScale;
     this.fixedRotation = !!def.fixedRotation;
     this.awake = true;
+    this.sleepTime = 0;
+    this.allowSleep = def.allowSleep !== false;
     this.world = null;
     this.broken = false;
     var defMat = def.material || 'steel';
     this.fixtures = (def.shapes || []).map(function (s) {
       var f = s.shape ? s : { shape: s };
       var mat = P.material(f.material || defMat);
-      return {
+      var fx = {
         shape: f.shape, material: mat,
         density: f.density != null ? f.density : mat.density,
         friction: f.friction != null ? f.friction : mat.friction,
         restitution: f.restitution != null ? f.restitution : mat.restitution,
-        sensor: !!f.sensor, group: f.group || 0, body: null,
+        sensor: !!f.sensor, group: 0, filter: null, body: null,
         // static / kinetic friction: the fixture's own values, else the
         // material's (only when the fixture didn't override `friction`)
         muS: f.muS != null ? f.muS : (f.friction == null && mat.muS != null ? mat.muS : null),
@@ -62,6 +69,14 @@
         rollingResistance: f.rollingResistance != null ? f.rollingResistance : (mat.rollingResistance || 0),
         tangentSpeed: f.tangentSpeed || 0
       };
+      var fl = f.filter || {};
+      fx.filter = {
+        category: fl.category != null ? fl.category : 1,
+        mask: fl.mask != null ? fl.mask : 0xFFFFFFFF,
+        group: fl.group != null ? fl.group : (f.group || 0)
+      };
+      fx.group = fx.filter.group;
+      return fx;
     });
     var self = this;
     this.fixtures.forEach(function (f) { f.body = self; });
@@ -93,6 +108,7 @@
   Body.prototype.setTransform = function (p, angle) {
     this.angle = angle; this.q = M.rot(angle);
     this.c = M.add(M.rotate(this.q, this.localCenter), p);
+    if (this.world && this.type !== 'static') this.wake();
   };
 
   // Body origin in world space.
@@ -110,17 +126,19 @@
     this.force = M.add(this.force, F);
     if (worldPoint) this.torque += M.cross(M.sub(worldPoint, this.c), F);
     this.appliedLog.push({ vector: M.v(F.x, F.y), point: worldPoint ? M.v(worldPoint.x, worldPoint.y) : null, torque: 0 });
-    this.awake = true;
+    if (this.awake === false) this.wake();
   };
   Body.prototype.applyTorque = function (T) {
     if (this.type !== 'dynamic') return;
     this.torque += T;
     this.appliedLog.push({ vector: M.v(0, 0), point: null, torque: T });
+    if (this.awake === false) this.wake();
   };
   Body.prototype.applyImpulse = function (J, worldPoint) {
     if (this.type !== 'dynamic') return;
     this.v = M.mulAdd(this.v, this.invM, J);
     if (worldPoint) this.w += this.invI * M.cross(M.sub(worldPoint, this.c), J);
+    if (this.awake === false) this.wake();
   };
 
   Body.prototype.wake = function () { this.awake = true; this.sleepTime = 0; };
