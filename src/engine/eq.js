@@ -64,6 +64,9 @@
         } else if (name === 'u' || name === 't') {
           var g2 = readGroup(src, i); i = g2[1];
           out += '<span class="eq-' + (name === 'u' ? 'unit' : 'text') + '">' + renderUpright(g2[0]) + '</span>';
+        } else if (name === 'bar') {
+          var gb = readGroup(src, i); i = gb[1];
+          out += '<span class="eq-bar">' + render(gb[0]) + '</span>';
         } else if (name === 'hl' || name === 'strike') {
           var g3 = readGroup(src, i); i = g3[1];
           out += '<span class="eq-' + name + '">' + render(g3[0]) + '</span>';

@@ -202,6 +202,7 @@ a { color: var(--hazard); }
 .eq-rad { border-top: 1.5px solid currentColor; padding: 0 .15em; }
 .eq-hl { background: rgba(230,180,34,.35); border-radius: 3px; padding: 0 .1em; }
 .eq-strike { text-decoration: line-through; text-decoration-color: var(--bad); text-decoration-thickness: 2px; }
+.eq-bar { text-decoration: overline; }
 .eq-tag { margin-left: 1.2em; font-size: .78em; color: var(--ink-soft); font-family: var(--mono); }
 .eq-block { margin: 10px 0; padding: 10px 12px; background: rgba(255,255,255,.45); border: 1px dashed var(--paper-edge); border-radius: 4px; overflow-x: auto; text-align: center; }
 .eq-block.big .eq { font-size: 1.5em; }
