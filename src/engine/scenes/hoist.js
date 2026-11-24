@@ -124,7 +124,7 @@
       }
       if (this.time >= this.duration) {
         this.state = 'holding';
-        var drift = Math.abs(this.y - (p.mode === 'hover' ? p.hookHeight : this.y));
+        var drift = Math.abs(this.y - (p.mode === 'hover' ? p.hookHeight : 0));   // distance from where the load started
         this.finish(Math.abs(this.a) < 1e-9 || Math.abs(this.v) < 0.02 ? 'held' : 'drifting', { T: T, W: W, a: this.a, v: this.v, drift: drift, y: this.y });
       }
     } else if (this.state === 'falling') {
