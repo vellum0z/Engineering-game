@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Physics Lab · Salvage Engineer</title>
+<link rel="stylesheet" href="styles/main.css">
+<style>
+  /* Developer test bench for the physics engine. Not linked from the game. */
+  html, body { height: 100%; overflow: hidden; }
+  .lab { display: grid; grid-template-columns: 1fr 260px; grid-template-rows: auto 1fr; height: 100vh; }
+  .lab .topbar { grid-column: 1 / -1; position: static; }
+  .lab .topbar .title { font-family: var(--display); letter-spacing: 1.5px; font-size: 18px; }
+  .lab .topbar .sub { color: var(--steel-hi); font-size: 12px; flex: 1; }
+  .stage { position: relative; min-width: 0; min-height: 0; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+  #view.dragging { cursor: grabbing; }
+  .hud { position: absolute; left: 10px; top: 8px; font-size: 12px; color: var(--paper-dim); pointer-events: none;
+         background: rgba(20,17,15,.7); padding: 4px 8px; border-radius: 4px; border: 1px solid #3a332d; white-space: pre; }
+  .side { background: linear-gradient(#211c18, #171310); border-left: 3px solid var(--rust-dark); padding: 10px 12px; overflow-y: auto; font-size: 13px; }
+  .side h2 { font-family: var(--display); font-size: 13px; letter-spacing: 1.5px; color: var(--hazard); margin: 14px 0 6px; font-weight: 400; }
+  .side h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { background: var(--iron); border: 1px solid #4a4038; border-radius: 4px; padding: 5px 10px; cursor: pointer; color: var(--paper); font-size: 12px; }
+  .btn:hover { border-color: var(--hazard); }
+  .btn.on { background: var(--rust-dark); border-color: var(--rust); }
+  select { width: 100%; background: var(--iron); color: var(--paper); border: 1px solid #4a4038; border-radius: 4px; padding: 5px; font: inherit; font-size: 12px; }
+  label.tog { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; color: var(--paper-dim); font-size: 12px; }
+  label.tog input { accent-color: var(--hazard); }
+  .blurb { color: var(--steel-hi); font-size: 12px; line-height: 1.45; margin: 6px 0 0; }
+  .legend { display: grid; grid-template-columns: 14px 1fr; gap: 3px 6px; font-size: 11px; color: var(--paper-dim); align-items: center; }
+  .sw { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #0008; }
+  .stressbar { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #8fcf6a, #e6b422, #e2553f); margin: 4px 0 2px; }
+  .note { font-size: 11px; color: var(--steel); margin-top: 8px; }
+  .warn { color: var(--hazard); }
+</style>
+</head>
+<body>
+<div class="lab">
+  <header class="topbar">
+    <span class="brand-mark">SE</span>
+    <span class="title">PHYSICS LAB</span>
+    <span class="sub">engine test bench: drag bodies, wheel to zoom, drag empty space to pan, click a body for its free-body diagram</span>
+  </header>
+  <div class="stage">
+    <canvas id="view"></canvas>
+    <div class="hud" id="hud"></div>
+  </div>
+  <aside class="side">
+    <h2>SCENE</h2>
+    <select id="scene"></select>
+    <p class="blurb" id="blurb"></p>
+    <h2>RUN</h2>
+    <div class="row">
+      <button class="btn" id="play">Pause</button>
+      <button class="btn" id="step">Step</button>
+      <button class="btn" id="reset">Reset</button>
+      <button class="btn" id="slow">½×</button>
+    </div>
+    <h2>OVERLAYS</h2>
+    <div id="toggles"></div>
+    <h2>FORCE UNIT</h2>
+    <select id="unit">
+      <option value="N">N (auto kN)</option><option value="kN">kN</option><option value="lbf">lbf</option><option value="kip">kip</option>
+    </select>
+    <h2>STRESS</h2>
+    <div class="stressbar"></div>
+    <div class="legend" style="grid-template-columns: 1fr 1fr 1fr;"><span>0</span><span style="text-align:center">½ rated</span><span style="text-align:right">break</span></div>
+    <h2>MATERIALS</h2>
+    <div class="legend" id="legend"></div>
+    <div class="note" id="missing"></div>
+  </aside>
+</div>
+
+<!--
+  Demo scenes. Kept in their own script so the Node tests can pull them out of
+  this file and run them headless. They use only the public engine API and
+  check for modules that may not exist yet.
+-->
+<script id="lab-scenes">
+(function (root) {
+  'use strict';
+  var SE = root.SE = root.SE || {};
+  var D2R = Math.PI / 180;
+
+  function world(P) { return new P.World({ gravity: { x: 0, y: -9.81 } }); }
+  function ground(P, w, mat) {
+    return w.add(new P.Body({ type: 'static', position: { x: 0, y: -0.5 }, shapes: [{ shape: P.box(30, 0.5), material: mat || 'concrete' }], label: '' }));
+  }
+  function crate(P, w, x, y, hw, opts) {
+    return w.add(new P.Body(Object.assign({ position: { x: x, y: y }, shapes: [P.box(hw, hw)], material: 'cargo' }, opts || {})));
+  }
+
+  var scenes = [
+    {
+      id: 'stack', name: 'Box stack',
+      blurb: 'Ten 1 m cargo crates, 400 kg each, stacked on concrete. A good solver holds the column still with no jitter or creep. Drag the top crate to knock it over.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        for (var i = 0; i < 10; i++) crate(P, w, 0, 0.5 + i * 1.0, 0.5);
+        return { world: w };
+      }
+    },
+    {
+      id: 'pyramid', name: 'Pyramid',
+      blurb: 'A 12-row pyramid of 0.8 m crates (78 bodies). Stresses stacking, friction and many contacts at once. Bodies dim when they fall asleep.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var rows = 12, s = 0.8, hw = 0.4, gap = 0.02;
+        for (var r = 0; r < rows; r++) {
+          var n = rows - r, x0 = -(n - 1) * (s + gap) / 2;
+          for (var i = 0; i < n; i++) crate(P, w, x0 + i * (s + gap), hw + r * s, hw);
+        }
+        return { world: w };
+      }
+    },
+    {
+      id: 'pendulum', name: 'Pendulums',
+      blurb: 'Left: a double pendulum of two pinned rods (chaotic). Middle: a 2.5 m rigid-rod pendulum released from horizontal, period ≈ 2π√(L/g) for small swings. Right: a mass on a spring at 0.6 Hz, drawn as a zigzag.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var top = 7;
+        // double pendulum: two 1.6 m steel rods pinned end to end
+        var mount = w.add(new P.Body({ type: 'static', position: { x: -4, y: top }, shapes: [P.box(0.25, 0.12)], label: '' }));
+        var r1 = w.add(new P.Body({ position: { x: -3.2, y: top }, shapes: [P.box(0.8, 0.06)], material: 'steel', label: '' }));
+        var r2 = w.add(new P.Body({ position: { x: -1.6, y: top }, shapes: [P.box(0.8, 0.06)], material: 'steel', label: '' }));
+        w.addJoint(new P.RevoluteJoint({ bodyA: mount, bodyB: r1, worldAnchor: { x: -4, y: top } }));
+        w.addJoint(new P.RevoluteJoint({ bodyA: r1, bodyB: r2, worldAnchor: { x: -2.4, y: top } }));
+        // simple pendulum: point-like bob on a rigid rod
+        var piv = w.add(new P.Body({ type: 'static', position: { x: 1.5, y: top }, shapes: [P.box(0.25, 0.12)] }));
+        var bob = w.add(new P.Body({ position: { x: 4.0, y: top }, shapes: [P.circle(0.22)], material: 'steel', label: 'L = 2.5 m' }));
+        w.addJoint(new P.DistanceJoint({ bodyA: piv, bodyB: bob }));
+        // spring: k chosen for f = 0.6 Hz, k = m(2πf)²
+        var hook = w.add(new P.Body({ type: 'static', position: { x: 6.5, y: top }, shapes: [P.box(0.25, 0.12)] }));
+        var m = w.add(new P.Body({ position: { x: 6.5, y: top - 2.2 }, shapes: [P.box(0.3, 0.3)], material: 'cargo', label: 'f = 0.6 Hz' }));
+        var k = m.m * Math.pow(2 * Math.PI * 0.6, 2);
+        w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: m, length: 1.6, stiffness: k, damping: 0.02 * 2 * Math.sqrt(k * m.m) }));
+        return { world: w, view: { lo: { x: -7.5, y: -0.5 }, hi: { x: 8, y: 8 } } };
+      }
+    },
+    {
+      id: 'cradle', name: "Newton's cradle",
+      blurb: 'Five steel balls on rods, restitution 1 and no friction. Swing the left ball in: momentum and energy pass along the row. Losses show how much the soft contacts damp.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var top = 6, L = 3, r = 0.3, n = 5;
+        var bar = w.add(new P.Body({ type: 'static', position: { x: 0, y: top + 0.1 }, shapes: [P.box(2.4, 0.1)], material: 'steel' }));
+        for (var i = 0; i < n; i++) {
+          var x = (i - (n - 1) / 2) * (2 * r + 0.002), th = i === 0 ? 50 * D2R : 0;
+          var ball = w.add(new P.Body({ position: { x: x - L * Math.sin(th), y: top - L * Math.cos(th) },
+            shapes: [{ shape: P.circle(r), material: 'steel', restitution: 1, friction: 0 }] }));
+          w.addJoint(new P.DistanceJoint({ bodyA: bar, bodyB: ball, localAnchorA: { x: x, y: -0.1 } }));
+        }
+        return { world: w };
+      }
+    },
+    {
+      id: 'hoist', name: 'Rope hoist (snaps)',
+      blurb: 'A 200 kg crate hangs from a gantry on a rope rated 3 kN (static load 1.96 kN, so amber). At t = 2 s a 120 kg crate drops onto it; the impact spikes the tension past the rating and the rope snaps. On the right a slack tether hangs dashed until the cart pulls it taut.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var gantry = w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 }, material: 'steel', label: '',
+          shapes: [P.box(0.15, 4, { x: -2.5, y: 4 }), P.box(0.15, 4, { x: 2.5, y: 4 }), P.box(3.2, 0.15, { x: 0, y: 8.1 })] }));
+        var load = crate(P, w, 0, 3.5, 0.5, { mass: 200, label: '200 kg' });
+        w.addJoint(new P.DistanceJoint({ bodyA: gantry, bodyB: load, localAnchorA: { x: 0, y: 7.95 }, localAnchorB: { x: 0, y: 0.5 },
+          rope: true, breakForce: 3000, label: 'hoist rope' }));
+        // slack tether: 6 m of rope between a post and a cart on rollers
+        var post = w.add(new P.Body({ type: 'static', position: { x: 5, y: 2 }, shapes: [P.box(0.15, 2)], material: 'timber' }));
+        var cart = crate(P, w, 7.0, 0.4, 0.4, { material: 'steel', mass: 80, label: 'cart' });
+        cart.fixtures[0].friction = 0.02;
+        var tether = new P.DistanceJoint({ bodyA: post, bodyB: cart, localAnchorA: { x: 0.15, y: 1.6 }, localAnchorB: { x: -0.4, y: 0.2 }, rope: true, length: 6, breakForce: 6000, label: 'tether' });
+        w.addJoint(tether);
+        var dropped = false;
+        return {
+          world: w,
+          view: { lo: { x: -3.5, y: -0.5 }, hi: { x: 11.5, y: 8.5 } },
+          update: function (wd) {
+            if (!dropped && wd.time >= 2) {
+              dropped = true;
+              wd.add(new P.Body({ position: { x: 0, y: 6.6 }, shapes: [P.box(0.4, 0.4)], material: 'cargo', mass: 120, label: '120 kg' }));
+            }
+            // a steady tow on the cart pulls the tether taut after a few seconds
+            if (wd.time > 1) cart.applyForce({ x: 400, y: 0 });
+          }
+        };
+      }
+    },
+    {
+      id: 'cantilever', name: 'Welded cantilever',
+      blurb: 'Six timber segments welded into a 6 m cantilever. Welds are torsion springs (k = 2 MN·m/rad), so the beam sags. Each weld is rated 60 kN·m: the colours follow the bending moment, highest at the wall. At t = 2 s a 600 kg crate lands on the tip and the root weld lets go.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var y = 4, seg = 1, hh = 0.15;
+        var wall = w.add(new P.Body({ type: 'static', position: { x: -0.5, y: 3 }, shapes: [P.box(0.5, 3)], material: 'concrete' }));
+        var prev = wall;
+        for (var i = 0; i < 6; i++) {
+          var b = w.add(new P.Body({ position: { x: seg * (i + 0.5), y: y }, shapes: [P.box(seg / 2, hh)], material: 'timber' }));
+          w.addJoint(new P.WeldJoint({ bodyA: prev, bodyB: b, worldAnchor: { x: seg * i, y: y },
+            angularStiffness: 2e6, angularDamping: 1.5e5, breakTorque: 60000, label: 'weld ' + i }));
+          prev = b;
+        }
+        var dropped = false;
+        return {
+          world: w,
+          view: { lo: { x: -1.5, y: -0.5 }, hi: { x: 7.5, y: 7.5 } },
+          update: function (wd) {
+            if (!dropped && wd.time >= 2) {
+              dropped = true;
+              wd.add(new P.Body({ position: { x: 5.5, y: y + 2.2 }, shapes: [P.box(0.45, 0.45)], material: 'cargo', mass: 600, label: '600 kg' }));
+            }
+          }
+        };
+      }
+    },
+    {
+      id: 'ramp', name: 'Ramp with friction',
+      blurb: 'A 30° concrete ramp (tan 30° = 0.577). Each block slides only if the mixed friction μ = √(μ₁μ₂) is below 0.577: ice (0.14) races off, timber (0.56) creeps, steel (0.62) and rubber (0.79) hold.',
+      build: function (P) {
+        var w = world(P); ground(P, w);
+        var th = 30 * D2R, x0 = -6, x1 = 4, H = (x1 - x0) * Math.tan(th);
+        w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 }, material: 'concrete',
+          shapes: [P.polygon([{ x: x0, y: 0 }, { x: x1, y: 0 }, { x: x0, y: H }])] }));
+        var hw = 0.35, n = { x: Math.sin(th), y: Math.cos(th) };
+        [['rubber', -5], ['steel', -3.5], ['timber', -2], ['ice', -0.5]].forEach(function (it) {
+          var sx = it[1], sy = H - (sx - x0) * Math.tan(th);
+          w.add(new P.Body({ position: { x: sx + n.x * (hw + 0.01), y: sy + n.y * (hw + 0.01) }, angle: -th,
+            shapes: [P.box(hw, hw)], material: it[0], mass: 50, label: it[0] }));
+        });
+        return { world: w, view: { lo: { x: -7, y: -0.5 }, hi: { x: 9, y: 7.5 } } };
+      }
+    }
+  ];
+
+  SE.labScenes = scenes;
+})(globalThis);
+</script>
+
+<script>
+(function () {
+  'use strict';
+  // Engine files in index.html order. A module that hasn't landed yet is
+  // skipped and listed in the sidebar.
+  var FILES = [
+    'src/engine/ns.js', 'src/engine/units.js', 'src/engine/draw.js',
+    'src/physics/math.js', 'src/physics/shapes.js', 'src/physics/materials.js', 'src/physics/body.js',
+    'src/physics/collide.js', 'src/physics/query.js', 'src/physics/soft.js', 'src/physics/contact.js',
+    'src/physics/broadphase.js', 'src/physics/islands.js', 'src/physics/joint.js', 'src/physics/distance.js',
+    'src/physics/revolute.js', 'src/physics/weld.js', 'src/physics/prismatic.js', 'src/physics/mouse.js',
+    'src/physics/pulley.js', 'src/physics/winch.js', 'src/physics/cable.js', 'src/physics/structures.js',
+    'src/physics/breakage.js', 'src/physics/world.js', 'src/physics/sensors.js', 'src/physics/recorder.js',
+    'src/physics/serialize.js', 'src/physics/stepper.js', 'src/physics/debugdraw.js'
+  ];
+  var missing = [];
+
+  function loadNext(i, done) {
+    if (i >= FILES.length) return done();
+    var s = document.createElement('script');
+    s.src = FILES[i];
+    s.onload = function () { loadNext(i + 1, done); };
+    s.onerror = function () { missing.push(FILES[i].replace('src/physics/', '')); s.remove(); loadNext(i + 1, done); };
+    document.head.appendChild(s);
+  }
+
+  loadNext(0, start);
+
+  function start() {
+    var SE = window.SE, P = SE.phys, M = SE.pmath;
+    var canvas = document.getElementById('view'), ctx = canvas.getContext('2d');
+    var cam = new P.Camera({ canvas: canvas, zoom: 50 });
+    var hud = document.getElementById('hud');
+    var DT = 1 / 60;
+
+    var opts = { grid: true, shapes: true, angles: true, joints: true, stress: true, labels: true,
+      contacts: false, aabbs: false, forces: false, contactForces: false, weights: false, freeBody: true, forceUnit: 'N', dt: DT };
+    var TOGGLES = [
+      ['grid', 'Grid'], ['shapes', 'Shapes'], ['angles', 'Angle marks'], ['labels', 'Labels'], ['joints', 'Joints'],
+      ['stress', 'Stress colours'], ['contacts', 'Contact points + normals'], ['aabbs', 'Bounding boxes'],
+      ['forces', 'Joint forces'], ['contactForces', 'Contact forces'], ['weights', 'Weights'], ['freeBody', 'Free body (click a body)']
+    ];
+    var tg = document.getElementById('toggles');
+    TOGGLES.forEach(function (t) {
+      var l = document.createElement('label'); l.className = 'tog';
+      var c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!opts[t[0]]; c.id = 'tog-' + t[0];
+      c.addEventListener('change', function () { opts[t[0]] = c.checked; });
+      l.appendChild(c); l.appendChild(document.createTextNode(t[1])); tg.appendChild(l);
+    });
+    document.getElementById('unit').addEventListener('change', function (e) { opts.forceUnit = e.target.value; });
+
+    var lg = document.getElementById('legend');
+    Object.keys(P.debugDraw.MATERIAL_FILL).forEach(function (k) {
+      if (k === 'frictionless') return;
+      var sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = P.debugDraw.MATERIAL_FILL[k];
+      var nm = document.createElement('span'); nm.textContent = k + '  μ ' + P.MATERIALS[k].friction;
+      lg.appendChild(sw); lg.appendChild(nm);
+    });
+    if (missing.length) document.getElementById('missing').innerHTML = '<span class="warn">Not built yet:</span> ' + missing.join(', ');
+
+    // ---------------------------------------------------------------- scenes
+    var sel = document.getElementById('scene');
+    SE.labScenes.forEach(function (s, i) { var o = document.createElement('option'); o.value = i; o.textContent = s.name; sel.appendChild(o); });
+    var params = new URLSearchParams(location.search);
+    var initial = SE.labScenes.findIndex(function (s) { return s.id === params.get('scene'); });
+    sel.value = initial >= 0 ? initial : 0;
+    ['contacts', 'aabbs', 'forces', 'contactForces', 'weights'].forEach(function (k) {
+      if (params.get(k) === '1') { opts[k] = true; document.getElementById('tog-' + k).checked = true; }
+    });
+
+    var scene, world, running = true, timescale = 1, acc = 0, stepMs = 0, selected = null, grab = null;
+
+    function load() {
+      var def = SE.labScenes[+sel.value];
+      document.getElementById('blurb').textContent = def.blurb;
+      scene = def.build(P); world = scene.world;
+      selected = null; grab = null; acc = 0;
+      cam.resize();
+      P.debugDraw.track(world);
+      cam.fit(scene.view || P.debugDraw.worldBounds(world, 40), 40);
+    }
+    sel.addEventListener('change', load);
+
+    function step() {
+      if (scene.update) scene.update(world);
+      if (grab) dragForce();
+      var t0 = performance.now();
+      world.step(DT);
+      stepMs = stepMs * 0.9 + (performance.now() - t0) * 0.1;
+    }
+
+    var playBtn = document.getElementById('play');
+    playBtn.addEventListener('click', function () { running = !running; playBtn.textContent = running ? 'Pause' : 'Play'; });
+    document.getElementById('step').addEventListener('click', function () { running = false; playBtn.textContent = 'Play'; step(); });
+    document.getElementById('reset').addEventListener('click', load);
+    var slowBtn = document.getElementById('slow');
+    slowBtn.addEventListener('click', function () { timescale = timescale === 1 ? 0.5 : 1; slowBtn.classList.toggle('on', timescale !== 1); });
+    window.addEventListener('keydown', function (e) {
+      if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+      else if (e.key === '.') document.getElementById('step').click();
+      else if (e.key === 'r') load();
+    });
+
+    // ------------------------------------------------------------------ mouse
+    // Dragging uses P.MouseJoint when it exists; otherwise a critically damped
+    // spring force (3 Hz, ζ = 0.7) pulls the grabbed point toward the cursor.
+    function screenPt(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    var down = null;
+    canvas.addEventListener('pointerdown', function (e) {
+      canvas.setPointerCapture(e.pointerId);
+      var s = screenPt(e), p = cam.screenToWorld(s), b = world.bodyAt(p);
+      down = { s: s, moved: false, body: b };
+      if (b && b.type === 'dynamic' && e.button === 0) startGrab(b, p);
+      canvas.classList.add('dragging');
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!down) return;
+      var s = screenPt(e);
+      if (Math.hypot(s.x - down.s.x, s.y - down.s.y) > 3) down.moved = true;
+      if (grab) { grab.target = cam.screenToWorld(s); if (grab.joint) setJointTarget(grab.joint, grab.target); }
+      else { cam.pan(s.x - (down.last || down.s).x, s.y - (down.last || down.s).y); }
+      down.last = s;
+    });
+    canvas.addEventListener('pointerup', function () {
+      if (down && !down.moved) selected = down.body && down.body.type !== 'static' ? down.body : null;
+      endGrab(); down = null; canvas.classList.remove('dragging');
+    });
+    canvas.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      cam.zoomAt(screenPt(e), Math.exp(-e.deltaY * 0.0015));
+    }, { passive: false });
+
+    function startGrab(b, p) {
+      grab = { body: b, local: b.localPoint(p), target: p, joint: null };
+      if (P.MouseJoint) {
+        try {
+          var anchor = world.bodies.find(function (x) { return x.type === 'static'; }) || b;
+          var j = new P.MouseJoint({ bodyA: anchor, bodyB: b, target: p, worldAnchor: p, maxForce: 1000 * b.m * 9.81, hertz: 5, dampingRatio: 0.7 });
+          world.addJoint(j); grab.joint = j;
+        } catch (err) { grab.joint = null; }
+      }
+      if (b.wake) b.wake();
+    }
+    function setJointTarget(j, t) { if (j.setTarget) j.setTarget(t); else j.target = { x: t.x, y: t.y }; }
+    function endGrab() { if (grab && grab.joint) world.removeJoint(grab.joint); grab = null; }
+    function dragForce() {
+      if (grab.joint) return;
+      var b = grab.body, p = b.worldPoint(grab.local), w = 2 * Math.PI * 3, z = 0.7;
+      var dv = b.velocityAt(p), d = M.sub(grab.target, p);
+      var F = M.scale(M.sub(M.scale(d, w * w), M.scale(dv, 2 * z * w)), b.m);
+      var Fmax = 200 * b.m * 9.81, Fl = M.len(F);
+      if (Fl > Fmax) F = M.scale(F, Fmax / Fl);
+      // hold the body up against gravity too, so it follows the cursor instead of sagging under it
+      F = M.add(F, M.scale(world.gravity, -b.m * b.gravityScale));
+      if (b.wake) b.wake();
+      b.applyForce(F, p);
+    }
+
+    // ------------------------------------------------------------- free body
+    // Uses the sensors module's extraction when it exists, otherwise a simple
+    // one here: weight, joint reactions and summed contact forces.
+    function freeBody(b) {
+      if (P.sensors && P.sensors.freeBody) {
+        try { var r = P.sensors.freeBody(world, b, DT); if (r && r.length != null) return r; } catch (err) { /* fall back */ }
+      }
+      var list = [], g = world.gravity;
+      list.push({ kind: 'weight', point: b.c, vector: M.scale(g, b.m * b.gravityScale) });
+      world.joints.forEach(function (j) {
+        if (!j.reaction || (j.bodyA !== b && j.bodyB !== b) || j.type === 'mouse') return;
+        var r = j.reaction(), sign = j.bodyB === b ? 1 : -1;
+        var kind = j.type === 'distance' ? (j.rope ? 'tension' : (j.stiffness > 0 || j.hertz > 0 ? 'spring' : 'tension')) : 'reaction';
+        var p = j.bodyB === b ? j.anchorB() : j.anchorA();
+        if (r.force && M.len(r.force) > 1e-6) list.push({ kind: kind, point: p, vector: M.scale(r.force, sign) });
+        if (r.torque && Math.abs(r.torque) > 1e-3) list.push({ kind: 'moment', point: p, moment: sign * r.torque });
+      });
+      var invH = world.substeps / DT;
+      world.contacts.forEach(function (ct) {
+        var sign = ct.fb.body === b ? 1 : (ct.fa.body === b ? -1 : 0);
+        if (!sign || !ct.normal || !ct.points.length) return;
+        var N = 0, T = 0, c = { x: 0, y: 0 };
+        ct.points.forEach(function (cp) { N += cp.normalImpulse * invH; T += cp.tangentImpulse * invH; c = M.add(c, cp.point); });
+        if (N < 1e-3) return;
+        c = M.scale(c, 1 / ct.points.length);
+        list.push({ kind: 'normal', point: c, vector: M.scale(ct.normal, sign * N) });
+        if (Math.abs(T) > 1e-3) list.push({ kind: 'friction', point: c, vector: M.scale(ct.tangent, sign * T) });
+      });
+      return list;
+    }
+
+    // ------------------------------------------------------------------- loop
+    var last = performance.now();
+    function frame(now) {
+      var elapsed = Math.min((now - last) / 1000, 0.1); last = now;
+      if (running) {
+        acc += elapsed * timescale;
+        var n = 0;
+        while (acc >= DT && n < 4) { step(); acc -= DT; n++; }
+        if (n === 4) acc = 0;
+      }
+      cam.resize();
+      opts.highlight = (grab && grab.body) || selected;
+      P.debugDraw(ctx, world, cam, opts);
+      if (opts.freeBody && selected && world.bodies.indexOf(selected) >= 0) {
+        P.debugDrawFreeBody(ctx, freeBody(selected), cam, { forceUnit: opts.forceUnit });
+      }
+      var awake = world.bodies.filter(function (b) { return b.type !== 'static' && b.awake !== false; }).length;
+      hud.textContent = 't ' + world.time.toFixed(2) + ' s   ' + (running ? (timescale === 1 ? '▶' : '▶ ½×') : '❚❚') +
+        '\nbodies ' + world.bodies.length + ' (awake ' + awake + ')   joints ' + world.joints.length + '   contacts ' + world.contacts.size +
+        '\nstep ' + stepMs.toFixed(2) + ' ms   zoom ' + cam.zoom.toFixed(0) + ' px/m' +
+        (selected ? '\nselected ' + (selected.label || ('body #' + selected.id)) + '  m ' + selected.m.toFixed(1) + ' kg' : '');
+      requestAnimationFrame(frame);
+    }
+    load();
+    window.lab = { get world() { return world; }, camera: cam, options: opts, load: load, step: step,
+      select: function (b) { selected = b; }, pause: function () { running = false; playBtn.textContent = 'Play'; } };
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>
