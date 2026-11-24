@@ -50,6 +50,15 @@
  *   P.broadphase.proxies(world) -> [{ fixture, lo, hi, isStatic }]
  *   P.DynamicTree                                the tree itself
  *
+ *   var st = P.broadphase.saveState(world)      for snapshot/restore
+ *   P.broadphase.loadState(world, st)
+ * save and rebuild the trees, proxies and pair set exactly (node layout and
+ * pair order included), so a restored world finds pairs in the same order
+ * and replays bit for bit. The saved state is never mutated, so one
+ * snapshot can be loaded any number of times. Everything the broadphase
+ * keeps lives in world._bp and in body fields starting with _bp, so a
+ * generic snapshot should skip those and call these two instead.
+ *
  * At the end of update(), P.islands.beforeStep(world) wakes any sleeping
  * island that an awake body has reached, so the solver never pushes on a
  * sleeping body.
@@ -500,10 +509,107 @@
     return out;
   }
 
+  /* -------------------------------------------------- snapshot support */
+  var PROXY_FIELDS = ['index', 'key', 'isStatic', 'id', 'lx', 'ly', 'ux', 'uy', 'tlx', 'tly', 'tux', 'tuy'];
+
+  function saveTree(tree, pindex) {
+    return {
+      root: tree.root, free: tree.free.slice(),
+      nodes: tree.nodes.map(function (n) {
+        if (!n) return null;
+        return { lx: n.lx, ly: n.ly, ux: n.ux, uy: n.uy, parent: n.parent, c1: n.c1, c2: n.c2,
+          height: n.height, data: n.data ? pindex.get(n.data) : -1 };
+      })
+    };
+  }
+
+  function loadTree(saved, proxiesByIndex) {
+    var tree = new DynamicTree();
+    tree.root = saved.root; tree.free = saved.free.slice();
+    tree.nodes = saved.nodes.map(function (n) {
+      if (!n) return null;
+      return { lx: n.lx, ly: n.ly, ux: n.ux, uy: n.uy, parent: n.parent, c1: n.c1, c2: n.c2,
+        height: n.height, data: n.data >= 0 ? proxiesByIndex[n.data] : null };
+    });
+    return tree;
+  }
+
+  function saveState(world) {
+    var st = world._bp;
+    if (!st) return null;
+    var pindex = new Map(), proxies = [], bodies = [];
+    st.known.forEach(function (b) {
+      var list = (b._bpProxies || []).map(function (px) {
+        var o = { tree: px.tree === st.stat ? 'stat' : 'dyn' };
+        PROXY_FIELDS.forEach(function (k) { o[k] = px[k]; });
+        pindex.set(px, proxies.length);
+        proxies.push(o);
+        return proxies.length - 1;
+      });
+      bodies.push({ body: b, proxies: list, type: b._bpType, stamp: b._bpStamp, movedStamp: b._bpMovedStamp,
+        pose: b._bpPose ? { x: b._bpPose.x, y: b._bpPose.y, a: b._bpPose.a } : null });
+    });
+    var pairs = [];
+    st.pairs.forEach(function (pr) {
+      pairs.push({ key: pr.key, pa: pindex.get(pr.pa), pb: pindex.get(pr.pb), sensor: pr.sensor,
+        touching: pr.touching, overlapping: pr.overlapping, fresh: pr.fresh });
+    });
+    return {
+      dyn: saveTree(st.dyn, pindex), stat: saveTree(st.stat, pindex),
+      proxies: proxies, bodies: bodies, pairs: pairs,
+      joints: Array.from(st.joints),
+      moved: st.moved.filter(function (px) { return pindex.has(px); }).map(function (px) { return pindex.get(px); }),
+      stamp: st.stamp
+    };
+  }
+
+  function clearBodyFields(b) {
+    b._bpProxies = null; b._bpPose = null;
+    delete b._bpType; delete b._bpStamp; delete b._bpMovedStamp; delete b._bpXf; delete b._bpXfStamp;
+  }
+
+  function loadState(world, saved) {
+    world.bodies.forEach(clearBodyFields);
+    if (world._bp) world._bp.known.forEach(clearBodyFields);
+    if (!saved) { world._bp = null; return; }
+    var byIndex = new Array(saved.proxies.length);
+    var dynProxies = [];
+    saved.bodies.forEach(function (e) {
+      var b = e.body;
+      clearBodyFields(b);
+      b._bpType = e.type; b._bpStamp = e.stamp;
+      if (e.movedStamp !== undefined) b._bpMovedStamp = e.movedStamp;
+      b._bpPose = e.pose ? { x: e.pose.x, y: e.pose.y, a: e.pose.a } : null;
+      b._bpProxies = e.proxies.map(function (pi) {
+        var o = saved.proxies[pi], px = { fixture: b.fixtures[o.index], body: b, tree: null, treeName: o.tree };
+        PROXY_FIELDS.forEach(function (k) { px[k] = o[k]; });
+        byIndex[pi] = px;
+        dynProxies.push(px);
+        return px;
+      });
+    });
+    var dyn = loadTree(saved.dyn, byIndex), stat = loadTree(saved.stat, byIndex);
+    dynProxies.forEach(function (px) { px.tree = px.treeName === 'stat' ? stat : dyn; delete px.treeName; });
+    var st = world._bp = {
+      dyn: dyn, stat: stat, pairs: new Map(),
+      known: new Set(saved.bodies.map(function (e) { return e.body; })),
+      joints: new Set(saved.joints), jointMap: new Map(),
+      moved: saved.moved.map(function (i) { return byIndex[i]; }), stamp: saved.stamp
+    };
+    saved.pairs.forEach(function (o) {
+      var pa = byIndex[o.pa], pb = byIndex[o.pb];
+      st.pairs.set(o.key, { key: o.key, pa: pa, pb: pb, fa: pa.fixture, fb: pb.fixture, sensor: o.sensor,
+        touching: o.touching, overlapping: o.overlapping, fresh: o.fresh });
+    });
+    var map = st.jointMap;
+    function link(a, b) { var s = map.get(a); if (!s) map.set(a, s = new Set()); s.add(b); }
+    st.joints.forEach(function (j) { if (!j.collideConnected && j.bodyA && j.bodyB) { link(j.bodyA, j.bodyB); link(j.bodyB, j.bodyA); } });
+  }
+
   P.DynamicTree = DynamicTree;
   P.AABB_MARGIN = AABB_MARGIN;
   P.broadphase = {
     update: update, shouldCollide: shouldCollide, shouldSense: shouldSense, filtersPass: filtersPass,
-    syncJoints: syncJoints, pairs: pairs, proxies: proxies, sensorVisitors: sensorVisitors
+    syncJoints: syncJoints, saveState: saveState, loadState: loadState, pairs: pairs, proxies: proxies, sensorVisitors: sensorVisitors
   };
 })(globalThis.SE);
