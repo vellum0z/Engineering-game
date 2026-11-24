@@ -21,6 +21,10 @@
  * snapshotted without touching this file. Fields that appeared after the
  * snapshot are removed on restore, so lazily created fields (peakForce,
  * sleepTime) don't leak from the later run into the replay.
+ * Modules whose state isn't plain data (the broadphase's trees and pair
+ * set) keep it in fields starting with `_bp` on the world and the bodies;
+ * those are skipped here and saved through the module's own
+ * saveState(world) / loadState(world, state) hooks instead.
  *
  *   var scene = SE.phys.toScene(world);   // plain JSON-able object
  *   var w2 = SE.phys.fromScene(scene);    // scene object or JSON string
@@ -77,15 +81,18 @@
     return o;
   }
 
+  // Fields owned by a module's saveState/loadState hooks, not copied here.
+  function hooked(k) { return k.charCodeAt(0) === 95 && k.lastIndexOf('_bp', 0) === 0; }
+
   function captureFields(obj, skip, refs) {
     var out = {};
-    Object.keys(obj).forEach(function (k) { if (!skip[k]) out[k] = clone(obj[k], refs); });
+    Object.keys(obj).forEach(function (k) { if (!skip[k] && !hooked(k)) out[k] = clone(obj[k], refs); });
     return out;
   }
 
   function restoreFields(obj, saved, skip, refs) {
     Object.keys(obj).forEach(function (k) {
-      if (!skip[k] && !Object.prototype.hasOwnProperty.call(saved, k)) delete obj[k];
+      if (!skip[k] && !hooked(k) && !Object.prototype.hasOwnProperty.call(saved, k)) delete obj[k];
     });
     Object.keys(saved).forEach(function (k) { obj[k] = clone(saved[k], refs); });
   }
@@ -110,6 +117,17 @@
   }
 
   /* ---------------------------------------------------------- snapshots */
+  // Stage modules with their own saveState/loadState, called in this order.
+  var HOOKED = ['broadphase', 'islands'];
+  function hookStates(world) {
+    var out = {};
+    HOOKED.forEach(function (name) {
+      var mod = P[name];
+      if (mod && mod.saveState) out[name] = mod.saveState(world);
+    });
+    return out;
+  }
+
   function snapshot(world) {
     var bodies = world.bodies.slice(), joints = world.joints.slice();
     var refs = refSet(bodies, joints);
@@ -122,6 +140,7 @@
         };
       }),
       joints: joints.map(function (j) { return { joint: j, state: captureFields(j, SKIP_JOINT, refs) }; }),
+      hooks: hookStates(world),
       refs: refs
     };
   }
@@ -135,6 +154,10 @@
       e.body.fixtures.forEach(function (f, i) { restoreFields(f, e.fixtures[i], SKIP_FIXTURE, refs); });
     });
     snap.joints.forEach(function (e) { restoreFields(e.joint, e.state, SKIP_JOINT, refs); });
+    HOOKED.forEach(function (name) {
+      var mod = P[name];
+      if (mod && mod.loadState && snap.hooks) mod.loadState(world, snap.hooks[name] === undefined ? null : snap.hooks[name]);
+    });
     return world;
   }
 
