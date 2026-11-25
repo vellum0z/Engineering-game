@@ -143,11 +143,13 @@ const BUILDS = {
         else if (kind === 'spring') w.addJoint(new P.DistanceJoint({ bodyA: b, bodyB: a, stiffness: r.logRange(100, 1e5), damping: r.range(0, 100) }));
         else if (kind === 'pin') w.addJoint(new P.RevoluteJoint({ bodyA: b, bodyB: a, worldAnchor: mid }));
         else if (kind === 'weld') w.addJoint(new P.WeldJoint({ bodyA: b, bodyB: a, worldAnchor: mid }));
-        else if (kind === 'slider') w.addJoint(new P.PrismaticJoint({ bodyA: b, bodyB: a, worldAnchor: mid, worldAxis: M.norm({ x: r.range(-1, 1), y: r.range(-1, 1) }), motorForce: r.range(0, 2e4) }));
+        else if (kind === 'slider') w.addJoint(new P.PrismaticJoint({ bodyA: b, bodyB: a, worldAnchor: mid, worldAxis: M.norm({ x: r.range(-1, 1), y: r.range(-1, 1) }), motorForce: r.range(0, 2e4), lowerTranslation: -r.range(0.2, 2), upperTranslation: r.range(0.2, 2) }));
         else w.addJoint(new P.WinchJoint({ bodyA: b, bodyB: a, reelSpeed: r.range(-1, 1), maxPull: r.logRange(100, 1e5) }));
       } catch (e) { /* a definition the API rejects is fine: that's a yard error, not a sim fault */ }
     }
-    return { w, rest: false, swingOk: true, busy: true };
+    // random welds and pins between bodies up to 24 m apart can't all be met, so
+    // drift is expected here; the mix only checks the sim stays finite and bounded
+    return { w, rest: false, swingOk: true, busy: true, noDrift: true };
   }
 };
 
@@ -198,7 +200,7 @@ function runCase(kind, seed) {
   // energy gain beyond what motors/winches could supply
   const scaleE = Math.max(Math.abs(E0), 1);
   if (!spec.winch && !spec.busy && !spec.overlap && Emax > E0 + 0.05 * scaleE + 5) issues.push('energy gain: ' + ((Emax - E0) / scaleE * 100).toFixed(1) + '%');
-  if (worstGap > 0.05) issues.push('joint drift: ' + (worstGap * 100).toFixed(1) + ' cm');
+  if (!spec.noDrift && worstGap > 0.05) issues.push('joint drift: ' + (worstGap * 100).toFixed(1) + ' cm');
   if (spec.rest) {
     let ke = 0, mtot = 0;
     w.bodies.forEach(b => { if (b.type === 'dynamic') { ke += b.kineticEnergy(); mtot += b.m; } });
