@@ -179,7 +179,9 @@ function runCase(kind, seed) {
     let bad = false;
     w.bodies.forEach(b => {
       if (!isFinite(b.c.x) || !isFinite(b.c.y) || !isFinite(b.angle) || !isFinite(b.v.x) || !isFinite(b.w)) bad = true;
-      maxSpeed = Math.max(maxSpeed, M.len(b.v));
+      // a body that rolled off the end of the ground (|x| > 60 m) is in free
+      // fall, not an explosion; one that fell through the ground still counts
+      if (b.c.y > -2 || Math.abs(b.c.x) < 60) maxSpeed = Math.max(maxSpeed, M.len(b.v));
     });
     if (bad) { issues.push('NaN at step ' + s); break; }
     w.joints.forEach(j => { worstGap = Math.max(worstGap, rigidGap(j)); });
