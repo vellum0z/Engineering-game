@@ -78,6 +78,35 @@
   P.solve2 = solve2;
 
   /*
+   * Caps on how fast a joint may push its error closed. Position correction
+   * asks for a speed biasRate·C; when a long lever on a light body opens a
+   * joint by centimetres, that speed spins the body so fast that the
+   * linearised constraint is wrong by the next substep, the error grows, and
+   * the build explodes. Capping the push (as contacts cap theirs with
+   * maxPushVelocity) keeps every correction small enough to stay linear;
+   * a big error then closes over a few frames instead of in one substep.
+   *
+   * A soft row holds a steady load only through its push: at rest
+   * ms·m·biasRate·C = is·λ. A one-sided limit therefore scales its
+   * impulseScale by the same factor as its capped push, so it still holds
+   * any load instead of creeping through at the cap (its impulse is bounded
+   * by the load it holds). Equality rows keep the full impulseScale: in a
+   * build that cannot be satisfied it is what keeps their impulses bounded,
+   * so under a very large load on a very light part (about 6 kN per kg at
+   * 60 Hz) they give way slowly at the cap instead.
+   */
+  P.MAX_JOINT_PUSH = 3;   // m/s
+  P.MAX_JOINT_TURN = 3;   // rad/s
+  function capBias(v, max) { return v > max ? max : (v < -max ? -max : v); }
+  // Scale the vector (bx, by) down to length max; returns the factor.
+  function capBias2(bx, by, max) { var l = Math.sqrt(bx * bx + by * by); return l > max ? max / l : 1; }
+  // Factor (<= 1) that brings the push v down to max.
+  function capScale(v, max) { var a = v < 0 ? -v : v; return a > max ? max / a : 1; }
+  P.capBias = capBias;
+  P.capScale = capScale;
+  P.capBias2 = capBias2;
+
+  /*
    * Joint blocks: a direct solve for chains and frames of rigid joints.
    *
    * One Gauss-Seidel pass per substep cannot carry a load down a chain of
@@ -100,14 +129,23 @@
    * anything that swings fast (a 4-link chain lost 20% in 10 s). Both passes
    * therefore aim for Ċ = −drift / h, the chord the anchors really travel,
    * so the pin stays closed to second order and the swing keeps its energy.
+   * The correction is capped at DRIFT_CAP: on a light part spinning on a
+   * long lever it grows with w², and uncapped it fed its own spin.
    *
    * Groups and their row ordering (reverse Cuthill-McKee, so a chain costs
    * O(n) and a truss stays banded) are kept while the joints don't change.
    * A is factored (LDLᵀ in that envelope) again only when some body in the
    * group has turned by more than BLOCK_REFACTOR_ANGLE since the last
-   * factor, checked at each substep. Redundant rows (closed loops, two welds on
-   * one pair) show up as zero pivots and are left to the other rows.
-   * Springs, motors and limits stay in each joint's own solve.
+   * factor (less, in proportion, when the group is ill-conditioned), checked
+   * every pass. Redundant rows (closed loops, two pins on one pair) show up
+   * as pivots below PIVOT_TOL and are left to the other rows. Springs,
+   * motors and limits stay in each joint's own solve.
+   *
+   * Safety: each solve checks that it reduced the rows' error. If not (a
+   * near-singular or stale factor), it takes its impulses back, refactors
+   * and tries once more; if that fails too the group falls back to each
+   * joint solving on its own until it is rebuilt. And see the energy guard
+   * below, which stops jammed builds from pumping energy in.
    *
    * A joint takes part by implementing
    *   blockSlots()       -> array of its rigid row ids this step (may be empty)
@@ -118,7 +156,22 @@
    * and, in solve(), skipping its rigid rows when this.block is set and
    * calling P.jointBlock.solve(this.block, h, useBias) when this.blockLeader.
    * Set world.jointBlockSolve = false to fall back to plain Gauss-Seidel.
+   *
+   * Any joint type can contribute rows (DistanceJoint rods, for example):
+   *   - in prepare(), call P.jointBlock.prepare(this) after setting jointSoft
+   *   - implement blockSlots / blockRow / blockImpulse / blockAdd as above,
+   *     and blockSolveOwn(h, useBias), which solves those same rows alone
+   *     (used when the group cannot be factored)
+   *   - in solve(), skip the rows when this.block is set, and call
+   *     P.jointBlock.solve(this.block, h, useBias) if this.blockLeader
+   *   - in postStep(dt), call P.jointBlock.guard(this.block, dt) if
+   *     this.blockLeader; optional storedEnergy() (J) for springs and
+   *     driveWork(dt) (J) for motors keep the guard from fighting them
+   * Rows must be equalities: a one-sided row (a rope) can join only while it
+   * is taut, and should leave the group when it goes slack.
    */
+  var PIVOT_TOL = 1e-6;               // pivot / diagonal below this: the row depends on the others
+  var DRIFT_CAP = 1;                  // m/s: most the turning correction may ask for
   var BLOCK_MAX_ENVELOPE = 400000;     // matrix entries; past this, Gauss-Seidel
   var BLOCK_REFACTOR_ANGLE = 0.001;    // rad a body may turn before A is refactored
 
@@ -228,19 +281,25 @@
     byBody.forEach(function (l, b) { bodies.push(b); });
     blk.bodies = bodies; blk.ang0 = new Float64Array(bodies.length);
     blk.invM0 = new Float64Array(bodies.length); blk.invI0 = new Float64Array(bodies.length);
+    blk.cx0 = new Float64Array(bodies.length); blk.cy0 = new Float64Array(bodies.length);
+    blk.slides = blk.joints.some(function (j) { return j.blockSlides; });
     blk.factored = false;
   }
 
   // A = J M⁻¹ Jᵀ only changes when a body turns (lever arms rotate) or its
   // mass changes, so a frame or a resting beam keeps its factor. Anything
   // turning faster than BLOCK_REFACTOR_ANGLE per substep refactors every
-  // substep; a stale factor would make the solve diverge.
+  // substep; a stale factor would make the solve diverge. A slider's rows
+  // also depend on how far it has slid (its lever arm grows with the
+  // stroke), so a group with one (joint.blockSlides) also refactors once a
+  // body has moved 10 m × the turn tolerance (1 cm at most).
   function needsRefactor(blk) {
     if (!blk.factored) return true;
-    var bs = blk.bodies;
+    var bs = blk.bodies, slideTol = 10 * blk.turnTol;
     for (var i = 0; i < bs.length; i++) {
       var b = bs[i];
-      if (Math.abs(b.angle - blk.ang0[i]) > BLOCK_REFACTOR_ANGLE || b.invM !== blk.invM0[i] || b.invI !== blk.invI0[i]) return true;
+      if (Math.abs(b.angle - blk.ang0[i]) > blk.turnTol || b.invM !== blk.invM0[i] || b.invI !== blk.invI0[i]) return true;
+      if (blk.slides && Math.abs(b.c.x - blk.cx0[i]) + Math.abs(b.c.y - blk.cy0[i]) > slideTol) return true;
     }
     return false;
   }
@@ -249,10 +308,10 @@
   // of every substep: within a step a fast-swinging chain turns far enough
   // that a factor from the step start no longer converges.
   function refactor(blk) {
-    blk.factored = true;
-    blk.bodies.forEach(function (b, i) { blk.ang0[i] = b.angle; blk.invM0[i] = b.invM; blk.invI0[i] = b.invI; });
+    blk.factored = true; blk.factoredAt = blk.passes;
+    blk.bodies.forEach(function (b, i) { blk.ang0[i] = b.angle; blk.invM0[i] = b.invM; blk.invI0[i] = b.invI; blk.cx0[i] = b.c.x; blk.cy0[i] = b.c.y; });
     var rows = blk.rows, order = blk.order, first = blk.first, env = blk.env;
-    var dinv = blk.dinv, diag0 = blk.diag0, n = rows.length, k, c, kk;
+    var dinv = blk.dinv, diag0 = blk.diag0, n = rows.length, k, c, kk, worst = 1;
     for (k = 0; k < n; k++) { var r = rows[order[k]]; r.joint.blockRow(r.slot, r); }
     for (k = 0; k < n; k++) {
       var ri = rows[order[k]], e = env[k];
@@ -269,9 +328,13 @@
       }
       var d = ei[i - fi];
       for (kk = fi; kk < i; kk++) d -= ei[kk - fi] * ei[kk - fi] * env[kk][kk - first[kk]];
-      if (d > 1e-9 * diag0[i] && d > 0) { ei[i - fi] = d; dinv[i] = 1 / d; }
+      if (d > PIVOT_TOL * diag0[i] && d > 0) { ei[i - fi] = d; dinv[i] = 1 / d; worst = Math.max(worst, diag0[i] / d); }
       else { ei[i - fi] = 0; dinv[i] = 0; }          // dependent row
     }
+    // An ill-conditioned group (a light part on long levers between heavy
+    // ones) amplifies any change in geometry, so it refactors after
+    // proportionally smaller turns.
+    blk.turnTol = Math.min(BLOCK_REFACTOR_ANGLE, 0.05 / worst);
   }
 
   // One entry of J M⁻¹ Jᵀ between rows p and q.
@@ -296,35 +359,123 @@
     if (B.invM || B.invI) { B.v = M.v(B.v.x + B.invM * r.jb[0] * d, B.v.y + B.invM * r.jb[1] * d); B.w += B.invI * r.jb[2] * d; }
   }
 
-  function blockSolve(blk, h, useBias) {
+  function blockSolve(blk, h, useBias, retry) {
     if (!blk.built) { blk.built = true; factor(blk); }
-    if (blk.ok && useBias && needsRefactor(blk)) refactor(blk);
+    blk.passes = (blk.passes || 0) + (retry ? 0 : 1);
+    if (blk.ok && !retry && needsRefactor(blk)) refactor(blk);
     if (!blk.ok) {
-      // too big to factor: each joint solves its own rows
+      // too big to factor, or the factor misbehaved: each joint solves its
+      // own rows
       blk.joints.forEach(function (j) { j.blockSolveOwn(h, useBias); });
       return;
     }
     var soft = blk.joints[0].jointSoft, ms = 1, is = 0, br = 0;
     if (useBias) { ms = soft.massScale; is = soft.impulseScale; br = soft.biasRate; }
     var rows = blk.rows, order = blk.order, first = blk.first, env = blk.env, dinv = blk.dinv;
-    var n = rows.length, b = blk.rhs, x = blk.lam, i, k, r;
+    var n = rows.length, b = blk.rhs, x = blk.lam, i, k, r, e0 = 0, e1 = 0, d;
+    var push = blk.push || (blk.push = new Float64Array(n)), applied = blk.applied || (blk.applied = new Float64Array(n));
     for (k = 0; k < n; k++) {
       r = rows[order[k]]; r.joint.blockRow(r.slot, r);
-      b[k] = rowVel(r) + br * r.C + r.drift / h;
+      push[k] = capBias(br * r.C, r.angular ? P.MAX_JOINT_TURN : P.MAX_JOINT_PUSH) + capBias(r.drift / h, DRIFT_CAP);
+      b[k] = rowVel(r) + push[k];
+      if (dinv[k]) e0 += b[k] * b[k];
     }
     // x = A⁻¹ b
     for (i = 0; i < n; i++) { var s = b[i], e = env[i], f = first[i]; for (k = f; k < i; k++) s -= e[k - f] * x[k]; x[i] = s; }
     for (i = 0; i < n; i++) x[i] *= dinv[i];
     for (i = n - 1; i >= 0; i--) { var ee = env[i], ff = first[i], xi = x[i]; for (k = ff; k < i; k++) x[k] -= ee[k - ff] * xi; }
     for (k = 0; k < n; k++) {
+      d = -ms * x[k];
+      if (!isFinite(d)) d = 0;
+      applied[k] = d;
+      rowApply(rows[order[k]], d);
+    }
+    // Safety net: the exact solve leaves each row at (1 − ms) of what it was
+    // asked to fix. If the rows end up further off than they started, the
+    // factor is wrong for this geometry (near-singular or stale): take the
+    // impulses back and let the group's joints solve on their own until the
+    // group is rebuilt.
+    // (rows the factor dropped as dependent are left out: when a loop or a
+    // doubled joint asks for something inconsistent they cannot reach zero)
+    for (k = 0; k < n; k++) { if (!dinv[k]) continue; r = rows[order[k]]; var res = rowVel(r) + push[k]; e1 += res * res; }
+    if (!(e1 <= (1 - ms + 0.5) * (1 - ms + 0.5) * e0 + 1e-18)) {
+      for (k = 0; k < n; k++) rowApply(rows[order[k]], -applied[k]);
+      if (!retry && blk.factoredAt !== blk.passes) { refactor(blk); blockSolve(blk, h, useBias, true); return; }
+      blk.ok = false;
+      blk.joints.forEach(function (j) { j.blockSolveOwn(h, useBias); });
+      return;
+    }
+    // then the soft part: relax the accumulated impulse by impulseScale
+    for (k = 0; k < n; k++) {
       r = rows[order[k]];
-      var d = -ms * x[k] - is * r.joint.blockImpulse(r.slot);
-      r.joint.blockAdd(r.slot, d);
-      rowApply(r, d);
+      if (is) { d = -is * r.joint.blockImpulse(r.slot); rowApply(r, d); applied[k] += d; }
+      r.joint.blockAdd(r.slot, applied[k]);
     }
   }
 
-  P.jointBlock = { prepare: blockPrepare, solve: blockSolve };
+  /*
+   * Energy guard, run once per step by the group's leader (postStep). A
+   * passive group of rigid joints cannot gain energy: kinetic + gravity +
+   * spring energy only goes down, apart from work done by applied forces.
+   * A build that jams (a welded frame driven into the ground or through
+   * another part, which the contacts keep pushing out while the joints hold
+   * it in) can still pump energy in every substep. When the group's energy
+   * rises by more than a small allowance in one step, its velocities are
+   * scaled down by just enough to remove the gain: the jammed part looks
+   * stuck instead of exploding. Motors and rams in the group are allowed
+   * the work they can really do in a step: force (or torque) times their
+   * set speed, at most.
+   */
+  var GUARD_ALLOW = 0.002;             // fraction of kinetic energy a step may gain (impacts from outside)
+  // Energy is remembered per body and per joint (not per group), so the
+  // guard keeps working while groups are rebuilt as parts sleep and wake.
+  function blockGuard(blk, dt) {
+    if (!blk.bodies) return;
+    var world = blk.joints[0].bodyA.world || blk.joints[0].bodyB.world;
+    if (!world) return;
+    var g = world.gravity, step = world.stepCount, prev = 0, prevK = 0, E = 0, K = 0, work = 0, known = true;
+    blk.bodies.forEach(function (b) {
+      var k = b.kineticEnergy(), e = k - b.m * (g.x * b.c.x + g.y * b.c.y);
+      K += k; E += e;
+      if (b._guardStep === step - 1) { prev += b._guardE; prevK += b._guardK; } else known = false;
+      (b.lastApplied || []).forEach(function (f) { work += Math.abs((f.vector.x * b.v.x + f.vector.y * b.v.y) * dt) + Math.abs(f.torque * b.w * dt); });
+    });
+    blk.joints.forEach(function (j) {
+      if (j.driveWork) work += j.driveWork(dt);
+      if (j.storedEnergy) { var s = j.storedEnergy(); E += s; if (j._guardStep === step - 1) prev += j._guardE; else known = false; }
+    });
+    if (known) {
+      // the slack is a fraction of the kinetic energy before the step, so a
+      // group that blew up within one step cannot keep a share of it
+      var excess = E - prev - work - GUARD_ALLOW * Math.min(K, prevK) - 1e-3;
+      if (excess > 0 && K > 0) {
+        var f = Math.sqrt(Math.max(0, K - excess) / K);
+        blk.bodies.forEach(function (b) { b.v = M.scale(b.v, f); b.w *= f; });
+        // In a real blow-up (most of the motion spurious) also scale the
+        // impulses the joints warm-start with next step, or they put the
+        // same energy straight back. A small trim leaves them alone, so a
+        // loaded structure keeps reading its load.
+        if (f < 0.5 && excess > 1) blk.joints.forEach(function (j) { scaleImpulses(j, f); });
+        blk.guarded = (blk.guarded || 0) + 1;
+      }
+    }
+    blk.bodies.forEach(function (b) { b._guardK = b.kineticEnergy(); b._guardE = b._guardK - b.m * (g.x * b.c.x + g.y * b.c.y); b._guardStep = step; });
+    blk.joints.forEach(function (j) { if (j.storedEnergy) { j._guardE = j.storedEnergy(); j._guardStep = step; } });
+  }
+
+  // Scale every accumulated impulse of a joint (fields named impulse or
+  // ...Impulse, numbers or vectors), unless it has its own scaleImpulses(f).
+  function scaleImpulses(j, f) {
+    if (j.scaleImpulses) { j.scaleImpulses(f); return; }
+    Object.keys(j).forEach(function (k) {
+      if (k !== 'impulse' && !/Impulse$/.test(k)) return;
+      var v = j[k];
+      if (typeof v === 'number') j[k] = v * f;
+      else if (v && typeof v.x === 'number') j[k] = M.v(v.x * f, v.y * f);
+    });
+  }
+
+  P.jointBlock = { prepare: blockPrepare, solve: blockSolve, guard: blockGuard };
 
   // Jacobian of one component of a point-to-point constraint (anchor B −
   // anchor A): x row is vB.x − wB rB.y − vA.x + wA rA.y, y row likewise.
@@ -441,11 +592,11 @@
 
     // 3. limits
     if (this.enableLimit && !fixedRotation) {
-      var ang = this.angle(), bias, ms, is, imp, next, C;
+      var ang = this.angle(), bias, ms, is, imp, next, C, f;
       if (this.lowerAngle > -Infinity) {
         C = ang - this.lowerAngle; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;                     // speculative
-        else if (useBias) { bias = this.jointSoft.biasRate * C; ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = this.jointSoft.biasRate * C; f = capScale(bias, P.MAX_JOINT_TURN); bias *= f; ms = this.jointSoft.massScale; is = f * this.jointSoft.impulseScale; }
         imp = -this.axialMass * ms * (B.w - A.w + bias) - is * this.lowerImpulse;
         next = Math.max(this.lowerImpulse + imp, 0);
         imp = next - this.lowerImpulse; this.lowerImpulse = next;
@@ -454,7 +605,7 @@
       if (this.upperAngle < Infinity) {
         C = this.upperAngle - ang; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;
-        else if (useBias) { bias = this.jointSoft.biasRate * C; ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = this.jointSoft.biasRate * C; f = capScale(bias, P.MAX_JOINT_TURN); bias *= f; ms = this.jointSoft.massScale; is = f * this.jointSoft.impulseScale; }
         // sign flipped: the upper limit pushes B clockwise
         imp = -this.axialMass * ms * (A.w - B.w + bias) - is * this.upperImpulse;
         next = Math.max(this.upperImpulse + imp, 0);
@@ -476,6 +627,7 @@
     var bx = 0, by = 0, pms = 1, pis = 0;
     if (useBias) {
       bx = (b.p.x - a.p.x) * this.jointSoft.biasRate; by = (b.p.y - a.p.y) * this.jointSoft.biasRate;
+      var cap = capBias2(bx, by, P.MAX_JOINT_PUSH); bx *= cap; by *= cap;
       pms = this.jointSoft.massScale; pis = this.jointSoft.impulseScale;
     }
     var s = solve2(pointK(A, B, rA, rB), Cdot.x + bx, Cdot.y + by);
@@ -504,6 +656,16 @@
 
   // A running motor keeps both bodies awake (sleeping skips joints whose
   // bodies are all asleep).
+  RevoluteJoint.prototype.postStep = function (dt) { if (this.blockLeader && this.block) P.jointBlock.guard(this.block, dt); };
+  // Most work the motor can do in a step: its torque times its set speed
+  // (a motor never drives faster than motorSpeed), for the energy guard.
+  RevoluteJoint.prototype.driveWork = function (dt) {
+    return this.enableMotor ? Math.abs(this.motorTorque()) * Math.min(Math.abs(this.angularSpeed()), Math.abs(this.motorSpeed)) * dt : 0;
+  };
+  RevoluteJoint.prototype.storedEnergy = function () {
+    if (!(this.stiffness > 0)) return 0;
+    var c = this.angle() - this.springAngle; return 0.5 * this.stiffness * c * c;
+  };
   RevoluteJoint.prototype.preStep = function () {
     if (this.enableMotor && this.motorSpeed !== 0 && this.maxMotorTorque > 0) { this.bodyA.wake(); this.bodyB.wake(); }
   };
