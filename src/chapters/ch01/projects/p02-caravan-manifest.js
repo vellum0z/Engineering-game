@@ -173,9 +173,15 @@
       var p = s.part('convoy'); if (!p) return { fail: 'The convoy is missing.' };
       var b = s.body('convoy'), here = SE.yard.inBox(b.c, { x0: 17, x1: 38, y0: 3 });
       if (!s.held('parked', here && s.speed('convoy') < 0.05, 1)) return null;
-      return p.crates.length ? 'pass' : { fail: 'The convoy crossed empty. The caravan came to trade, so take at least one crate.' };
+      return cratesAcross(s) ? 'pass' : { fail: 'The convoy crossed empty. The caravan came to trade, so get at least one crate over.' };
     }
   );
+
+  // Crates that made it over the creek, wherever they ride.
+  function cratesAcross(s) {
+    var p = s.part('convoy');
+    return p ? p.allCrates.filter(function (c) { return c.c.x > 14.5 && c.c.y > 2.5; }).length : 0;
+  }
 
   var coupleGoal = function (s) {
     var hit = s.impacts.filter(function (i) { return (i.a === 'car' && i.b === 'standing') || (i.a === 'standing' && i.b === 'car'); })[0];
@@ -213,11 +219,14 @@
     }
   );
 
+  // Blocks still sitting on the wagon bed.
+  function aboard(p) { return p.blocks.filter(function (k) { return k.c.y > p.body.c.y; }).length; }
+
   var wagonGoal = G.all(
     G.never(function (s) { return broke(s, 'wagon') ? 'The wagon axle snapped. Its plate says 3 500 lb.' : null; }),
     function (s) {
       var p = s.part('wagon'); if (!p) return { fail: 'The wagon is missing.' };
-      if (!p.blocks.length) return { fail: 'Nothing loaded. The caravan paid for counterweights.' };
+      if (!aboard(p)) return { fail: 'Nothing loaded. The caravan paid for counterweights.' };
       return s.t >= 3 ? 'pass' : null;
     }
   );
@@ -226,6 +235,8 @@
 
   SE.content.registerProject('ch01', {
     id: 'P2', order: 2, title: 'Caravan Manifest', subtitle: 'An FPS manifest in an SI town',
+    objective: 'Sign off five trades with the caravan, nothing broken',
+    pitch: 'The caravan\'s manifest is in pounds, feet and miles; every rating in town is SI. Turn each figure into a setting, run it, and let the real load show you if you got it right.',
     brief: [
       'A trade caravan has come down from the old Army depot at Fort Calder: a wrecker towing a lowboy, a string of rail cars on the spur, a flatbed and a wagon. They want concrete and diesel. We want their generator, their drilling mud and their steel.',
       'Their manifest is in **pounds, feet, tons and miles**. Everything in Kettle Hollow, from the bridges to the tanker axles, is rated in **SI**. Their own wagon is rated in pounds.',
@@ -243,15 +254,24 @@
     solutions: {
       'P2.convoy': [
         { set: { convoy: { crates: '2' } } },
+        // or jack the span up from the creek bed with a ram and take all three:
+        // bearing load 29.4 + 192.8 - 40 = 182 kN, under its 209 kN limit
+        { add: [{ type: 'ram', a: { part: 'ground', at: { x: 7, y: 0.05 } }, b: { part: 'bridge' }, dials: { force: '40 kN', stroke: '0.2 m' } }] },
         { pass: false, set: { convoy: { crates: '3' } } }     // 193 kN on a 180 kN span
       ],
       'P2.couple': [
         { add: [{ type: 'push', a: { part: 'car' }, dials: { force: '12.5 kN', angle: '0 deg', time: '2 s' } }] },
+        // or reel it in with a winch anchored past the standing cars, at the rated speed
+        { add: [{ type: 'winch', a: { part: 'ground', at: { x: 31, y: 0.7 } }, b: { part: 'car' }, dials: { speed: '1.75 m/s', pull: '10 kN', rating: '50 kN' } }] },
+        { pass: false, add: [{ type: 'winch', a: { part: 'ground', at: { x: 31, y: 0.7 } }, b: { part: 'car' }, dials: { speed: '4 m/s', pull: '50 kN', rating: '80 kN' } }] },   // mi/h read as m/s
         { pass: false, add: [{ type: 'push', a: { part: 'car' }, dials: { force: '27.5 kN', angle: '0 deg', time: '2 s' } }] },   // 30 800 lb used as kg
         { pass: false, add: [{ type: 'push', a: { part: 'car' }, dials: { force: '5 kN', angle: '0 deg', time: '2 s' } }] }        // too gentle to latch
       ],
       'P2.mud': [
         { set: { tanker: { fill: '1.70 m' } } },
+        // the FPS route: 3.42 slug/ft^3 x 32.2 ft/s^2 = 110.1 lb/ft^3; 3000 x 9.81 / 4.448 = 6616 lb;
+        // / 110.1 lb/ft^3 = 60.1 ft^3; over 10.76 ft^2 of floor = 5.58 ft. Fill to 5.55 ft.
+        { set: { tanker: { fill: '5.55 ft' } } },
         { pass: false, set: { tanker: { fill: '1.705 m' } } },  // density rounded to 1.76 Mg/m^3 before dividing
         { pass: false, set: { tanker: { fill: '0.8 m' } } }     // 1410 kg: under half a load
       ],
@@ -263,32 +283,36 @@
       ],
       'P2.blocks': [
         { set: { wagon: { blocks: '3' } } },
+        { set: { wagon: { blocks: '2' } } },                    // safe but light: passes with points off
         { pass: false, set: { wagon: { blocks: '4' } } }
       ]
     },
     jobs: [
       {
         id: 'P2.convoy', design: CROSSING, yard: { camera: CROSSING_CAM },
-        label: '**Bridge crossing.** The wrecker weighs **8.75 ton** and the empty lowboy **14.2 kip** (manifest). Each cargo crate weighed **3 880 lb** on the depot scale. The Mill Creek truss is rated **180 kN**. Set how many of the three crates ride across on this trip; the rest wait on the bank for a second run.',
+        objective: 'Get the convoy and its crates across without breaking the truss',
+        label: 'Wrecker **8.75 ton**, empty lowboy **14.2 kip**, three crates of **3 880 lb**. The truss is rated **180 kN**. Crates left behind wait for a second trip.',
         goal: convoyGoal, timeout: 45,
         hints: [
           'Three different units for one total. Put everything in pounds first, then convert once.',
           'A ton is 2000 lb and a kip is 1000 lb. Add the wrecker and the lowboy, then add crates one at a time and convert each total with 4.448 N/lb.',
           'Wrecker and lowboy: 17 500 + 14 200 = 31 700 lb = 141.0 kN. Each crate adds 3 880 × 4.448 = 17.26 kN. How many fit under 180 kN?'
         ],
-        margin: function (s) { var p = s.part('convoy'); return p ? (2 - Math.min(2, p.crates.length)) * 15 : 0; },
+        margin: function (s) { return (2 - Math.min(2, cratesAcross(s))) * 15; },
         onFail: function (ctx) {
           var p = ctx.result.state.part('convoy');
           return p && p.crates.length === 3 ? 'If you read **ton** as 1000 lb, the whole convoy comes to 154 kN and looks like it fits. The U.S. ton is 2000 lb; the kip is the one that is 1000 lb.' : 'Total the wrecker, the lowboy and the crates in newtons and compare with the plate.';
         },
         success: function (ctx) {
-          var p = ctx.result.state.part('convoy');
-          return p.crates.length === 2 ? 'Across with two crates and the deck barely moving: about 176 kN on a 180 kN span. One more run for the last crate.' : 'Across, but with only one crate the wrecker has to go back twice. Two would have fitted.';
+          var n = cratesAcross(ctx.result.state);
+          if (n === 3) return 'All three crates across in one go. The truss alone could only take 180 kN, so whatever you added carried the rest.';
+          return n === 2 ? 'Across with two crates and the deck barely moving: about 176 kN on a 180 kN span. One more run for the last crate.' : 'Across, but with only one crate the wrecker has to go back twice. Two would have fitted.';
         }
       },
       {
         id: 'P2.couple', design: SPUR, yard: { camera: SPUR_CAM },
-        label: '**Coupling the rail car.** The caravan car\'s weight plate says **30 800 lb**. Its couplers are rated for **4 mi/h**. It rolls on greased bearings. Give it one shove (a **Push** from the library) so it rolls into the standing cars at the rated speed.',
+        objective: 'Roll the caravan car into the standing cars at 4 mi/h',
+        label: 'The car weighs **30 800 lb** and runs on greased bearings. Its couplers are rated **4 mi/h**: they shatter 15% over and won\'t latch under half.',
         goal: coupleGoal, timeout: 40,
         hints: [
           'Two conversions: the plate is a weight, and the speed is in miles per hour. You need the car\'s mass and a speed in m/s (or do the whole job in slugs and ft/s).',
@@ -300,13 +324,14 @@
           var v = ctx.result.state.memo.couple;
           if (v > COUPLER_BREAK) return 'Way too hard. If you used **30 800 kg** as the mass, remember the plate is a weight in pounds: divide by g after converting to newtons.';
           if (v && v < COUPLER_LATCH) return 'Too gentle. The knuckle needs at least half the rated speed to latch.';
-          return 'The car has to roll into the standing cars. One push, pointing right (0°), sized from v = F t / m.';
+          return 'The car has to roll into the standing cars. A push gives v = F t / m; a winch sets the speed directly.';
         },
         success: function (ctx) { return 'Clunk. The knuckle closed at **' + f3(ctx.result.state.memo.couple) + ' m/s**; the rating is 1.79 m/s.'; }
       },
       {
         id: 'P2.mud', design: PAD, yard: { camera: PAD_CAM },
-        label: '**Drilling mud.** The manifest gives the mud\'s density as **3.42 slug/ft³**. Our tanker has a **1.00 m²** floor and its axle is rated **3.00 t** of cargo. Set the fill depth so it carries as much as it safely can.',
+        objective: 'Fill the tanker as full as its axle can take',
+        label: 'Mud: **3.42 slug/ft³**. Tank floor **1.00 m²**. Axle rated **3.00 t** of cargo. Set the tanker\'s fill depth.',
         goal: tankGoal, timeout: 6,
         hints: [
           'Get the density into kg/m³. Then the depth that puts 3000 kg in a 1.00 m² tank follows.',
@@ -324,7 +349,8 @@
       },
       {
         id: 'P2.air', design: BAY, yard: { camera: BAY_CAM },
-        label: '**Air ride.** The caravan\'s sheet says their flatbed rides level with the generator skid aboard at **118 psi** in their **8 in** air bag. Their bag is ruined; ours has a **250 mm** bore and bursts at **700 kPa**. Set the pressure so the deck rides at 300 mm.',
+        objective: 'Level the flatbed at 300 mm without bursting the bag',
+        label: 'Their sheet: **118 psi** in their **8 in** bag rides level. Our bag: **250 mm** bore, bursts at **700 kPa**. Set the bag pressure.',
         goal: bagGoal, timeout: 10,
         hints: [
           'The bag carries the same load either way. Work out that load from their pressure and their bag\'s area, then share it over ours.',
@@ -340,14 +366,15 @@
       },
       {
         id: 'P2.blocks', design: DOCK, yard: { camera: DOCK_CAM },
-        label: '**Counterweight sale.** The caravan is buying our concrete counterweights: cylinders **450 mm** across and **1.15 m** long, concrete at **2.40 Mg/m³**. Their wagon\'s axle plate says **3 500 lb**. They\'d like six. Set how many go on.',
+        objective: 'Load as many blocks as the caravan wagon can carry',
+        label: 'Each block: **450 mm** across, **1.15 m** long, concrete at **2.40 Mg/m³**. Wagon axle plate: **3 500 lb**. Set how many go on.',
         goal: wagonGoal, timeout: 5,
         hints: [
           'Volume, then mass, then weight, then pounds. Stay in SI until the last step.',
           'V = (π/4) d² L in m³. m = ρV with 2.40 Mg/m³ = 2400 kg/m³. W = mg in newtons, then multiply by (1 lb / 4.448 N).',
           'V = 0.7854 × 0.450² × 1.15 = 0.1829 m³, so m = 439.0 kg and W = 4306 N = 968 lb each. How many fit under 3 500 lb?'
         ],
-        margin: function (s) { var p = s.part('wagon'); return p ? (3 - Math.min(3, p.blocks.length)) * 12 : 0; },
+        margin: function (s) { var p = s.part('wagon'); return p ? (3 - Math.min(3, aboard(p))) * 12 : 0; },
         onFail: function (ctx) {
           var p = ctx.result.state.part('wagon');
           return p && p.blocks.length >= 4 ? 'If you got **439 lb** a block, that is the mass in kilograms with a pound label on it. A pound is a force: find W = mg first.' : 'Work out one block\'s weight in pounds, then how many fit under the plate.';
@@ -422,7 +449,7 @@
         (aboard ? crates : left).push(c);
       }
       driver(b, body, { speed: 1.2, stopX: 22, maxForce: 25e3, gain: 40e3 });
-      return { body: body, bodies: [body].concat(crates, left), crates: crates };
+      return { body: body, bodies: [body].concat(crates, left), crates: crates, allCrates: crates.concat(left) };
     },
     plate: function () { return ['Wrecker ' + WRECKER_TON + ' ton', 'Lowboy (empty) ' + LOWBOY_KIP + ' kip', 'Crates ' + SE.yard.dial.fmtNum(CRATE_LB, 4) + ' lb each (depot scale)']; },
     readouts: function (built) { return [{ key: 'speed', label: 'speed', q: 'speed', read: function () { return built.body.v.x; } }]; }
