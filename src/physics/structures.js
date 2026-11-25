@@ -823,7 +823,7 @@
     var group = def.group || -(++groupSeq);   // negative: parts of one structure never collide with each other
     var limits = { moment: mat.yield * sec.S, axial: mat.yield * sec.A, shear: mat.yield / Math.sqrt(3) * sec.A / 1.5 };
     var s = { kind: 'beam', label: def.label || 'beam', material: mat, section: sec, length: L, dx: dx, EI: EI,
-      segments: N, start: p0, end: p1, axis: u, normal: n, limits: limits, bodies: [], links: [], supports: [] };
+      segments: N, start: p0, end: p1, axis: u, normal: n, limits: limits, damping: zeta, bodies: [], links: [], supports: [] };
     var stationPoint = function (i) { return M.mulAdd(p0, i * dx, u); };
 
     for (var i = 0; i < N; i++) {
@@ -889,7 +889,7 @@
     var depth = def.depth || Math.sqrt(4 * A / Math.PI);
     var group = def.group || -(++groupSeq);   // negative: parts of one structure never collide with each other
     var s = { kind: 'truss', label: def.label || 'truss', material: mat, area: A, I: I,
-      nodes: [], members: [], supports: [] };
+      damping: def.damping != null ? def.damping : 0.02, nodes: [], members: [], supports: [] };
     var pts = def.nodes.map(function (p) { return M.v(p.x, p.y); });
     var attached = pts.map(function () { return 0; });
     var defs = def.members.map(function (m) {
