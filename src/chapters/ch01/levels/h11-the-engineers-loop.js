@@ -106,7 +106,9 @@
   }
   var PROOF_DESIGN = proofDesign();
 
-  var CAMERA = { fit: { lo: { x: -10, y: -1 }, hi: { x: 9, y: 18 } } };
+  // the crate steps zoom in on the bottom of the lift, where the crate is
+  var CRATE_CAMERA = { fit: { lo: { x: -6, y: -0.5 }, hi: { x: 6, y: 9.5 } } };
+  var CAMERA = { fit: { lo: { x: -10, y: -1 }, hi: { x: 9, y: 20.5 } } };
 
   /* ---------------------------------------------------------- helpers */
   var f3 = function (x) { return Y.dial.fmtNum(x, 3); };
@@ -143,6 +145,8 @@
     subtitle: 'Read, sketch, compute, judge, lift',
     sections: ['1.6'],
     minutes: 25,
+    objective: 'Lift the water tank onto the tower deck',
+    pitch: 'Juno needs the settlement\'s water tank on the signal tower deck today. Work out what it weighs, set the winch, and pick a rope that won\'t part.',
     intro: [
       'Juno has pinned a work order to the depot\'s job board: the settlement\'s water tank has to go up onto the deck of the old signal tower, today, before the pump line is reconnected.',
       'Hask taps the board. "Every job from here on runs the same loop: **read** it, **tabulate** it, **apply** the principles, **solve**, then **judge** whether the answer makes sense. Five phases. Skip one and something ends up on the ground. Today the gantry winch will tell you which one you skipped."'
@@ -159,7 +163,9 @@
     solutions: {
       'H11.lift': [
         { add: [{ type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: BEST.key } }], set: { winch: { pull: '181 kN' } } },
-        { add: [{ type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: ROPES[3].key } }], set: { winch: { pull: '181 kN' } } },
+        { add: [{ type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: ROPES[3].key } }], set: { winch: { pull: '240 kN' } } },
+        // a different approach: two weak ropes side by side share the load
+        { add: [{ type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: ROPES[1].key } }, { type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: ROPES[1].key } }], set: { winch: { pull: '181 kN' } } },
         // 36 000 lb looks big: it is 160 kN, under the weight
         { pass: false, add: [{ type: 'h11-sling', a: { part: 'hook', anchor: 'bottom' }, b: { part: 'tank', anchor: 'top' }, dials: { rope: ROPES[1].key } }], set: { winch: { pull: '181 kN' } } },
         // the pull set from the water alone: 1.02 x 166.7 kN = 170 kN
@@ -172,6 +178,7 @@
       /* ---------------------------------------------------- the work order */
       {
         type: 'say', who: 'juno',
+        brief: '**Work order:** get the part-filled water tank 9 m up onto the tower deck. Set the winch 2 % over its weight and use the lightest rope that holds.',
         text: '**Work order: tank to tower.**\n\n' +
           'The steel water tank stands on the pad under the gantry jib. It is a vertical cylinder **' + D_MM + ' mm** across inside and **' + TANK_H_MM + ' mm** tall, stamped *20 000 L* on the side. Somebody already filled it to a depth of **' + H_MM + ' mm** and nobody wants to drain it. Water is **1000 kg/m³**. The empty tank (shell, lid and fittings, 6 mm plate) has a mass of **' + M_DRUM + ' kg**.\n\n' +
           'It goes up to the deck of the signal tower, **9.0 m** up, on the jib winch. Four of you on the crew. It\'s 14 °C and dry.\n\n' +
@@ -181,7 +188,9 @@
       /* ------------------------------------------------------ phase 1: read */
       {
         type: 'watch', who: 'hask', kicker: 'Phase 1 of 5 · Read',
-        yard: { design: READ_DESIGN, goal: runFor(12, 'crate'), readouts: ['proof.tension', 'winch.lineOut'] },
+        objective: 'Lift the test crate and read the chain tension',
+        brief: 'Press **▶ Run**. Watch the **proof chain tension** gauge once the 500 kg crate rises at a steady speed.',
+        yard: { design: READ_DESIGN, goal: runFor(12, 'crate'), readouts: ['proof.tension', 'winch.lineOut'], camera: CRATE_CAMERA },
         text: '**Phase 1: read.** Reading a job means matching it to theory you already know. Before the tank, a **500 kg** test crate on a proof chain. The winch can pull up to **12 kN** and reels in at **0.5 m/s**.\n\nPress **▶ Run** and watch the **proof chain tension** gauge. It does one thing while the crate speeds up and another once it rises at a steady 0.5 m/s.',
         goalText: 'Run the test lift',
         until: function (ctx, type) { return type === 'result' && !!steady(ctx.result); },
@@ -191,13 +200,16 @@
       },
       {
         type: 'rule', title: 'Rising at a steady speed is equilibrium',
+        brief: 'No acceleration, so the chain just carries the weight: **T = W**. That is the one number this job needs from the work order.',
         law: 'a = 0 \\quad \\Rightarrow \\quad T = W = mg',
         eq: function (ctx) { var T = steady(ctx.result); return T ? 'T = ' + f3(T / 1000) + '\\u{ kN} \\approx (' + CRATE_M + '\\u{ kg})(9.81\\u{ m/s^2}) = ' + f3(CRATE_M * GRAV / 1000) + '\\u{ kN}' : ''; },
         text: 'A load going up at constant speed is a **particle in equilibrium**, the H1 case: no acceleration, so the cable just balances the weight. The extra pull only matters while it speeds up. That is the theory this job connects to, and it tells you the one thing you need from Juno\'s brief: **the weight of the tank**. The height of the tower, the weather and the crew size don\'t change the tension.'
       },
       {
         type: 'watch', who: 'hask',
-        yard: { keep: true, goal: runFor(12, 'crate'), readouts: ['proof.tension', 'winch.lineOut'] },
+        objective: 'Double the crate to 1000 kg and lift it again',
+        brief: 'Click the crate, set its mass to **1000 kg**, and run it again. Watch the steady tension.',
+        yard: { keep: true, goal: runFor(12, 'crate'), readouts: ['proof.tension', 'winch.lineOut'], camera: CRATE_CAMERA },
         text: 'Check it yourself. Select the crate and set its mass to **1000 kg**, then run it again. The winch can pull 12 kN, which is still more than the weight.',
         goalText: 'Double the crate and run again',
         until: function (ctx, type) {
@@ -211,6 +223,8 @@
       /* -------------------------------------------------- phase 2: tabulate */
       {
         type: 'build', who: 'hask', kicker: 'Phase 2 of 5 · Tabulate and sketch',
+        objective: 'Chalk a to-scale sketch that matches the tank',
+        brief: 'Click the tank to read its plate. Then select **your sketch** and type the inside diameter, the height and the water depth (**3200 mm**).',
         yard: { design: SKETCH_DESIGN, readouts: [] },
         text: '**Phase 2: tabulate.** Here is the real tank. Click it to read its plate. Then chalk a **sketch** of it on the pad beside it: select **your sketch** and type the inside diameter, the tank height and the **water depth** from the brief.\n\nThe sketch is drawn to scale next to the tank, so a slip shows the moment you type it. A big, true sketch is where you catch "that\'s the tank height, not the water".',
         goalText: 'Sketch matches the tank: diameter, height and waterline',
@@ -237,6 +251,7 @@
       /* ----------------------------------------------------- phase 3: apply */
       {
         type: 'rule', kicker: 'Phase 3 of 5 · Apply', title: 'From tank to winch pull',
+        brief: 'Chain the formulas and check the units on every line. Units catch a wrong equation fast, but not a lost factor of 4.',
         law: 'V = \\frac{\\pi}{4}d^{2}h \\quad m = \\rho V + m_{\\t{tank}} \\quad W = mg',
         eq: [
           '[\\u{m^2}][\\u{m}] = [\\u{m^3}] \\qquad [\\u{kg/m^3}][\\u{m^3}] + [\\u{kg}] = [\\u{kg}] \\qquad [\\u{kg}][\\u{m/s^2}] = [\\u{N}]',
@@ -248,6 +263,8 @@
       /* ----------------------------------------------------- phase 4: solve */
       {
         type: 'watch', who: 'hask', kicker: 'Phase 4 of 5 · Solve',
+        objective: 'Set the winch to 1.02 × W and lift the tank off',
+        brief: 'Work out the tank\'s weight **W**. Select the **jib winch**, set **Max pull** to 1.02 × W, and run the test on the proof chain.',
         yard: { design: PROOF_DESIGN, goal: runFor(14, 'tank'), readouts: ['proof.tension', 'tank.lift'] },
         text: '**Phase 4: solve.** Work out the weight of the tank and water. Keep every digit until the end, then round once.\n\nThe tank is on a **proof chain** that nothing here can break. Select the **jib winch** and set its **Max pull** to Juno\'s rule, **1.02 × your W**. Then run the governor test.',
         goalText: 'The tank lifts off on the proof chain',
@@ -273,12 +290,13 @@
       /* ----------------------------------------------------- phase 5: judge */
       {
         type: 'rule', kicker: 'Phase 5 of 5 · Judge', title: 'Does 18 tonnes make sense?',
-        law: '2.6 \\times 2.6 \\times 3.2\\u{ m} = 21.6\\u{ m^3} \\;\\Rightarrow\\; \\le 21.6\\u{ t of water}',
-        eq: '\\frac{\\pi}{4} \\times 21.6\\u{ t} + 1.1\\u{ t} \\approx 18.1\\u{ t} \\approx 12\\ \\t{cars}',
+        brief: 'A 2.6 × 2.6 × 3.2 m box holds at most 21.6 t of water. A cylinder fills about 79 % of it, so 18 t is believable.',
+        law: '\\frac{\\pi}{4} \\times 21.6\\u{ t} + 1.1\\u{ t} \\approx 18.1\\u{ t}',
         text: 'Technical judgment means comparing an answer with something you trust, before you bet a lift on it. One cubic metre of water is a tonne, so the box around this tank could hold at most 21.6 t of water. A cylinder fills π/4 ≈ 79 % of its box. Add a tonne of steel and you land on 18.1 t, about a dozen cars.\n\nThe winch already agreed with you. But the quick check is what you do **before** a run: errors from a dropped prefix or a radius used as a diameter are never small (10×, 4×, 1000×), so a rough bound catches them.'
       },
       {
         type: 'reveal', kicker: 'Procedure', title: 'General procedure for analysis',
+        brief: 'You just ran it: **read**, **tabulate**, **apply**, **solve**, **judge**. Every later job is laid out this way.',
         text: 'You just ran it:\n\n' +
           '- **1 · Read** the problem carefully and connect the physical situation to the theory (a load rising steadily is in equilibrium, T = W).\n' +
           '- **2 · Tabulate** the data and draw any diagrams to a large scale (the table and the chalk sketch).\n' +
@@ -292,9 +310,11 @@
       /* ------------------------------------------------------------ the job */
       {
         type: 'job', id: 'H11.lift', who: 'juno',
+        objective: 'Lift the tank to deck level without parting a rope',
+        brief: 'Rig rope from the rack between the hook block and the tank lid, choose which rope, and run. Tags are in kN, lb and kip. The lightest that holds scores best.',
         yard: {
           design: TANK_DESIGN,
-          bin: [{ type: 'h11-sling', count: 1, label: 'Rope from the rack' }],
+          bin: [{ type: 'h11-sling', count: 2, label: 'Rope from the rack' }],
           ghosts: [{ type: 'h11-sling', x: 0, y: TH + SLING / 2, w: 0.3, h: SLING, text: 'rope: hook block to tank lid' }],
           readouts: ['winch.tension', 'sling.tension', 'tank.lift']
         },
@@ -302,7 +322,7 @@
           if (ctx.values.pull) ctx.yard.setDial('winch', 'pull', ctx.values.pull);
         },
         text: function (ctx) {
-          return 'The proof chain belongs to the test bench. For the real lift, take **one rope from the rack** and rig it from the bottom of the hook block to the tank lid. Select it to choose which rope it is. The tags are a mess of units:\n\n' +
+          return 'The proof chain belongs to the test bench. For the real lift, take a rope from the rack (or two, side by side) and rig it from the bottom of the hook block to the tank lid. Select it to choose which rope it is. The tags are a mess of units:\n\n' +
             ROPES.map(function (r) { return '- ' + r.name + ': **' + r.tag + '**'; }).join('\n') + '\n\n' +
             'Use the **lightest** rope that survives the lift. The winch is set to ' + (ctx.values.pull ? 'your **' + ctx.values.pull + '**' : 'pull **1.02 × W**') + ', and as the drum starts the rope feels the full pull, not just the weight. Run it: the tank has to rise to **deck level**, where the crew swings it across.';
         },
@@ -326,15 +346,16 @@
         ],
         // a heavier rope than needed still works, but it took three people to drag it to the jib
         margin: function (s) {
-          var p = s.part('sling'); if (!p) { var ids = Object.keys(s.built.parts).filter(function (k) { return s.built.parts[k].inst.type === 'h11-sling'; }); p = ids.length ? s.built.parts[ids[0]] : null; }
-          if (!p) return 0;
-          var R = rope(p.inst.dials.rope).rating;
+          var R = 0;
+          Object.keys(s.built.parts).forEach(function (k) { var p = s.built.parts[k]; if (p.inst.type === 'h11-sling') R += rope(p.inst.dials.rope).rating; });
+          if (!R) return 0;
           return R <= BEST.rating + 1 ? 0 : Math.round(Math.min(30, 10 * Math.log(R / BEST.rating) / Math.log(1.25)));
         },
         success: function (ctx) {
-          var sl = ctx.find('h11-sling'), r = sl ? rope(sl.dials.rope) : BEST;
-          var msg = 'The tank is at deck level and the crew is swinging it across. ' + r.name + ' (' + r.tag + ' = ' + kN(r.rating) + ') carried it.';
-          if (r !== BEST) msg += ' It held, but rope C (45 kip = 200 kN) is lighter and still enough.';
+          var used = ctx.all('h11-sling').map(function (p) { return rope(p.dials.rope); });
+          var msg = 'The tank is at deck level and the crew is swinging it across. ' + used.map(function (r) { return r.name + ' (' + r.tag + ' = ' + kN(r.rating) + ')'; }).join(' and ') + (used.length > 1 ? ' shared it.' : ' carried it.');
+          if (used.length > 1) msg += ' Two ropes side by side each take about half the load, so a pair of weak ones can do what one can\'t.';
+          else if (used[0] && used[0] !== BEST) msg += ' It held, but rope C (45 kip = 200 kN) is lighter and still enough.';
           return msg + '\n\nIn one unit the rack reads 150, 160, 200, 250 and 400 kN. The trap was B: "36 000" looks huge until you remember a pound is only 4.448 N.';
         }
       },
@@ -352,6 +373,8 @@
       /* --------------------------------------------------------- free play */
       {
         type: 'free', who: 'hask',
+        objective: 'Free play: find what breaks, and why',
+        brief: 'The pad is yours. Water depth, shell mass and the winch are open now. Try the prompts below.',
         yard: {
           design: { parts: scenery().concat([tank(['depth', 'shell']), hook(), winch('181 kN', { open: ['pull', 'speed'] })]) },
           bin: [{ type: 'h11-sling', count: 2, label: 'Rope from the rack' }, { type: 'cable', count: 1, dials: { rating: '1 MN' }, label: 'Proof chain' }],
