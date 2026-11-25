@@ -374,11 +374,11 @@
         if (j.type !== 'distance' || j.broken) return;
         if (!(bodies.has(j.bodyA) || bodies.has(j.bodyB))) return;
         var owner = claim.get(j);
-        if (owner && owner !== self && owner.lineBlockStep === step) return;   // a winch or another structure has it
+        if (owner && owner !== self && owner.lineBlockStep === step) return;   // another structure has it
         var dm = distMode(j);
         if (!dm) return;
         claim.set(j, self);
-        j.lineBlockStep = step;
+        j.structureStep = step;
         if (j._sSolver !== self || j._sLambda == null) { j._sLambda = dm.sign * j.axial(); j._sSolver = self; }
         self.adoptedDist.push({ joint: j, mode: dm.mode, sign: dm.sign });
       });
@@ -928,5 +928,18 @@
   P.LineSupport = LineSupport;
   P.StructureLink = Link;
   P.StructureSolver = StructureSolver;
-  P.structures = { beam: beam, truss: truss };
+  // True if a structure in j's world will solve distance joint j this step,
+  // so the line blocks (pulley.js) leave it out whichever is prepared first.
+  function claims(j) {
+    var world = j.bodyA.world || j.bodyB.world;
+    if (!world || world.structureCoupling === false || j.type !== 'distance' || j.broken || !distMode(j)) return false;
+    if (world._sBodiesStep !== world.stepCount || world._sBodiesTime !== world.time) {
+      var set = new Set();
+      world.joints.forEach(function (s) { if (s.type === 'structure') s.bodySet.forEach(function (b) { set.add(b); }); });
+      world._sBodies = set; world._sBodiesStep = world.stepCount; world._sBodiesTime = world.time;
+    }
+    return world._sBodies.has(j.bodyA) || world._sBodies.has(j.bodyB);
+  }
+
+  P.structures = { beam: beam, truss: truss, claims: claims };
 })(globalThis.SE);
