@@ -91,15 +91,65 @@
     return k > 0 ? 1 / k : 0;
   };
 
+  /*
+   * Rods in the joint block. A rigid rod (no rope, spring or motor) that
+   * shares a body with pins, welds or sliders, directly or through other
+   * such rods, is a row of P.jointBlock (revolute.js) with them. Solved on
+   * its own beside the block, it fights the block's direct solve and in a
+   * jammed build their warm starts run away (thousands of m/s mid-substep).
+   * Every other rod, rope and stiff spring stays in the line blocks
+   * (pulley.js), so each rod has exactly one block solver. The rule is a
+   * function of the world, worked out once per step, so both block
+   * builders read the same answer whichever runs first.
+   */
+  function plainRod(j) {
+    return j.type === 'distance' && !j.broken && j.isRigid() && !j.rope && !(j.maxMotorForce > 0);
+  }
+  function dyn(b) { return b && b.type === 'dynamic' && (b.invM > 0 || b.invI > 0); }
+  function jointBlockBodies(world) {
+    if (world._rodJBStep === world.stepCount && world._rodJBTime === world.time) return world._rodJB;
+    var set = new Set(), rods = [];
+    world.joints.forEach(function (j) {
+      if (j.broken) return;
+      if (j.type === 'distance') { if (plainRod(j)) rods.push(j); return; }
+      if (!j.blockSlots || !j.blockSlots().length) return;
+      if (dyn(j.bodyA)) set.add(j.bodyA);
+      if (dyn(j.bodyB)) set.add(j.bodyB);
+    });
+    // rods reach through each other: a rod between two rods on a pinned frame joins too
+    for (var grew = set.size > 0; grew;) {
+      grew = false;
+      rods.forEach(function (j) {
+        var a = dyn(j.bodyA) && set.has(j.bodyA), b = dyn(j.bodyB) && set.has(j.bodyB);
+        if (a === b) return;
+        if (!a && dyn(j.bodyA)) { set.add(j.bodyA); grew = true; }
+        if (!b && dyn(j.bodyB)) { set.add(j.bodyB); grew = true; }
+      });
+    }
+    world._rodJB = set; world._rodJBStep = world.stepCount; world._rodJBTime = world.time;
+    return set;
+  }
+  // true if this rod is a row of the joint block this step
+  DistanceJoint.prototype.inJointBlock = function () {
+    var world = this.bodyA.world || this.bodyB.world;
+    if (!world || world.jointBlockSolve === false || !plainRod(this) || !P.jointBlock) return false;
+    if (P.structures && P.structures.claims && P.structures.claims(this)) return false;   // a beam or truss has it
+    var set = jointBlockBodies(world);
+    return set.has(this.bodyA) || set.has(this.bodyB);
+  };
+
   DistanceJoint.prototype.prepare = function (h, cfg) {
     this.invH = 1 / h; this.h = h;
+    this.jointSoft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h);
+    // every distance joint registers, so the joint block always has its
+    // leader; only a rod inJointBlock() gives it a row
+    if (P.jointBlock) P.jointBlock.prepare(this);
     if (P.lineBlocks && P.lineBlocks.prepare(this, h, cfg)) {
       // solved with its neighbours as one block (pulley.js); its pull is upperImpulse
       this.impulse = 0; this.springImpulse = 0; this.lowerImpulse = 0; this.motorImpulse = 0;
       this.stiff = false; this.explicit = false;
       return;
     }
-    this.jointSoft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h);
     var hz = this.hertz, zeta = this.dampingRatio, m = this.effMass(this.geometry());
     if (this.stiffness > 0) {
       // k (N/m) and c (N·s/m) -> frequency and damping ratio for this pair of masses
@@ -157,6 +207,18 @@
   };
 
   DistanceJoint.prototype.solve = function (h, useBias) {
+    // (a beam or truss that took the joint over marks block with its own
+    // marker, which has no joints: then the structure solves it)
+    var grp = this.block && this.block.joints ? this.block : null;
+    this.solveOwn(h, useBias, !!grp);
+    if (grp) P.jointBlock.member(this, h, useBias);
+  };
+  // the rod's own row, used when its joint block can't be factored (a rod in
+  // the block has nothing else to solve; other joints did theirs already)
+  DistanceJoint.prototype.blockSolveOwn = function (h, useBias) { if (this.inJointBlock()) this.solveOwn(h, useBias, false); };
+
+  // skipRod: a rod whose row the joint block solves leaves it alone
+  DistanceJoint.prototype.solveOwn = function (h, useBias, skipRod) {
     if (claimed(this)) return;
     // solved together with the lines it shares bodies with (pulley.js)
     var blk = P.lineBlocks && P.lineBlocks.active(this);
@@ -216,10 +278,26 @@
       imp = next - this.springImpulse; this.springImpulse = next; push(imp);
     }
 
-    if (this.isRigid()) { this.impulse = rigid(this.length, this.impulse); return; }
+    if (this.isRigid()) { if (!(skipRod && this.inJointBlock())) this.impulse = rigid(this.length, this.impulse); return; }
     if (this.minLength > 0) this.lowerImpulse = limit(this.minLength, this.lowerImpulse, 1);
     if (this.maxLength < Infinity) this.upperImpulse = limit(this.maxLength, this.upperImpulse, -1);
   };
+
+  // Joint block rows (revolute.js): slot 0 is the rod's length, along A -> B.
+  DistanceJoint.prototype.blockSlots = function () { return this.inJointBlock() ? [0] : []; };
+  DistanceJoint.prototype.blockRow = function (slot, r) {
+    var g = this.geometry(), cA = M.cross(g.rA, g.axis), cB = M.cross(g.rB, g.axis);
+    r.ja[0] = -g.axis.x; r.ja[1] = -g.axis.y; r.ja[2] = -cA;
+    r.jb[0] = g.axis.x; r.jb[1] = g.axis.y; r.jb[2] = cB;
+    r.C = g.L - this.length; r.drift = 0;
+  };
+  DistanceJoint.prototype.blockImpulse = function () { return this.impulse; };
+  DistanceJoint.prototype.blockAdd = function (slot, d) { this.impulse += d; };
+  // No late re-projection for distance joints: a rod has no rows of its
+  // own, and re-projecting after every spring or rope member (rigid, no
+  // push) let a hub of springs and rods drift apart by decimetres.
+  DistanceJoint.prototype.blockActive = function () { return false; };
+  DistanceJoint.prototype.postStep = function (dt) { if (this.blockLeader && this.block && this.block.joints) P.jointBlock.guard(this.block, dt); };
 
   // Positive = tension (pulling the ends together), negative = compression.
   DistanceJoint.prototype.tension = function () { return -this.axial() * this.invH; };
