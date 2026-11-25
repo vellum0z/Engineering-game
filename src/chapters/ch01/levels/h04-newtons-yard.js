@@ -49,7 +49,7 @@
   // pushes them apart with `force` along the line between its two ends,
   // the same push on each end in opposite directions, then it drops away.
   Y.definePart({
-    type: 'h04-kicker', name: 'Spring pack', category: 'Forces',
+    type: 'h04-kicker', name: 'Spring pack', category: 'Forces', library: false,
     blurb: 'A loaded spring pack wedged between two carts. When it fires it shoves both ends apart, then falls clear.',
     size: { w: 0.4, h: 0.3 },
     connector: true,

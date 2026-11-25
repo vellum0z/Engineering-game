@@ -393,7 +393,7 @@
   // A sling from the caravan: a rope whose plate is stamped in FPS. The plate
   // is the breaking load, so the player picks a plate, not a number.
   Y.definePart({
-    type: 'h07-sling', name: 'Caravan sling', category: 'Rigging',
+    type: 'h07-sling', name: 'Caravan sling', category: 'Rigging', library: false,
     blurb: 'A wire-rope sling from the caravan. The plate is its breaking load, stamped in FPS units.',
     size: { w: 0.1, h: 2 },
     connector: true,

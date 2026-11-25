@@ -179,7 +179,8 @@
     if (!v.pass) this.failedRuns++;
     this.lastResult = { pass: v.pass, reason: v.reason || '', time: this.state.t, state: this.state, failedRuns: this.failedRuns, runs: this.runs };
     SE.audio && SE.audio.play && SE.audio.play(v.pass ? 'good' : 'bad');
-    if (this.objective) this.setObjectiveStatus(v.pass ? 'pass' : 'fail', v.pass ? '' : firstSentence(v.reason));
+    // a job's banner follows the run; a build or watch step marks its own banner done when its check is met
+    if (this.objective && (!v.pass || this.objective.kind === 'job')) this.setObjectiveStatus(v.pass ? 'pass' : 'fail', v.pass ? '' : firstSentence(v.reason));
     this.emit('result', this.lastResult);
     this.refreshBar();
   };
@@ -240,7 +241,7 @@
     window.addEventListener('resize', this.onResize);
     setTimeout(function () { self.cam.resize(); self.fitView(); }, 0);
     this.renderObjective();
-    if (!Yard.coachSeen()) this.showCoach();
+    if (!Yard.coachSeen() && !Yard.coachShown) { Yard.coachShown = true; this.showCoach(); }
   };
 
   /* --------------------------------------------------------- objective */
@@ -608,6 +609,7 @@
   };
   Yard.prototype.donePlacing = function () {
     var pl = this.placing; this.placing = null;
+    if (this.toastEl && /info/.test(this.toastEl.className)) { clearTimeout(this._flashT); this.toastEl.className = 'yard-flash'; }
     if (pl && pl.entry && this.remaining(pl.entry, pl.binIndex) > 0 && pl.def.repeat) this.startPlacing(pl.entry, pl.binIndex);
     this.refreshBin();
   };

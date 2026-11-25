@@ -68,7 +68,7 @@
           btn('📖 Guide', function () { self.openGuide(); }, 'ghost small guide-btn', { title: 'The full explanation, what this level teaches, and the controls' })]),
         this.progress = el('div', { class: 'step-progress' })
       ]),
-      this.inspector, this.log, this.card
+      this.card, this.inspector, this.log
     ]);
     root.appendChild(el('div', { class: 'play-layout yard-layout' }, [this.yardEl, this.panel]));
     this.ctx = this.makeCtx();
