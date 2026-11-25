@@ -81,6 +81,18 @@
  * force(), torque(), reaction() and anchors; their own solve() is empty.
  * Removing a link (breakage does) takes its rows out on the next step.
  *
+ * Outside parts. Ropes, rods and springs (DistanceJoint), pins, welds and
+ * sliders (the E04 block joints) and contacts that touch a structure body
+ * are taken into the same solve each step, so a stay, a prop or a hung load
+ * is as stiff as the beam it acts on instead of a soft one-pass joint on a
+ * 0.5 kg segment. Ropes and contacts are one-sided rows (λ ≥ 0, friction
+ * |λt| ≤ μλn), solved by projected Gauss–Seidel on their Schur complement
+ * while the beam's own rows stay exact. Bodies pinned or rodded to the
+ * structure count as part of it; contacts between two such bodies, deep
+ * overlaps and impacts are taken as stiff springs instead of hard rows so
+ * nothing is pushed apart at once. world.structureCoupling = false turns
+ * this off and leaves those parts to their own solvers.
+ *
  * Saving: each structure keeps `def`, a JSON copy of its build definition
  * (ground left out), and its solver and links are flagged `internal` /
  * part-of-structure, so a scene file can store the call instead of the
@@ -96,6 +108,9 @@
   var M = SE.pmath, P = SE.phys;
   var groupSeq = 0x5e000;
   var NU = 0.3, KAPPA = 5 / 6;      // Poisson's ratio, shear coefficient
+  var DEEP_OVERLAP = 0.02;          // m: deeper contacts get the soft contact push
+  var RIGID_EPS = 1e-6;             // relative compliance of rigid rows
+  var REFACTOR_ANGLE = 0.01;        // rad a body may turn before the relax pass refactors
 
   /* ------------------------------------------------------------- sections */
   function done(s) { s.S = s.I / s.c; s.depth = s.depth || 2 * s.c; return s; }
@@ -143,9 +158,9 @@
     this.rows = [];
     for (var i = 0; i < n; i++) {
       // roller: its one row is along the normal (component 1)
-      var comp = def.type === 'roller' ? 1 : i;
-      this.rows.push({ link: self, comp: comp, A: this.bodyA, B: this.bodyB,
-        ax: 0, ay: 0, aw: 0, bx: 0, by: 0, bw: 0, C: 0, gamma: 0, beta: 0, index: 0 });
+      var row = newRow('link', this.bodyA, this.bodyB);
+      row.link = self; row.comp = def.type === 'roller' ? 1 : i;
+      this.rows.push(row);
     }
   }
   Link.prototype = Object.create(P.Joint.prototype);
@@ -160,14 +175,14 @@
     var ux = M.rotate(A.q, this.localAxisA), d = M.sub(b.p, a.p);
     var rA = this.type === 'roller' ? M.add(a.r, d) : a.r, rB = b.r;
     for (var i = 0; i < this.rows.length; i++) {
-      var row = this.rows[i];
+      var row = this.rows[i], ja = row.ja, jb = row.jb;
       if (row.comp === 2) {
-        row.ax = 0; row.ay = 0; row.aw = -1; row.bx = 0; row.by = 0; row.bw = 1;
+        ja[0] = 0; ja[1] = 0; ja[2] = -1; jb[0] = 0; jb[1] = 0; jb[2] = 1;
         row.C = B.angle - A.angle - this.referenceAngle;
       } else {
         var n = row.comp === 0 ? ux : M.perp(ux);
-        row.ax = -n.x; row.ay = -n.y; row.aw = -M.cross(rA, n);
-        row.bx = n.x; row.by = n.y; row.bw = M.cross(rB, n);
+        ja[0] = -n.x; ja[1] = -n.y; ja[2] = -M.cross(rA, n);
+        jb[0] = n.x; jb[1] = n.y; jb[2] = M.cross(rB, n);
         row.C = M.dot(n, d);
       }
     }
@@ -190,7 +205,124 @@
     return { moment: -sg * r.torque, axial: -M.dot(F, ux), shear: M.dot(F, nx) };
   };
 
+  /* ------------------------------------------------------------------ rows */
+  // A scalar constraint row: Jacobians ja / jb ([x, y, angular] for bodies
+  // A and B), position error C, and how it is solved:
+  //   mode 'spring'  implicit spring k, c (Γ, β below), both passes
+  //        'rigid'   Γ = 0, soft position correction in the biased pass
+  //        'uni'     like rigid but its total impulse stays >= 0, and an
+  //                  open gap (C > 0) may close this substep, not overshoot
+  //        'uniSpring' a spring that only pulls or pushes (λ >= 0)
+  //        'friction' |λ| <= μ λ(normal row), drives the slip speed to `target`
+  function newRow(kind, A, B) {
+    return { kind: kind, A: A, B: B, ja: [0, 0, 0], jb: [0, 0, 0], C: 0, drift: 0, mode: 'spring',
+      k: 0, c: 0, gamma: 0, beta: 0, target: 0, mu: 0, normal: null, index: 0, x: 0 };
+  }
+  function isDyn(b) { return b.type === 'dynamic' && b.awake !== false && (b.invM > 0 || b.invI > 0); }
+
+  function rowLambda(r) {
+    switch (r.kind) {
+      case 'link': return r.link.lambda[r.comp];
+      case 'block': return r.joint.blockImpulse(r.slot);
+      case 'dist': return r.joint._sLambda;
+      case 'cn': return r.cp.normalImpulse;
+      default: return r.cp.tangentImpulse;      // 'ct'
+    }
+  }
+  function rowAdd(r, d) {
+    switch (r.kind) {
+      case 'link': r.link.lambda[r.comp] += d; break;
+      case 'block': r.joint.blockAdd(r.slot, d); break;
+      case 'dist': r.joint._sLambda += d; break;
+      case 'cn':
+        r.cp.normalImpulse += d;
+        if (d > r.cp.maxNormalImpulse) r.cp.maxNormalImpulse = d;
+        if (d > 0) r.cp.totalNormalImpulse += d;
+        break;
+      default: r.cp.tangentImpulse += d;
+    }
+  }
+  function rowVel(r) {
+    var A = r.A, B = r.B, ja = r.ja, jb = r.jb;
+    return ja[0] * A.v.x + ja[1] * A.v.y + ja[2] * A.w + jb[0] * B.v.x + jb[1] * B.v.y + jb[2] * B.w;
+  }
+  function rowApply(r, d) {
+    var A = r.A, B = r.B;
+    if (isDyn(A)) { A.v = M.v(A.v.x + A.invM * r.ja[0] * d, A.v.y + A.invM * r.ja[1] * d); A.w += A.invI * r.ja[2] * d; }
+    if (isDyn(B)) { B.v = M.v(B.v.x + B.invM * r.jb[0] * d, B.v.y + B.invM * r.jb[1] * d); B.w += B.invI * r.jb[2] * d; }
+  }
+  // One entry of J M⁻¹ Jᵀ between rows p and q.
+  function entry(p, q) {
+    var s = 0;
+    for (var ip = 0; ip < 2; ip++) {
+      var b = ip ? p.B : p.A;
+      if (!isDyn(b)) continue;
+      var jp = ip ? p.jb : p.ja;
+      if (q.A === b) s += b.invM * (jp[0] * q.ja[0] + jp[1] * q.ja[1]) + b.invI * jp[2] * q.ja[2];
+      if (q.B === b) s += b.invM * (jp[0] * q.jb[0] + jp[1] * q.jb[1]) + b.invI * jp[2] * q.jb[2];
+    }
+    return s;
+  }
+
+  // Distance joints the solver can take over: rods, inextensible ropes and
+  // springs given by a stiffness (k or EA). Motors, extra limits and
+  // frequency-only springs stay with the joint.
+  function distMode(j) {
+    if (j.maxMotorForce > 0) return null;
+    if (!j.spring) {
+      if (j.isRigid()) return { mode: 'rigid', sign: 1 };
+      if (j.rope && j.minLength <= 0 && j.maxLength < Infinity) return { mode: 'uni', sign: -1 };
+      return null;
+    }
+    if (!(j.stiffness > 0) || j.minLength > 0) return null;
+    if (j.rope) return { mode: 'uniSpring', sign: -1 };
+    return j.maxLength === Infinity ? { mode: 'spring', sign: 1 } : null;
+  }
+  // Rows of a taken-over distance joint, along the line A -> B times sign
+  // (sign -1 for a rope, so its impulse is the pull and stays >= 0).
+  function distUpdate(r) {
+    var j = r.joint, g = j.geometry(), s = r.sign, u = g.axis;
+    r.ja[0] = -s * u.x; r.ja[1] = -s * u.y; r.ja[2] = -s * M.cross(g.rA, u);
+    r.jb[0] = s * u.x; r.jb[1] = s * u.y; r.jb[2] = s * M.cross(g.rB, u);
+    var target = r.mode === 'uni' ? j.maxLength : j.length;
+    r.C = s * (g.L - target);
+  }
+  // Store the solver's impulse where the joint's own readouts find it.
+  function distWrite(j, sign) {
+    var axial = sign * j._sLambda;          // impulse on B along A -> B
+    j.impulse = 0; j.springImpulse = 0; j.lowerImpulse = 0; j.upperImpulse = 0; j.motorImpulse = 0;
+    if (j.rope) j.upperImpulse = -axial;
+    else if (j.isRigid() || j.stiff) j.impulse = axial;
+    else j.springImpulse = axial;
+    j.linePeak = 0;
+  }
+  // Contact point rows, using the contact solver's anchors from the start of
+  // the step and its rebuilt separation (see contact.js).
+  function contactUpdate(r) {
+    var ct = r.ct, cp = r.cp, A = r.A, B = r.B, n = ct.normal;
+    var d = r.kind === 'cn' ? n : ct.tangent, rA = cp.rA, rB = cp.rB;
+    r.ja[0] = -d.x; r.ja[1] = -d.y; r.ja[2] = -M.cross(rA, d);
+    r.jb[0] = d.x; r.jb[1] = d.y; r.jb[2] = M.cross(rB, d);
+    if (r.kind === 'cn') {
+      var dA = M.add(M.sub(A.c, A.c0), M.rotate(M.rot(A.angle - A.angle0), rA));
+      var dB = M.add(M.sub(B.c, B.c0), M.rotate(M.rot(B.angle - B.angle0), rB));
+      r.C = M.dot(M.sub(dB, dA), n) + cp.adjustedSeparation;
+    } else {
+      r.C = 0;
+      r.mu = cp.sliding ? ct.muK : ct.muS;
+      r.target = ct.tangentSpeed || 0;
+    }
+  }
+  function updateRow(r) {
+    if (r.kind === 'link') { if (r.link.rows[0] === r) r.link.updateRows(); }
+    else if (r.kind === 'block') r.joint.blockRow(r.slot, r);
+    else if (r.kind === 'dist') distUpdate(r);
+    else contactUpdate(r);
+  }
+
   /* --------------------------------------------------- the direct solver */
+  // Marker set as joint.block on joints this solver has taken over, so
+  // their own solve skips the rows we solve (see P.jointBlock in revolute.js).
   function StructureSolver(structure, links, world) {
     var b0 = links[0].bodyB;
     P.Joint.call(this, { bodyA: b0, bodyB: b0, collideConnected: true, label: structure.label + ':solver' });
@@ -199,113 +331,362 @@
     this.structure = structure;
     this.links = links;
     this.world = world;
-    this.rows = [];
-    this.n = 0;
-    this.K = null; this.first = null; this.D = null; this.x = null;
+    this.bodySet = new Set();
+    links.forEach(function (l) { [l.bodyA, l.bodyB].forEach(function (b) { if (b.type === 'dynamic') this.bodySet.add(b); }, this); }, this);
+    this.mark = { structureSolver: this, step: -1 };
+    this.rowsS = []; this.rowsU = [];
+    this.adoptedJoints = []; this.adoptedDist = []; this.adoptedContacts = [];
+    this.lineBlockStep = -1;
   }
   StructureSolver.prototype = Object.create(P.Joint.prototype);
   StructureSolver.prototype.force = function () { return 0; };
 
-  StructureSolver.prototype.prepare = function (h) {
-    var world = this.world, inWorld = new Set(world.joints), rows = [];
-    this.invH = 1 / h;
+  // The world skips joints whose two bodies are asleep. A broken structure
+  // can be partly asleep (one piece resting, another falling), so before
+  // each step point bodyA/bodyB at a body that is still awake.
+  StructureSolver.prototype.preStep = function () {
+    var A = this.bodyA;
+    if (A.awake !== false && this.bodySet.has(A)) return;
+    var self = this;
+    this.bodySet.forEach(function (b) { if (b.awake !== false && (self.bodyA.awake === false || !self.bodySet.has(self.bodyA))) { self.bodyA = b; self.bodyB = b; } });
+  };
+
+  // Everything this structure solves, besides its own links:
+  //  - distance joints (ropes, rods, stiff springs) and contacts touching its
+  //    bodies, claimed here in prepare (contacts are prepared before joints,
+  //    and a claimed rope skips its own warm start and solve);
+  //  - rigid joints (pins, welds, sliders) touching its bodies, together with
+  //    the whole joint group they belong to, claimed in the first warm start
+  //    of the step, after every joint's prepare has set up its group.
+  StructureSolver.prototype.prepare = function (h, cfg) {
+    var world = this.world, self = this, inWorld = new Set(world.joints), bodies = this.bodySet;
+    this.invH = 1 / h; this.h = h; this.cfg = cfg;
+    this.jointSoft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h);
     this.links.forEach(function (l) {
       if (l.broken || !inWorld.has(l)) { l.broken = true; return; }
       l.invH = 1 / h;
-      l.updateRows();
-      l.rows.forEach(function (row) {
-        var k = l.k[row.comp], c = l.c[row.comp], den = h * k + c;
-        row.gamma = 1 / (h * den);
-        row.beta = k / den;
-        row.index = rows.length;
-        rows.push(row);
-      });
     });
-    this.rows = rows; this.n = rows.length;
+    var step = world.stepCount, claim = world._lineBlockClaim || (world._lineBlockClaim = new Map());
+    this.lineBlockStep = step;
+    this.adoptedDist = [];
+    if (world.structureCoupling !== false) {
+      world.joints.forEach(function (j) {
+        if (j.type !== 'distance' || j.broken) return;
+        if (!(bodies.has(j.bodyA) || bodies.has(j.bodyB))) return;
+        var owner = claim.get(j);
+        if (owner && owner !== self && owner.lineBlockStep === step) return;   // a winch or another structure has it
+        var dm = distMode(j);
+        if (!dm) return;
+        claim.set(j, self);
+        j.lineBlockStep = step;
+        if (j._sSolver !== self || j._sLambda == null) { j._sLambda = dm.sign * j.axial(); j._sSolver = self; }
+        self.adoptedDist.push({ joint: j, mode: dm.mode, sign: dm.sign });
+      });
+    }
+    // Bodies held to the structure by rigid joints (a strut pinned to a
+    // beam, say). Contacts between two of them are left to the soft contact
+    // solver: such parts are often built overlapping a little, and rigid rows
+    // on both sides of an overlap would fight with unbounded force.
+    var tied = new Set(bodies), queue = Array.from(bodies);
+    while (queue.length) {
+      var body = queue.pop();
+      for (var ji = 0; ji < world.joints.length; ji++) {
+        var jj = world.joints[ji];
+        if (jj.broken || (jj.bodyA !== body && jj.bodyB !== body)) continue;
+        if (!(jj.blockSlots || (jj.type === 'distance' && jj.isRigid && jj.isRigid()))) continue;
+        var other = jj.bodyA === body ? jj.bodyB : jj.bodyA;
+        if (other.type === 'dynamic' && !tied.has(other)) { tied.add(other); queue.push(other); }
+      }
+    }
+    this.adoptedContacts.forEach(function (ct) { if (ct.structureSolver === self) ct.structureSolver = null; });
+    this.adoptedContacts = [];
+    var moving = function (b) { return b.type !== 'static' && b.awake !== false; };
+    if (world.structureCoupling !== false) {
+      world.contacts.forEach(function (ct) {
+        if (ct.structureSolver && ct.structureStep === step) return;   // another structure has it
+        var A = ct.fa.body, B = ct.fb.body;
+        // Contacts on anything this solver moves rigidly (the structure and
+        // the parts pinned to it) are solved here too: a separate soft
+        // contact solve pushing on rigidly solved bodies rings up.
+        if (!(tied.has(A) || tied.has(B))) return;
+        if (!(moving(A) || moving(B)) || !ct.normal || !ct.points.length) return;   // not prepared this step
+        // Parts built overlapping (a strut pinned to a beam often overlaps
+        // the next segment), or a fast hit that went deep, keep the contact
+        // solver's soft push, k = m_eff·ω² as in contact.js, but solved here
+        // with everything else: rigid rows on both sides of an overlap that
+        // cannot open would need unbounded force, and a separate soft solve
+        // fighting this exact one can ring up.
+        // An impact (approach faster than the restitution threshold) is
+        // cushioned the same way: a rigid stop would hand a light segment the
+        // whole momentum of a falling crate in one substep and snap the beam
+        // everywhere at once. The next step, at rest, the contact is rigid.
+        ct._sSoft = (tied.has(A) && tied.has(B)) || ct.points.some(function (cp) {
+          return cp.separation < -DEEP_OVERLAP || cp.relativeVelocity < -cfg.restitutionThreshold;
+        });
+        ct.structureSolver = self; ct.structureStep = step;
+        self.adoptedContacts.push(ct);
+      });
+    }
+    this.built = -1;
   };
 
-  // Build K = J M⁻¹ Jᵀ + Γ from the current geometry and factor it. Done at
-  // the start of every substep: a structure that is spinning (say a beam
-  // knocked loose) turns too far within one step for a step-old matrix.
-  StructureSolver.prototype.factor = function () {
-    var rows = this.rows, n = this.n;
-    if (!n) return;
-    if (!this.K || this.K.length < n * n) {
-      this.K = new Float64Array(n * n); this.D = new Float64Array(n);
-      this.first = new Int32Array(n); this.x = new Float64Array(n);
-    } else this.K.fill(0, 0, n * n);
-    var K = this.K, first = this.first;
-    for (var i = 0; i < n; i++) first[i] = i;
-    // K = J M⁻¹ Jᵀ, accumulated body by body over the rows touching it
-    var byBody = new Map();
-    rows.forEach(function (row) {
-      [[row.A, 0], [row.B, 1]].forEach(function (e) {
-        var body = e[0];
-        if (body.invM === 0 && body.invI === 0) return;
-        var list = byBody.get(body); if (!list) byBody.set(body, list = []);
-        list.push({ i: row.index, x: e[1] ? row.bx : row.ax, y: e[1] ? row.by : row.ay, w: e[1] ? row.bw : row.aw });
+  // Rigid joints touching the structure, with their whole joint group.
+  StructureSolver.prototype.adoptJoints = function () {
+    var world = this.world, self = this, bodies = this.bodySet, mark = this.mark, step = world.stepCount;
+    mark.step = step;
+    var list = [], seen = new Set();
+    if (world.structureCoupling === false) { this.adoptedJoints = list; return; }
+    world.joints.forEach(function (j) {
+      if (!j.blockSlots || j.broken || seen.has(j)) return;
+      if (!(bodies.has(j.bodyA) || bodies.has(j.bodyB))) return;
+      if (j.block && j.block.structureSolver && j.block.structureSolver !== self && j.block.step === step) return;
+      var grp = j.block && j.block.joints ? j.block.joints : [j];
+      grp.forEach(function (m) {
+        if (seen.has(m) || m.broken) return;
+        if (m.block && m.block.structureSolver && m.block.structureSolver !== self && m.block.step === step) return;
+        seen.add(m); list.push(m);
+        m.block = mark; m.blockLeader = false;
       });
     });
-    byBody.forEach(function (list, body) {
+    this.adoptedJoints = list;
+  };
+
+  // Build the row lists: S rows (bilateral: links, rigid joint rows, rods,
+  // springs) go into the factored matrix; U rows (ropes, contact normals,
+  // friction) are solved on its Schur complement with clamping.
+  StructureSolver.prototype.buildRows = function () {
+    var S = [], U = [], self = this, h = this.h;
+    this.links.forEach(function (l) {
+      if (l.broken) return;
+      l.rows.forEach(function (r) {
+        r.mode = 'spring'; r.k = l.k[r.comp]; r.c = l.c[r.comp];
+        S.push(r);
+      });
+    });
+    this.adoptedJoints.forEach(function (j) {
+      j.blockSlots().forEach(function (slot) {
+        var r = j._sRows && j._sRows[slot];
+        if (!r) { r = newRow('block', j.bodyA, j.bodyB); r.joint = j; r.slot = slot; (j._sRows = j._sRows || {})[slot] = r; }
+        r.mode = 'rigid';
+        S.push(r);
+      });
+    });
+    this.adoptedDist.forEach(function (d) {
+      var j = d.joint, r = j._sRow || (j._sRow = newRow('dist', j.bodyA, j.bodyB));
+      r.joint = j; r.sign = d.sign; r.mode = d.mode;
+      if (d.mode === 'spring' || d.mode === 'uniSpring') {
+        r.k = j.stiffness;
+        var m = j.effMass(j.geometry());
+        r.c = j.damping != null ? j.damping : 2 * (j.dampingRatio || 0) * Math.sqrt(j.stiffness * m);
+      }
+      (d.mode === 'uni' || d.mode === 'uniSpring' ? U : S).push(r);
+    });
+    this.adoptedContacts.forEach(function (ct) {
+      var A = ct.fa.body, B = ct.fb.body;
+      var cfg = self.cfg, hz = Math.min(cfg.contactHertz, 0.25 / h);
+      if (!isDyn(A) || !isDyn(B)) hz = Math.min(2 * hz, 0.25 / h);
+      var om = 2 * Math.PI * hz;
+      ct._sRows = ct.points.map(function (cp) {
+        var rn = newRow('cn', A, B); rn.ct = ct; rn.cp = cp; rn.mode = 'uni';
+        if (ct._sSoft) { rn.mode = 'uniSpring'; rn.k = cp.normalMass * om * om; rn.c = 2 * cfg.contactDampingRatio * cp.normalMass * om; }
+        var rt = newRow('ct', A, B); rt.ct = ct; rt.cp = cp; rt.mode = 'friction'; rt.normal = rn;
+        U.push(rn, rt);
+        return rn;
+      });
+    });
+    S.concat(U).forEach(function (r) {
+      if (r.mode === 'spring' || r.mode === 'uniSpring') {
+        var den = h * r.k + r.c;
+        r.gamma = den > 0 ? 1 / (h * den) : 0; r.beta = den > 0 ? r.k / den : 0;
+      } else { r.gamma = 0; r.beta = 0; }
+    });
+    S.forEach(function (r, i) { r.index = i; });
+    U.forEach(function (r, i) { r.index = i; });
+    this.rowsS = S; this.rowsU = U;
+    this.built = this.world.stepCount;
+  };
+
+  // Build K = J M⁻¹ Jᵀ + Γ for the S rows from the current geometry and
+  // factor it (LDLᵀ inside the profile; a dependent row, e.g. two rigid
+  // ropes along one line, gets a zero pivot and is left to the others).
+  // Then the U rows' coupling Y = A⁻¹ K_SU and their Schur complement.
+  // Done at the start of every substep: a structure that is spinning (a beam
+  // knocked loose) turns too far within one step for a step-old matrix.
+  StructureSolver.prototype.factor = function () {
+    var S = this.rowsS, U = this.rowsU, n = S.length, m = U.length, i, j, k;
+    S.forEach(updateRow); U.forEach(updateRow);
+    // Rigid rows get a tiny compliance (1e-6 of their own diagonal): it keeps
+    // the matrix positive definite when rigid parts close a loop (two struts
+    // and the ground make a triangle) and costs nanometres of drift.
+    S.concat(U).forEach(function (r) { if (r.mode === 'rigid' || r.mode === 'uni' || r.mode === 'friction') r.gamma = RIGID_EPS * entry(r, r); });
+    if (!this.K || this.K.length < n * n) {
+      this.K = new Float64Array(Math.max(1, n * n)); this.D = new Float64Array(n + 1); this.Dinv = new Float64Array(n + 1);
+      this.first = new Int32Array(n + 1); this.x = new Float64Array(n + 1); this.z = new Float64Array(n + 1);
+    } else this.K.fill(0, 0, n * n);
+    var K = this.K, first = this.first;
+    for (i = 0; i < n; i++) first[i] = i;
+    var byBody = new Map();
+    S.forEach(function (row) {
+      for (var e = 0; e < 2; e++) {
+        var body = e ? row.B : row.A;
+        if (!isDyn(body)) continue;
+        var list = byBody.get(body); if (!list) byBody.set(body, list = []);
+        if (list[list.length - 1] !== row) list.push(row);
+      }
+    });
+    this.byBody = byBody;
+    // remember how the bodies were turned, see solve()
+    var turned = this.turned = [];
+    S.concat(U).forEach(function (r) {
+      if (isDyn(r.A) && turned.indexOf(r.A) < 0) turned.push(r.A);
+      if (isDyn(r.B) && turned.indexOf(r.B) < 0) turned.push(r.B);
+    });
+    this.turnAngles = turned.map(function (b) { return b.angle; });
+    byBody.forEach(function (list) {
       for (var p = 0; p < list.length; p++) {
         for (var q = 0; q <= p; q++) {
-          var u = list[p], v = list[q];
-          var val = body.invM * (u.x * v.x + u.y * v.y) + body.invI * u.w * v.w;
-          var r = Math.max(u.i, v.i), cc = Math.min(u.i, v.i);
-          K[r * n + cc] += val;
+          var r = Math.max(list[p].index, list[q].index), cc = Math.min(list[p].index, list[q].index);
+          K[r * n + cc] = entry(list[p], list[q]);
           if (cc < first[r]) first[r] = cc;
         }
       }
     });
-    for (i = 0; i < n; i++) K[i * n + i] += rows[i].gamma;
-    // LDLᵀ inside the profile (row i only has entries from first[i] on;
-    // fill-in stays inside that envelope)
-    var D = this.D;
+    var D = this.D, Dinv = this.Dinv, diag0 = new Float64Array(n);
+    for (i = 0; i < n; i++) { K[i * n + i] += S[i].gamma; diag0[i] = K[i * n + i]; }
     for (i = 0; i < n; i++) {
       var fi = first[i];
-      for (var j = fi; j <= i; j++) {
+      for (j = fi; j <= i; j++) {
         var s = K[i * n + j], k0 = Math.max(fi, first[j]);
-        for (var k = k0; k < j; k++) s -= K[i * n + k] * D[k] * K[j * n + k];
-        if (j < i) K[i * n + j] = s / D[j];
-        else D[i] = s > 1e-300 ? s : 1e-300;
+        for (k = k0; k < j; k++) s -= K[i * n + k] * D[k] * K[j * n + k];
+        if (j < i) K[i * n + j] = s * Dinv[j];
+        else if (s > 1e-9 * diag0[i] && s > 0) { D[i] = s; Dinv[i] = 1 / s; }
+        else { D[i] = 0; Dinv[i] = 0; }
+      }
+    }
+    // U rows: coupling columns and Schur complement
+    this.m = m;
+    if (!m) return;
+    if (!this.Y || this.Y.length < n * m) this.Y = new Float64Array(Math.max(1, n * m));
+    if (!this.KSU || this.KSU.length < n * m) this.KSU = new Float64Array(Math.max(1, n * m));
+    if (!this.SU || this.SU.length < m * m) this.SU = new Float64Array(m * m);
+    var Y = this.Y, KSU = this.KSU, SU = this.SU, col = new Float64Array(n);
+    KSU.fill(0, 0, n * m);
+    for (j = 0; j < m; j++) {
+      var u = U[j];
+      col.fill(0);
+      for (var e = 0; e < 2; e++) {
+        var body = e ? u.B : u.A;
+        var list = byBody.get(body);
+        if (list) list.forEach(function (row) { col[row.index] = entry(row, u); });
+      }
+      for (i = 0; i < n; i++) KSU[i * m + j] = col[i];
+      this.backSolve(col);
+      for (i = 0; i < n; i++) Y[i * m + j] = col[i];
+    }
+    for (i = 0; i < m; i++) {
+      for (j = 0; j <= i; j++) {
+        var v = entry(U[i], U[j]);
+        for (k = 0; k < n; k++) v -= KSU[k * m + i] * Y[k * m + j];
+        if (i === j) v += U[i].gamma;
+        SU[i * m + j] = v; SU[j * m + i] = v;
       }
     }
   };
 
-  function applyRow(row, imp) {
-    var A = row.A, B = row.B;
-    if (A.invM || A.invI) { A.v = M.v(A.v.x + A.invM * row.ax * imp, A.v.y + A.invM * row.ay * imp); A.w += A.invI * row.aw * imp; }
-    if (B.invM || B.invI) { B.v = M.v(B.v.x + B.invM * row.bx * imp, B.v.y + B.invM * row.by * imp); B.w += B.invI * row.bw * imp; }
-  }
+  // x := A⁻¹ x with the factor above (L y = b, D z = y, Lᵀ x = z).
+  StructureSolver.prototype.backSolve = function (x) {
+    var n = this.rowsS.length, K = this.K, Dinv = this.Dinv, first = this.first, i, k;
+    for (i = 0; i < n; i++) { var s = x[i]; for (k = first[i]; k < i; k++) s -= K[i * n + k] * x[k]; x[i] = s; }
+    for (i = 0; i < n; i++) x[i] *= Dinv[i];
+    for (i = n - 1; i >= 0; i--) { var xi = x[i]; for (k = first[i]; k < i; k++) x[k] -= K[i * n + k] * xi; }
+  };
 
   StructureSolver.prototype.warmStart = function () {
-    var rows = this.rows;
-    for (var i = 0; i < rows.length; i++) if (rows[i].link.rows[0] === rows[i]) rows[i].link.updateRows();
+    if (this.mark.step !== this.world.stepCount) this.adoptJoints();
+    if (this.built !== this.world.stepCount) this.buildRows();
     this.factor();
-    for (i = 0; i < rows.length; i++) applyRow(rows[i], rows[i].link.lambda[rows[i].comp]);
-  };
-
-  StructureSolver.prototype.solve = function () {
-    var rows = this.rows, n = this.n, K = this.K, D = this.D, first = this.first, x = this.x;
-    if (!n) return;
-    var i, k;
-    for (i = 0; i < n; i++) {
-      var row = rows[i];
-      if (row.link.rows[0] === row) row.link.updateRows();
-      var A = row.A, B = row.B;
-      var Cdot = row.ax * A.v.x + row.ay * A.v.y + row.aw * A.w + row.bx * B.v.x + row.by * B.v.y + row.bw * B.w;
-      x[i] = -(Cdot + row.beta * row.C) - row.gamma * row.link.lambda[row.comp];
-    }
-    // L y = b, D z = y, Lᵀ x = z
-    for (i = 0; i < n; i++) { var s = x[i]; for (k = first[i]; k < i; k++) s -= K[i * n + k] * x[k]; x[i] = s; }
-    for (i = 0; i < n; i++) x[i] /= D[i];
-    for (i = n - 1; i >= 0; i--) { var xi = x[i]; for (k = first[i]; k < i; k++) x[k] -= K[i * n + k] * xi; }
-    for (i = 0; i < n; i++) {
-      rows[i].link.lambda[rows[i].comp] += x[i];
-      applyRow(rows[i], x[i]);
+    // Links, taken-over ropes and contacts are warm-started here. Taken-over
+    // rigid joints warm-start themselves (their warmStart always runs).
+    var all = this.rowsS.concat(this.rowsU);
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i];
+      if (r.kind === 'block') continue;
+      rowApply(r, rowLambda(r));
     }
   };
 
+  // Right-hand side of one row: Δλ solves (K + Γ) Δλ = rhs.
+  function rowRhs(r, h, useBias, br, maxPush) {
+    var v = rowVel(r);
+    switch (r.mode) {
+      case 'spring': case 'uniSpring':
+        if (r.kind === 'cn' && r.C > 0) return -(v + r.C / h) - r.gamma * rowLambda(r);   // speculative gap
+        return -(v + r.beta * r.C) - r.gamma * rowLambda(r);
+      case 'rigid':
+        // position correction capped like contact push-out, so a joint torn
+        // open by a violent hit closes gently instead of adding energy
+        return -(v + (useBias ? M.clamp(br * r.C, -maxPush, maxPush) : 0) + r.drift / h) - r.gamma * rowLambda(r);
+      case 'uni':
+        if (r.C > 0) return -(v + r.C / h) - r.gamma * rowLambda(r);   // open: may close, not overshoot
+        return -(v + (useBias ? Math.max(br * r.C, -maxPush) : 0)) - r.gamma * rowLambda(r);
+      default:                                                   // friction
+        return -(v - r.target) - r.gamma * rowLambda(r);
+    }
+  }
+
+  StructureSolver.prototype.solve = function (h, useBias, cfg) {
+    var S = this.rowsS, U = this.rowsU, n = S.length, m = this.m || 0;
+    if (!n && !m) return;
+    cfg = cfg || this.cfg;
+    // The relax pass comes after positions moved. A part spinning fast (a
+    // piece knocked off a breaking beam) turns enough in one substep that the
+    // factor from before the move no longer converges: build it again.
+    if (!useBias && this.turned) {
+      for (var t = 0; t < this.turned.length; t++) {
+        if (Math.abs(this.turned[t].angle - this.turnAngles[t]) > REFACTOR_ANGLE) { this.factor(); m = this.m || 0; break; }
+      }
+    }
+    var br = this.jointSoft.biasRate, maxPush = cfg.maxPushVelocity || 3, i, j, k;
+    for (i = 0; i < n; i++) updateRow(S[i]);
+    for (i = 0; i < m; i++) updateRow(U[i]);
+    var z = this.z;
+    for (i = 0; i < n; i++) z[i] = rowRhs(S[i], h, useBias, br, maxPush);
+    this.backSolve(z);                                           // z = A⁻¹ r_S
+    if (m) {
+      var Y = this.Y, KSU = this.KSU, SU = this.SU;
+      var rU = this.rU && this.rU.length >= m ? this.rU : (this.rU = new Float64Array(m));
+      var xU = this.xU && this.xU.length >= m ? this.xU : (this.xU = new Float64Array(m));
+      var lam0 = this.lam0 && this.lam0.length >= m ? this.lam0 : (this.lam0 = new Float64Array(m));
+      for (j = 0; j < m; j++) {
+        var s = rowRhs(U[j], h, useBias, br, maxPush);
+        for (k = 0; k < n; k++) s -= KSU[k * m + j] * z[k];
+        rU[j] = s; xU[j] = 0; lam0[j] = rowLambda(U[j]);
+      }
+      // projected Gauss-Seidel on the (small, dense) Schur complement
+      for (var it = 0; it < 40; it++) {
+        var change = 0;
+        for (j = 0; j < m; j++) {
+          var d = SU[j * m + j];
+          if (!(d > 0)) continue;
+          var res = rU[j];
+          for (k = 0; k < m; k++) res -= SU[j * m + k] * xU[k];
+          var nx = xU[j] + res / d, tot = lam0[j] + nx, u = U[j];
+          if (u.mode === 'uni' || u.mode === 'uniSpring') { if (tot < 0) nx = -lam0[j]; }
+          else if (u.mode === 'friction') {
+            var ni = u.normal.index, lim = u.mu * Math.max(0, lam0[ni] + xU[ni]);
+            if (tot > lim) nx = lim - lam0[j]; else if (tot < -lim) nx = -lim - lam0[j];
+          }
+          change = Math.max(change, Math.abs(nx - xU[j]));
+          xU[j] = nx;
+        }
+        if (change < 1e-12) break;
+      }
+      for (i = 0; i < n; i++) { var c = 0; for (j = 0; j < m; j++) c += Y[i * m + j] * xU[j]; z[i] -= c; }
+      for (j = 0; j < m; j++) { rowAdd(U[j], xU[j]); rowApply(U[j], xU[j]); }
+    }
+    for (i = 0; i < n; i++) { rowAdd(S[i], z[i]); rowApply(S[i], z[i]); }
+    this.adoptedDist.forEach(function (d) { distWrite(d.joint, d.sign); });
+  };
   /* ------------------------------------------------------- roller support */
   // Stand-alone point-on-line joint for ordinary parts: the anchor on B stays
   // on the line through A's anchor with normal `normal` (fixed to A).
