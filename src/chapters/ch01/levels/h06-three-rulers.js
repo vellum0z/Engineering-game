@@ -45,7 +45,8 @@
 
   /* --------------------------------------------------------- the rail */
   // A 40 kg sack on a greased cart: the ledger's "1 sack".
-  var RAIL_CAM = { fit: { lo: { x: -32, y: -1 }, hi: { x: -12, y: 4 } } };
+  var RAIL_CAM = { fit: { lo: { x: -32, y: -0.5 }, hi: { x: -18, y: 3 } } };
+  var RAIL_NEAR = { fit: { lo: { x: -33, y: -0.5 }, hi: { x: -26, y: 2.5 } } };
   function rail(extra) {
     return { parts: [
       { id: 'cart', type: 'cart', x: -30, y: 0.25, dials: { mass: SACK + ' kg' }, locked: true, label: '1 sack (40 kg)' },
@@ -64,7 +65,7 @@
 
   /* -------------------------------------------------- the scale bench */
   // A gantry hook with room for a scale and a calibration weight below it.
-  var BENCH_CAM = { fit: { lo: { x: -4, y: -0.5 }, hi: { x: 4, y: 5 } } };
+  var BENCH_CAM = { fit: { lo: { x: -1.8, y: 1.2 }, hi: { x: 1.8, y: 5 } } };
   var BENCH = { parts: [
     { id: 'gantry', type: 'block', x: 0, y: 4.6, dials: { width: '3 m', height: '0.3 m' }, locked: true, label: 'gantry' },
     { id: 'hook', type: 'hook', x: 0, y: 4.3, locked: true, label: 'hook' }
@@ -72,11 +73,18 @@
 
   // Teo's test rig: the harness scale reads in newtons, the sandbag's mass is yours.
   var TEO_RIG = { parts: [
-    { id: 'gantry', type: 'block', x: 0, y: 4.6, dials: { width: '3 m', height: '0.3 m' }, locked: true, label: 'wall gantry' },
-    { id: 'hook', type: 'hook', x: 0, y: 4.3, locked: true, label: 'hook' },
-    { id: 'bag', type: 'crate', x: 0, y: 1.7, dials: { mass: '10 kg' }, locked: true, open: ['mass'], label: 'test sandbag' },
+    { id: 'gantry', type: 'block', x: 0, y: 6.6, dials: { width: '3 m', height: '0.3 m' }, locked: true, label: 'wall gantry' },
+    { id: 'hook', type: 'hook', x: 0, y: 6.3, locked: true, label: 'hook' },
+    { id: 'bag', type: 'crate', x: 0, y: 4.2, dials: { mass: '10 kg' }, locked: true, open: ['mass'], label: 'test sandbag' },
     { id: 'scale', type: 'springscale', a: { part: 'hook', anchor: 'eye' }, b: { part: 'bag', anchor: 'top' }, dials: { k: '5 kN/m', face: 'N' }, locked: true, label: 'harness scale' }
   ] };
+
+  // Extra loads the player may hang under the sandbag, any way they like.
+  var TEO_BIN = [
+    { type: 'crate', count: 2, dials: { mass: '20 kg' }, label: 'crate' },
+    { type: 'weight', count: 4, dials: { nominal: '20 kg' } },
+    { type: 'cable', count: 4, dials: { rating: '5 kN' } }
+  ];
 
   function scaleOf(ctx) {
     return ctx.all('springscale').filter(function (p) { return p.a && p.a.part === 'hook' && p.b && p.b.part; })[0] || null;
@@ -116,6 +124,8 @@
     subtitle: 'Base units, derived units, SI and FPS',
     sections: ['1.3'],
     minutes: 25,
+    objective: 'Find out why only three units can be free',
+    pitch: 'The quartermaster\'s homemade units break $F = ma$. Push a sack cart to see why, derive a unit by experiment, then calibrate a spring scale with SI and FPS weights.',
     intro: [
       'The quartermaster\'s ledger is a mess. Somebody measured rope in **paces**, cook times in **breaths**, grain in **sacks** and pulling power in **heaves**: one heave being whatever Big Ros can pull on a rope.',
       'Hask taps the page. "Four quantities, four rulers, all made up. Sounds fair. It isn\'t. Newton\'s second law ties those four together, and it won\'t let you pick all of them. We\'ll find out why on the rail, then fix the settlement\'s spring scale before somebody hangs a person off it."'
@@ -132,6 +142,22 @@
       'H6.teo': [
         { set: { bag: { mass: '77.9 kg' } } },
         { set: { bag: { mass: '5.34 slug' } } },
+        // a different approach: keep a light sandbag and hang a crate under it
+        { set: { bag: { mass: '40 kg' } }, add: [
+          { id: 'c2', type: 'crate', x: 0, y: 2.4, dials: { mass: '37.9 kg' } },
+          { type: 'cable', a: { part: 'bag', anchor: 'bottom' }, b: { part: 'c2', anchor: 'top' }, dials: { rating: '5 kN' } }
+        ] },
+        // or two 20 kg calibration weights in a chain under a 38 kg sandbag
+        { set: { bag: { mass: '38 kg' } }, add: [
+          { id: 'w1', type: 'weight', x: 0, y: 3.0, dials: { nominal: '20 kg' } },
+          { id: 'w2', type: 'weight', x: 0, y: 2.0, dials: { nominal: '20 kg' } },
+          { type: 'cable', a: { part: 'bag', anchor: 'bottom' }, b: { part: 'w1', anchor: 'top' }, dials: { rating: '5 kN' } },
+          { type: 'cable', a: { part: 'w1' }, b: { part: 'w2', anchor: 'top' }, dials: { rating: '5 kN' } }
+        ] },
+        { pass: false, set: { bag: { mass: '40 kg' } }, add: [
+          { id: 'c2', type: 'crate', x: 0, y: 2.4, dials: { mass: '172 kg' } },
+          { type: 'cable', a: { part: 'bag', anchor: 'bottom' }, b: { part: 'c2', anchor: 'top' }, dials: { rating: '5 kN' } }
+        ] },
         { pass: false, set: { bag: { mass: '172 kg' } } },
         { pass: false, set: { bag: { mass: '5.34 kg' } } },
         { pass: false, set: { bag: { mass: '17.5 kg' } } }
@@ -141,11 +167,14 @@
     steps: [
       {
         type: 'say', who: 'hask',
+        brief: 'The ledger picks all four units by hand: 1 **pace** = 0.8 m, 1 **breath** = 3 s, 1 **sack** = 40 kg, 1 **heave** = 250 N. Does 1 heave on 1 sack give 1 pace/breath²?',
         text: 'Here\'s the ledger\'s system:\n\n- **1 pace** = 0.8 m of rope\n- **1 breath** = 3 s\n- **1 sack** = 40 kg of grain\n- **1 heave** = Ros\'s pull, about 250 N\n\nEach one was picked on its own, by whoever was holding the pencil. Out on the rail there\'s one sack on a greased cart, with a speed gauge clipped to it. A tidy ledger would hope that **1 heave on 1 sack** gives **1 pace per breath²**, because one times one is one. Let\'s see.'
       },
       {
         type: 'build', who: 'hask',
         yard: { bin: [{ type: 'push', count: 1, dials: { force: HEAVE + ' N', time: '1 s' }, label: 'Ros (1 heave)' }] },
+        objective: 'Clip Ros onto the sack cart',
+        brief: 'Take **Ros** from the bin and click the cart. She pulls one heave (250 N) for 1 s.',
         text: 'Take **Ros** from the bin and clip her onto the cart. She pulls **one heave (250 N)** for **1 s**, then lets go.',
         goalText: 'Ros clipped to the sack cart',
         until: function (ctx) { return pushOn(ctx, 'cart').length > 0 || (ctx.find('push') ? 'Clip her onto the **cart**.' : false); }
@@ -153,6 +182,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(2) },
+        objective: 'Run the heave test and read the speed',
+        brief: 'Press **▶ Run**. The speed when Ros lets go tells you the acceleration.',
         text: 'Press **▶ Run** and watch the speed gauge. After Ros lets go the cart coasts, so its speed then is what one second of heaving gave it.',
         goalText: 'Run the heave test',
         until: function (ctx, type) {
@@ -175,11 +206,14 @@
           return ['1\\u{ heave} = k\\,(1\\u{ sack})(' + sig(aL, 3) + '\\u{ pace/breath^2})',
             'k = \\frac{1}{' + sig(aL, 3) + '} = ' + sig(1 / aL, 3) + '\\u{ heave·breath^2/(sack·pace)}'];
         },
+        brief: 'One heave gives a sack about 70 pace/breath², so the ledger has to carry a stray constant k in every force sum.',
         text: 'Experiments only tell us that force is **proportional** to mass times acceleration. The size of the constant depends on the units. Pick all four units on your own and every force sum in the ledger has to carry this ugly **k**. The cure is to stop choosing one of them.'
       },
       {
         type: 'watch', who: 'hask',
-        yard: { design: RAIL_HEAVE, camera: RAIL_CAM, goal: G.after(BREATH + 1) },
+        yard: { design: RAIL_HEAVE, camera: RAIL_NEAR, goal: G.after(BREATH + 1) },
+        objective: 'Sack leaves the 3 s push at 0.267 m/s',
+        brief: 'Define a new heave: the push that gives 1 sack 1 pace/breath². Set the push **force** so the sack ends its one-breath push at 1 pace per breath (0.267 m/s).',
         text: 'Let\'s **derive** the heave instead. Keep the pace, the breath and the sack exactly as they are, and define the new heave as the push that gives **1 sack** an acceleration of **1 pace per breath²**.\n\nThe new-heave push on the cart acts for **one breath (3 s)**. If it is exactly one new heave, the sack ends that breath moving at **1 pace per breath**, which is 0.8 m every 3 s, **0.267 m/s**. Select the push, set its **force**, and run it until the gauge agrees.',
         goalText: 'The sack leaves the push at 1 pace per breath (0.267 m/s)',
         until: function (ctx, type) {
@@ -195,12 +229,15 @@
         type: 'rule', kicker: 'Definition', title: 'Base units and a derived unit',
         law: '1\\u{ heave} \\equiv (1\\u{ sack})(1\\u{ pace/breath^2})',
         eq: function (ctx) { return '\\frac{(40\\u{ kg})(0.8\\u{ m})}{(3\\u{ s})^{2}} = ' + sig(HEAVE_DERIVED, 3) + '\\u{ N}'; },
+        brief: 'Only three units can be chosen freely (base units); $F = ma$ derives the fourth. SI keeps m, s and kg, and derives the newton.',
         text: 'Length, time, mass and force are tied together by $F = ma$, so only **three** of their units can be chosen freely. Those three are **base units**. The fourth is **derived** from the equation, the way you just derived the heave.\n\nThe **International System (SI)** makes the same choice you did. It keeps the **meter** (m), the **second** (s) and the **kilogram** (kg) as base units, and derives force: one **newton** (N) is the push that gives 1 kg an acceleration of 1 m/s².\n\n$$1\\u{ N} = (1\\u{ kg})(1\\u{ m/s^2}) \\quad\\Rightarrow\\quad \\u{N} = \\u{kg·m/s^2}$$',
         formula: 'ch01.base-units'
       },
       {
         type: 'watch', who: 'hask',
-        yard: { design: RAIL_SLUG, camera: RAIL_CAM, goal: G.after(2) },
+        yard: { design: RAIL_SLUG, camera: RAIL_NEAR, goal: G.after(2) },
+        objective: 'Cart leaves the 1 lb push at 1 ft/s',
+        brief: 'FPS keeps the pound as a force, so mass is derived. Set the cart **mass** so a 1 lb push for 1 s leaves it at 1 ft/s.',
         text: 'The old trading posts did it the other way round. Their **U.S. Customary (FPS)** system keeps the **foot**, the **second** and the **pound**, and the pound is a **force**. So mass has to be the derived one.\n\nThe push on this cart is fixed at **1 lb for 1 s**. Find the cart **mass** that leaves it moving at exactly **1 ft/s** (an acceleration of 1 ft/s²). Tip: you can type **ft/s** into the speed gauge\'s unit box.',
         goalText: 'The cart leaves the push at 1 ft/s',
         until: function (ctx, type) {
@@ -218,18 +255,17 @@
       {
         type: 'reveal', kicker: 'Definition', title: 'U.S. Customary (FPS) units',
         eq: '1\\u{ slug} = \\frac{1\\u{ lb}}{1\\u{ ft/s^2}} \\quad \\Rightarrow \\quad \\u{slug} = \\u{lb·s^2/ft}',
+        brief: 'That mass is the **slug** (14.59 kg): what 1 lb accelerates at 1 ft/s². In FPS, force is base and mass is derived.',
         text: 'In **FPS** the **foot** (ft), the **second** (s) and the **pound** (lb) are the base units. **Force** is base and **mass** is derived. It\'s the ledger puzzle again, solved from the other end.\n\nIf you typed **lb** into the mass dial, it refused: in FPS the pound is a force, and a mass dial won\'t take a force.',
         table: { head: ['System', 'Length', 'Time', 'Mass', 'Force'], rows: [['SI', 'meter (m)', 'second (s)', 'kilogram (kg)', 'newton (N)* = kg·m/s²'], ['U.S. Customary (FPS)', 'foot (ft)', 'second (s)', 'slug* = lb·s²/ft', 'pound (lb)']] },
         formula: 'ch01.table-units'
       },
       {
-        type: 'say', who: 'hask',
-        text: 'Now the spring scale. The settlement\'s best one came out of a wrecked delivery van with its dial scraped blank. Before Juno trusts it with anything that breathes, we check it against honest **calibration weights**: steel blocks whose mass is stamped on the side, some in kilograms and some in pounds.'
-      },
-      {
         type: 'build', who: 'hask',
         yard: { design: BENCH, camera: BENCH_CAM, bin: BENCH_BIN, ghosts: [{ type: 'weight', x: 0, y: 2.2, text: 'weight' }] },
-        text: 'Put the **1 kg weight** in the outline under the hook. Then take the **spring scale** and click the **hook**, then the **top of the weight**, so the weight hangs from the scale.',
+        objective: 'Hang the 1 kg weight from the spring scale',
+        brief: 'Check the salvaged scale against honest weights. Put the **1 kg weight** in the outline, then run the **spring scale** from the hook to the top of the weight.',
+        text: 'The settlement\'s best spring scale came out of a wrecked van with its dial scraped blank, so we check it against calibration weights.\n\nPut the **1 kg weight** in the outline under the hook. Then take the **spring scale** and click the **hook**, then the **top of the weight**, so the weight hangs from the scale.',
         goalText: 'A weight hanging from the hook by the spring scale',
         until: function (ctx) {
           if (hungWeight(ctx)) return true;
@@ -240,6 +276,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(3), bin: BENCH_BIN, camera: BENCH_CAM },
+        objective: 'Weigh two different kilogram weights',
+        brief: 'Run it and read the scale. Then **Reset**, change the weight\'s stamp to another kg value and run again.',
         text: 'Run it and read the scale. Then **Reset**, select the weight, change its stamp to **5 kg** (or 2, 10 or 20 kg) and run it again. A spring stretches in proportion to the **force** on it, so let\'s see what force a kilogram makes.',
         goalText: 'Two different kilogram weights read on the scale',
         until: function (ctx, type) {
@@ -262,12 +300,15 @@
           var si = log(ctx).si;
           return Object.keys(si).map(function (k) { var m = nominalKg(k); return 'W = (' + f3(m) + '\\u{ kg})(9.81\\u{ m/s^2}) = ' + f3(m * G_SI) + '\\u{ N} \\quad \\t{(scale: ' + f3(si[k].N) + ' N)}'; });
         },
+        brief: 'Every kilogram pulls on the scale with 9.81 N. Weight is a force: $W = mg$.',
         text: 'Weight is the force of gravity on a body, so in SI it is in **newtons**, and $F = ma$ with the acceleration due to gravity gives it. The measured value at the standard location (sea level, 45° latitude) is g = 9.806 65 m/s²; 9.81 is plenty for three significant figures. Roughly, a kilogram weighs ten newtons. An apple weighs about one.',
         formula: 'ch01.weight-si'
       },
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(3), bin: BENCH_BIN, camera: BENCH_CAM },
+        objective: 'Weigh 10 lb and 1 slug on a pound face',
+        brief: 'Switch the scale\'s **face** to **lb**, then hang the **10 lb** weight and the **1 slug** block in turn.',
         text: 'Now the trading-post weights. **Reset**, select the scale and switch its **face** to **lb**. Hang the **10 lb** weight and run it. Then try the **1 slug** block.',
         goalText: 'The 10 lb and the 1 slug weights read on a pound face',
         until: function (ctx, type) {
@@ -293,13 +334,16 @@
           var f = log(ctx).fps, W = f['1 slug'] ? f['1 slug'].N / LBF : G_FPS;
           return 'm = \\frac{' + f3(W) + '\\u{ lb}}{32.2\\u{ ft/s^2}} = ' + f3(W / G_FPS) + '\\u{ slug}';
         },
+        brief: 'A slug weighs 32.2 lb. From a weight in pounds, $m = W/g$ with g = 32.2 ft/s² gives slugs.',
         text: 'In FPS you usually know a body\'s **weight** in pounds, because that is what a scale reads. Its mass follows from the same law, solved the other way. Whatever weighs 32.2 lb at the standard location has a mass of exactly one slug.\n\nThe scale never measured mass at all. A spring scale reads **force**, so its face should be marked in newtons or pounds.',
         formula: 'ch01.weight-fps'
       },
       {
         type: 'job', id: 'H6.teo', who: 'juno',
-        yard: { design: TEO_RIG, camera: BENCH_CAM, bin: [] },
-        text: 'Juno, over the radio: "A survivor called Teo just walked in from the east road. The trading post\'s platform scale says he weighs **172 lb**. We winch him over the wall in a harness, and the crew tests every harness first with a **sandbag of the same mass**. The harness log is in SI."\n\nSet the sandbag\'s **mass** so the harness scale feels exactly what Teo will put on it. The scale\'s face reads newtons.',
+        yard: { design: TEO_RIG, camera: { fit: { lo: { x: -3, y: -0.2 }, hi: { x: 3, y: 7.6 } } }, bin: TEO_BIN },
+        objective: 'Load the harness scale with Teo\'s 172 lb',
+        brief: 'Teo weighs **172 lb**. Make the harness scale (face in N) feel exactly his weight: set the sandbag\'s mass, or hang extra loads under it. Then **▶ Run**.',
+        text: 'Juno, over the radio: "A survivor called Teo just walked in from the east road. The trading post\'s platform scale says he weighs **172 lb**. We winch him over the wall in a harness, and the crew tests every harness first with a **sandbag of the same mass**. The harness log is in SI."\n\nMake the harness scale feel exactly what Teo will put on it. The scale\'s face reads newtons. Any load that does it counts: change the sandbag\'s **mass**, or hang crates and calibration weights under it with cables.',
         goalText: 'The harness scale holds steady at Teo\'s weight (within 1 %)',
         goal: G.all(
           G.noBreaks(),
@@ -311,18 +355,17 @@
           var r = ctx.result && ctx.result.state ? ctx.result.state.read('scale.force') : NaN;
           if (!isFinite(r)) return '';
           var msg = 'The scale settled at **' + D.format(r, 'N', 3, 'force') + '** (' + D.format(r, 'lb', 3, 'force') + '). Teo\'s 172 lb would read ' + D.format(TEO_N, 'N', 3, 'force') + '.';
-          if (near(r, TEO_LB * G_SI, 0.02)) msg += ' That sandbag is **172 kg**: the pounds went straight onto a mass dial.';
-          else if (near(r, TEO_LB / G_FPS * G_SI, 0.02)) msg += ' That sandbag is **5.34 kg**: slugs were typed as kilograms.';
+          if (near(r, TEO_LB * G_SI, 0.02)) msg += ' That load is **172 kg**: the pounds went straight onto a mass dial.';
+          else if (near(r, TEO_LB / G_FPS * G_SI, 0.02)) msg += ' That load is **5.34 kg**: slugs were typed as kilograms.';
           return msg;
         },
         hints: [
-          'The platform scale read a **force**. You need a **mass**. Eq. 1–5 turns FPS weight into FPS mass.',
+          'The platform scale read a **force**. The sandbag needs a **mass**. Eq. 1–5 turns FPS weight into FPS mass.',
           '$m = W/g = 172 / 32.2$ slug. Then 1 slug = 14.59 kg, or type the slugs straight in.',
           '172 / 32.2 = 5.34 slug, and 5.34 × 14.59 = **77.9 kg**.'
         ],
-        grade: { part: 'bag', key: 'mass', spec: { value: TEO_KG, unit: 'kg', sf: 3, form: 'si' } },
         margin: function (s) { return Math.round(Math.min(10, Math.abs(s.read('scale.force') - TEO_N) / TEO_N * 1000)); },
-        success: function (ctx) { return 'The sandbag hangs at **' + D.format(TEO_N, 'N', 3, 'force') + '**, Teo\'s weight. His mass is 172 / 32.2 = **5.34 slug** = **77.9 kg**, and 77.9 × 9.81 = 765 N checks it. The crew clips the real harness on.'; }
+        success: function (ctx) { return 'The harness scale holds at **' + D.format(TEO_N, 'N', 3, 'force') + '**, Teo\'s weight. His mass is 172 / 32.2 = **5.34 slug** = **77.9 kg**, and 77.9 × 9.81 = 765 N checks it. The crew clips the real harness on.'; }
       },
       {
         type: 'deeper', title: 'Pound-force, pound-mass, and the k that came back',
@@ -335,6 +378,8 @@
       },
       {
         type: 'free', who: 'hask',
+        objective: 'Free play: weigh anything, in any unit',
+        brief: 'The calibration bench is yours. Chain scales, swap faces between N, kN, lb and kgf, or shove a weight mid-swing.',
         yard: { design: BENCH, camera: { fit: { lo: { x: -6, y: -0.5 }, hi: { x: 6, y: 5 } } }, poke: true, goal: null,
           bin: [{ type: 'weight', count: 4 }, { type: 'springscale', count: 3 }, { type: 'hook', count: 3 }, { type: 'crate', count: 2 }, { type: 'cart', count: 1 }, { type: 'push', count: 2 }, { type: 'speedo', count: 1 }] },
         text: 'The calibration bench is yours. Hang weights in a chain of scales, flip faces between **N**, **kN**, **lb** and **kgf**, or shove a weight mid-swing.',
@@ -357,61 +402,4 @@
     ]
   });
 
-  /* ------------------------------------------------------------------
-   * Stand-ins for the measuring parts this level uses (springscale and
-   * weight), following the Act I parts contract. They only register when
-   * src/yard/parts/measure.js has not already defined them, so the real
-   * parts replace them as soon as they land.
-   * ------------------------------------------------------------------ */
-  var FACES = { N: 'N', kN: 'kN', lb: 'lb', kgf: null };
-  function faceText(N, face) {
-    if (face === 'kgf') return D.fmtNum(N / G_SI, 3) + ' kgf';
-    return D.format(N, FACES[face] || 'N', 3, 'force');
-  }
-
-  if (!Y.PARTS.springscale) Y.definePart({
-    type: 'springscale', name: 'Spring scale', category: 'Measure',
-    blurb: 'A hook scale: a spring that stretches in proportion to the force on it. Hang it from above, hang the load below.',
-    size: { w: 0.3, h: 1 },
-    connector: true,
-    dials: [
-      { key: 'k', label: 'Spring stiffness', q: 'stiffness', def: '5 kN/m', min: 1 },
-      { key: 'face', label: 'Face', choice: ['N', 'kN', 'lb', 'kgf'], def: 'N' }
-    ],
-    build: function (b) {
-      var A = b.end('a'), B = b.end('b'), k = b.si('k');
-      var L = Math.hypot(B.world.x - A.world.x, B.world.y - A.world.y);
-      var m = Math.max(B.body.m || 0, A.body.m || 0) || 1;
-      var j = b.joint(new b.P.DistanceJoint({ bodyA: A.body, bodyB: B.body, localAnchorA: A.local, localAnchorB: B.local,
-        length: L, minLength: 0, stiffness: k, damping: 2 * 0.9 * Math.sqrt(k * m), label: b.inst.label || 'spring scale' }));
-      return { joint: j, face: b.text('face') };
-    },
-    readouts: function (built) { return [{ key: 'force', label: 'scale', q: 'force', read: function () { return built.joint.broken ? 0 : Math.max(0, built.joint.tension()); } }]; },
-    plate: function (inst) { return ['Face ' + inst.dials.face, 'k ' + inst.dials.k]; },
-    draw: function (ctx, cam, built) {
-      var j = built.joint, a = j.bodyA.worldPoint(j.localAnchorA), c = j.bodyB.worldPoint(j.localAnchorB);
-      var mid = cam.worldToScreen({ x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 });
-      var N = j.broken ? 0 : Math.max(0, j.tension());
-      ctx.save();
-      ctx.fillStyle = 'rgba(20,22,24,.88)'; ctx.strokeStyle = '#e6b422'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(mid.x, mid.y, 24, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#f3e7c4'; ctx.font = 'bold 11px "IBM Plex Mono", monospace'; ctx.textAlign = 'center';
-      ctx.fillText(faceText(N, built.face), mid.x, mid.y + 4);
-      ctx.restore();
-    }
-  });
-
-  var NOMINALS = ['1 kg', '2 kg', '5 kg', '10 kg', '20 kg', '1 lb', '5 lb', '10 lb', '25 lb', '1 slug'];
-  if (!Y.PARTS.weight) Y.definePart({
-    type: 'weight', name: 'Calibration weight', category: 'Measure',
-    blurb: 'A steel block of honest mass. A pound weight weighs its stamp at standard gravity; a slug is 14.59 kg.',
-    size: { w: 0.5, h: 0.5 },
-    dials: [{ key: 'nominal', label: 'Stamp', choice: NOMINALS, def: '1 kg' }],
-    anchors: { top: { x: 0, y: 0.25 } },
-    build: function (b) {
-      return { body: b.body({ position: b.at({ x: 0, y: 0 }), label: b.inst.label || b.text('nominal'),
-        shapes: [{ shape: b.P.box(0.25, 0.25), material: 'steel' }], mass: nominalKg(b.text('nominal')) }) };
-    },
-    plate: function (inst) { return [inst.dials.nominal]; }
-  });
 })(globalThis.SE);
