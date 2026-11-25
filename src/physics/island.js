@@ -497,7 +497,8 @@
       for (q = 0; q < ln.rows.length; q++) {
         row = ln.rows[q];
         var kk = ln.k[row.comp] > 0 ? ln.k[row.comp] : 100 * kmax;      // a rigid row
-        jv[0] = row.ax; jv[1] = row.ay; jv[2] = row.aw; jv[3] = row.bx; jv[4] = row.by; jv[5] = row.bw;
+        if (row.ja) { jv[0] = row.ja[0]; jv[1] = row.ja[1]; jv[2] = row.ja[2]; jv[3] = row.jb[0]; jv[4] = row.jb[1]; jv[5] = row.jb[2]; }
+        else { jv[0] = row.ax; jv[1] = row.ay; jv[2] = row.aw; jv[3] = row.bx; jv[4] = row.by; jv[5] = row.bw; }
         for (i = 0; i < 6; i++) {
           var ri = at[i < 3 ? 0 : 1]; if (ri < 0) continue; ri += i % 3;
           for (k = 0; k < 6; k++) {
