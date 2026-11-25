@@ -388,11 +388,12 @@ suite('physics e06: ropes, props and pins on a beam', () => {
     ok(M.dist(j2.anchorA(), j2.anchorB()) < 1e-3 && M.dist(j1.anchorA(), j1.anchorB()) < 1e-3, 'a pin opened');
     ok(c.list.length === 0, 'something broke');
   });
-  test('world.structureCoupling = false falls back to solving ropes on their own (the old, soft behaviour)', () => {
+  test('world.structureCoupling = false leaves ropes to their own solvers (line blocks)', () => {
     const c = cantilever({ off: true });
     const hook = c.w.add(new P.Body({ type: 'static', position: { x: 0.1, y: 4.4 } }));
     const rope = c.w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: c.tip, localAnchorB: c.tip.localPoint({ x: L, y: 3 }), rope: true }));
     rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 2);
-    ok(rope.tension() < 0.8 * Pl * Math.hypot(2.3, 1.4) / 1.4, 'uncoupled rope should be soft here: ' + rope.tension());
+    ok(rope.structureStep == null, 'a structure took the rope over');
+    ok(rope.tension() > 0, 'the rope carries nothing');
   });
 });
