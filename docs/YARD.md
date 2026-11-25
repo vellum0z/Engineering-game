@@ -120,6 +120,27 @@ What each one does in the engine:
 - **Balance**: the beam pins 4 cm above its centre of mass, so it hangs level with equal pans and tips (up to about 17°) toward the heavier one. A `weight` sits on a pan at the balance's y + 0.59 m. It compares masses, so it reads the same on any site.
 - **Caliper**: the part's extent along its own x (width) and y (height) from its shapes, rounded to 0.01 mm. `hole` is the hole centre from the left end, from the part's `holeLocal` or its `hole` dial (the `board`).
 
+## Screens: one objective, short cards, the rest in the guide
+
+Players should never have to read a wall of text to know what to do.
+
+- **The objective is pinned on the yard** (top left), in large type. It says the one thing to do now, as an outcome: "Get all three crates across the creek". It is under about ten words. A run marks it ✔ Done or ✖ Not yet, with the reason.
+- **Cards are short.** A card shows its `brief` (one or two sentences). The full `text` sits behind **📖 Guide**, along with what the level teaches, the story and the controls. Without a `brief`, the card shows the text's first paragraph cut to two sentences, which is a fallback, not a target.
+- **The controls tour** shows the first time someone opens the yard, and again from the **?** on the yard bar.
+- **Big bins are tabbed** by category (the manual library). A handheld kit shows only the parts the step needs.
+
+| Field | On | What it is |
+| --- | --- | --- |
+| `objective` | level, project, step, job | The pinned line. On a level or project it shows during talk steps and on the start card. |
+| `brief` | step | The one or two sentences the card shows. |
+| `pitch` | level, project | The one or two sentences on the start card. |
+
+### Any build that works passes
+
+This is a sandbox. A job's `goal` judges **outcomes**: where things end up, how fast, what broke, what a gauge read. It never checks which parts were used or what was typed, unless the objective itself names that constraint (a rating plate to stamp, a label to write, "use one winch"). Then the constraint goes in the objective so the player can see it.
+
+Every job lists at least **two passing reference builds that use different parts or a different approach**, plus one that must fail. If you can't find a second way, the goal is probably checking the method rather than the result.
+
 ## Writing a yard level
 
 See `src/chapters/ch01/levels/h01-still-or-moving.js` for a complete example.
@@ -144,7 +165,7 @@ Pre-placed parts in `design.parts` are part instances: `{ id, type, x, y, angle,
 | `watch` | run it and look | as `build`; `until` usually checks `type === 'result'` |
 | `rule` | write the law with the player's numbers | `title`, `law`, `eq(ctx)`, `text(ctx)`, `formula` |
 | `reveal` | a definition | as before |
-| `job` | the scored goal | `id`, `text`, `yard`, `goal`, `timeout`, `goalText`, `hints`, `margin(s)`, `grade`, `success`, `onFail` |
+| `job` | the scored goal | `id`, `objective`, `brief`, `text`, `yard`, `goal`, `timeout`, `goalText`, `hints`, `margin(s)`, `grade`, `success`, `onFail` |
 | `free` | free play | `text`, `prompts`, `yard` |
 | `deeper`, `summary` | as before | |
 

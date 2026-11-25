@@ -21,6 +21,14 @@
  *           checked for units and figures by SE.checker.
  *   free    free play with the kit: { type: 'free', text, yard }
  *
+ * Short screens: each card shows one short line or paragraph. Give a step
+ * `brief` (one or two sentences) and `objective` (the one thing to do, under
+ * about ten words, pinned on the yard). The full `text` moves behind the
+ * Guide button. Without a brief, the card shows the text's first paragraph
+ * (cut to two sentences) and links the rest to the guide. A level can set
+ * `objective` for the banner shown during talk steps, and `pitch` for the
+ * one line on its start card.
+ *
  * `yard` on a step changes the yard: { design, bin, ghosts, goal, readouts,
  * camera, site, keep: true (keep the player's build), add: [parts] }. Missing
  * fields fall back to the level's own `yard` block.
@@ -56,7 +64,8 @@
       el('div', { class: 'clip' }),
       el('div', { class: 'panel-head' }, [
         el('div', { class: 'panel-kicker', text: 'Handheld · ' + this.level.id + ((this.level.sections || []).length ? ' · Sections ' + this.level.sections.join(', ') : '') }),
-        el('h1', { class: 'panel-title', text: this.level.title }),
+        el('div', { class: 'panel-head-row' }, [el('h1', { class: 'panel-title', text: this.level.title }),
+          btn('📖 Guide', function () { self.openGuide(); }, 'ghost small guide-btn', { title: 'The full explanation, what this level teaches, and the controls' })]),
         this.progress = el('div', { class: 'step-progress' })
       ]),
       this.inspector, this.log, this.card
@@ -120,13 +129,59 @@
 
   function val(x, ctx) { return typeof x === 'function' ? x(ctx) : x; }
 
+  // The short version of a card's text: the first paragraph, cut to two sentences.
+  function shorten(text) {
+    text = String(text || '').trim();
+    if (!text) return { short: '', more: false };
+    var paras = text.split(/\n\s*\n/), first = paras[0], cut = false;
+    if (/^\s*[-*]\s/.test(first) || /^\s*\$\$/.test(first)) return { short: first, more: paras.length > 1 };
+    if (first.length > 260) {
+      var m = first.match(/^([\s\S]{20,}?[.!?](?:\*\*)?["”]?)\s+([\s\S]{10,}?[.!?](?:\*\*)?["”]?)(\s|$)/);
+      if (m && m[1].length + m[2].length < first.length - 20) { first = m[1] + ' ' + m[2]; cut = true; }
+    }
+    return { short: first, more: cut || paras.length > 1 };
+  }
+  Y.shorten = shorten;
+
+  // Body of a card: the brief (or the shortened text) and a link to the full text in the guide.
+  R.briefBody = function (s, ctx, textKey) {
+    var self = this, full = val(s[textKey || 'text'], ctx) || '';
+    var b = s.brief != null ? { short: val(s.brief, ctx), more: !!full } : shorten(full);
+    this.guideNow = { title: s.title || null, text: full, kicker: s.kicker };
+    var box = el('div', { class: 'step-body step-brief', html: md(b.short || '') });
+    if (b.more) box.appendChild(el('div', {}, [el('button', { class: 'guide-link', text: 'More in the guide ›', onclick: function () { self.openGuide(); } })]));
+    return box;
+  };
+
+  R.openGuide = function () {
+    var lv = this.level, now = this.guideNow, body = el('div', { class: 'guide-body' });
+    if (now && now.text) body.appendChild(el('div', {}, [el('h3', { text: 'Right now' }), el('div', { class: 'guide-step step-body', html: md(now.text) })]));
+    if (lv.goals) body.appendChild(el('div', {}, [el('h3', { text: 'What this level teaches' }), el('ul', {}, lv.goals.map(function (g) { return el('li', { html: inline(g) }); }))]));
+    if (lv.intro) body.appendChild(el('div', {}, [el('h3', { text: 'The story' }), el('div', { class: 'step-body', html: md(lv.intro) })]));
+    var y = this.yard;
+    body.appendChild(el('div', {}, [el('h3', { text: 'Controls' }), el('div', { class: 'step-body', html: md('Pick a part in the bin, then click the yard to place it. Click a part to set its numbers, with units. Drag to move, **R** rotates, **Delete** removes. Scroll to zoom, right-drag to pan. **▶ Run**: the physics decides, and any build that does the job counts.') }),
+      y ? btn('Show the controls tour', function () { m.close(); y.showCoach(); }, 'ghost small') : null]));
+    var m = SE.ui.modal({ title: 'Guide · ' + lv.id + ' ' + lv.title, body: body, class: 'guide-modal' });
+  };
+
+  // What the pinned objective says for a step.
+  R.objectiveFor = function (s) {
+    var lv = this.level, ctx = this.yardCtx();
+    var o = val(s.objective, ctx);
+    if (s.type === 'job') return { text: o || s.goalText || 'Make it work, then press ▶ Run.', kind: 'job' };
+    if (s.type === 'build' || s.type === 'watch') return { text: o || s.goalText || (s.type === 'watch' ? 'Press ▶ Run and watch.' : 'Set it up as shown.'), kind: s.type };
+    if (s.type === 'free') return { text: o || 'Free play: try anything with the kit.', kind: 'free' };
+    return lv.objective ? { text: val(lv.objective, ctx), kind: 'level' } : null;
+  };
+
   R.renderStep = function (s, done) {
     if (!this.level.yard) return baseRender.call(this, s, done);
     this.clearYardWatchers();
     if (s.yard) this.setYard(s.yard);
     else if (this.yard && this.yard.goal && s.type !== 'job') { this.yard.goal = null; }
-    var fn = { build: this.yardBuildStep, watch: this.yardBuildStep, rule: this.yardRuleStep, job: this.yardJobStep, free: this.yardFreeStep }[s.type];
-    if (!fn) return baseRender.call(this, s, done);
+    if (this.yard) this.yard.setObjective(this.objectiveFor(s));
+    var fn = { build: this.yardBuildStep, watch: this.yardBuildStep, rule: this.yardRuleStep, job: this.yardJobStep, free: this.yardFreeStep, say: this.yardSayStep, reveal: this.yardRevealStep }[s.type];
+    if (!fn) { this.guideNow = { text: val(s.text, this.yardCtx()) || '' }; return baseRender.call(this, s, done); }
     if (s.onEnter) { try { s.onEnter(this.yardCtx()); } catch (e) { console.error(e); } }
     fn.call(this, s, done);
     var c = this.card;
@@ -145,8 +200,8 @@
     var c = el('div', { class: 'step step-' + s.type });
     c.appendChild(whoHeader(s.who));
     c.appendChild(el('div', { class: 'step-kicker', text: s.kicker || (s.type === 'watch' ? 'Run it and watch' : 'Set it up') }));
-    c.appendChild(el('div', { class: 'step-body', html: md(val(s.text, this.yardCtx())) }));
-    var status = el('div', { class: 'goal-status', html: s.goalText ? '◻ ' + inline(s.goalText) : '' });
+    c.appendChild(this.briefBody(s, this.yardCtx()));
+    var status = el('div', { class: 'goal-status' });
     var nudge = el('div', { class: 'sim-msg' });
     var cont = btn(s.next || 'Continue ▸', function () { self.clearYardWatchers(); done(); }, 'primary', { disabled: s.until ? 'disabled' : null });
     c.appendChild(status); c.appendChild(nudge);
@@ -162,6 +217,7 @@
       try { r = s.until(self.yardCtx(), type); } catch (e) { console.error(e); r = false; }
       if (r === true) {
         met = true; cont.disabled = false;
+        if (self.yard) self.yard.setObjectiveStatus('pass');
         status.innerHTML = '✔ ' + inline(s.goalText || 'Done'); status.classList.add('met');
         nudge.innerHTML = '';
         SE.audio && SE.audio.play('success', { volume: 0.5 });
@@ -182,11 +238,56 @@
     if (s.law) c.appendChild(el('div', { class: 'eq-block big', html: SE.eq.html(s.law) }));
     var eq = val(s.eq, ctx);
     if (eq) [].concat(eq).forEach(function (e) { c.appendChild(el('div', { class: 'eq-block', html: SE.eq.html(e) })); });
-    c.appendChild(el('div', { class: 'step-body', html: md(val(s.text, ctx) || '') }));
+    c.appendChild(this.briefBody(s, ctx));
     if (s.formula) c.appendChild(el('div', { class: 'muted small', text: '→ added to your formula sheet' }));
     c.appendChild(el('div', { class: 'btn-row' }, [btn('Got it ▸', done, 'primary')]));
     this.card.appendChild(c);
     SE.audio && SE.audio.play('stamp', { volume: 0.4 });
+  };
+
+  /* -------------------------------------------------------- say, reveal */
+  R.yardSayStep = function (s, done) {
+    var c = el('div', { class: 'step step-say' });
+    c.appendChild(whoHeader(s.who));
+    c.appendChild(this.briefBody(s, this.yardCtx()));
+    var go = btn(s.next || 'Continue ▸', function () { done(); }, 'primary');
+    c.appendChild(el('div', { class: 'btn-row' }, [go]));
+    this.card.appendChild(c);
+    if (s.action) { var self = this; Promise.resolve(s.action(this.ctx)).catch(function (e) { console.error(e); }); }
+    setTimeout(function () { go.focus(); }, 40);
+  };
+  R.yardRevealStep = function (s, done) {
+    var c = el('div', { class: 'step step-reveal law-card' });
+    c.appendChild(el('div', { class: 'step-kicker', text: s.kicker || 'Principle' }));
+    if (s.title) c.appendChild(el('h2', { class: 'law-title', text: s.title }));
+    if (s.eq) c.appendChild(el('div', { class: 'eq-block big', html: SE.eq.html(s.eq, s.tag) }));
+    c.appendChild(this.briefBody(s, this.yardCtx()));
+    if (s.table) c.appendChild(SE.tools.table(s.table));
+    if (s.formula) c.appendChild(el('div', { class: 'muted small', text: '→ added to your formula sheet' }));
+    c.appendChild(el('div', { class: 'btn-row' }, [btn('Got it ▸', done, 'primary')]));
+    this.card.appendChild(c);
+    SE.audio && SE.audio.play('stamp', { volume: 0.4 });
+  };
+
+  /* -------------------------------------------------------------- intro */
+  var baseBegin = R.begin;
+  R.begin = function () {
+    if (!this.level.yard) return baseBegin.call(this);
+    var self = this, lv = this.level, ctx = this.yardCtx();
+    SE.ui.clear(this.card);
+    var pitch = val(lv.pitch, ctx) || shorten(lv.intro).short;
+    this.guideNow = null;
+    if (this.yard) this.yard.setObjective(lv.objective ? { text: val(lv.objective, ctx), kind: 'level' } : null);
+    this.card.appendChild(el('div', { class: 'step step-intro' }, [
+      lv.objective ? el('div', { class: 'intro-objective', html: inline('🎯 ' + val(lv.objective, ctx)) }) : null,
+      el('div', { class: 'step-body step-brief', html: md(pitch || '') }),
+      el('div', { class: 'btn-row' }, [
+        btn('Start ▸', function () { self.run(0); }, 'primary'),
+        btn('📖 What this level teaches', function () { self.openGuide(); }, 'ghost')
+      ]),
+      lv.minutes ? el('div', { class: 'muted small', text: 'About ' + lv.minutes + ' min.' }) : null
+    ]));
+    this.updateProgress(-1);
   };
 
   /* ---------------------------------------------------------------- job */
@@ -199,8 +300,9 @@
     var c = el('div', { class: 'step step-job task-card' });
     c.appendChild(whoHeader(s.who));
     c.appendChild(el('div', { class: 'step-kicker', text: s.required === false ? 'Optional job' : 'The job' }));
-    c.appendChild(el('div', { class: 'step-body', html: md(val(s.text, this.yardCtx())) }));
-    var status = el('div', { class: 'goal-status', html: '◻ ' + inline(s.goalText || 'Make it work, then press Run.') });
+    c.appendChild(this.briefBody(s, this.yardCtx()));
+    c.appendChild(el('div', { class: 'muted small', text: 'Any build that does the job counts. Press ▶ Run to test it.' }));
+    var status = el('div', { class: 'goal-status' });
     var hintBox = el('div', { class: 'hints' });
     var fb = el('div', { class: 'feedback-slot' });
     var hintTier = 0, solved = false;
@@ -261,8 +363,8 @@
     var c = el('div', { class: 'step step-free' });
     c.appendChild(whoHeader(s.who));
     c.appendChild(el('div', { class: 'step-kicker', text: 'Free play' }));
-    c.appendChild(el('div', { class: 'step-body', html: md(val(s.text, this.yardCtx()) || 'The yard is yours. Try anything.') }));
-    if (s.prompts) c.appendChild(el('ul', { class: 'prompts' }, s.prompts.map(function (p) { return el('li', { html: inline(p) }); })));
+    c.appendChild(s.text ? this.briefBody(s, this.yardCtx()) : el('div', { class: 'step-body', text: 'The yard is yours. Try anything.' }));
+    if (s.prompts) c.appendChild(el('details', { class: 'prompts-box' }, [el('summary', { text: 'Ideas to try (' + s.prompts.length + ')' }), el('ul', { class: 'prompts' }, s.prompts.map(function (p) { return el('li', { html: inline(p) }); }))]));
     c.appendChild(el('div', { class: 'btn-row' }, [btn(s.next || 'Done playing ▸', function () { self.clearYardWatchers(); done(); }, 'primary')]));
     this.card.appendChild(c);
   };

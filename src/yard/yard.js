@@ -17,6 +17,8 @@
  *   yard.on('change' | 'place' | 'dial' | 'select' | 'run' | 'result' | 'break' | 'frame', fn)
  *   yard.run(); yard.pause(); yard.stepOnce(); yard.reset();
  *   yard.design (live), yard.built (current world), yard.lastResult
+ *   yard.setObjective({ text, kind }) pins the one thing to do on the yard;
+ *   a finished run marks it done or not yet. yard.showCoach() shows the controls tour.
  *
  * Edit mode (before Run, or after Reset): pick a part in the bin, click the
  * canvas to place it; a connector (cable, push, gauge) takes a click on each
@@ -157,6 +159,7 @@
     this.stepper = null;
     this.endPoke();
     this.rebuild();
+    if (this.objStatus && this.objStatus.s === 'fail') this.setObjectiveStatus(null);
     if (!silent) { this.emit('reset', {}); this.refreshPanels(); }
   };
   Yard.prototype.afterStep = function () {
@@ -176,6 +179,7 @@
     if (!v.pass) this.failedRuns++;
     this.lastResult = { pass: v.pass, reason: v.reason || '', time: this.state.t, state: this.state, failedRuns: this.failedRuns, runs: this.runs };
     SE.audio && SE.audio.play && SE.audio.play(v.pass ? 'good' : 'bad');
+    if (this.objective) this.setObjectiveStatus(v.pass ? 'pass' : 'fail', v.pass ? '' : firstSentence(v.reason));
     this.emit('result', this.lastResult);
     this.refreshBar();
   };
@@ -212,7 +216,9 @@
     this.binEl = el('div', { class: 'yard-bin', role: 'toolbar', 'aria-label': 'Parts bin' });
     this.stripEl = el('div', { class: 'yard-strip', 'aria-live': 'off' });
     stageEl.appendChild(this.barEl);
-    stageEl.appendChild(el('div', { class: 'yard-view' }, [this.canvas, this.toastEl]));
+    this.objEl = el('div', { class: 'yard-objective', 'aria-live': 'polite' });
+    this.coachEl = el('div', { class: 'yard-coach' });
+    stageEl.appendChild(el('div', { class: 'yard-view' }, [this.canvas, this.objEl, this.toastEl, this.coachEl]));
     stageEl.appendChild(this.binEl);
     stageEl.appendChild(this.stripEl);
     this.ctx = this.canvas.getContext('2d');
@@ -233,6 +239,47 @@
     this.onResize = function () { self.cam.resize(); };
     window.addEventListener('resize', this.onResize);
     setTimeout(function () { self.cam.resize(); self.fitView(); }, 0);
+    this.renderObjective();
+    if (!Yard.coachSeen()) this.showCoach();
+  };
+
+  /* --------------------------------------------------------- objective */
+  // The one thing to do right now, pinned on the yard: { text, kind: 'job' | 'build' | 'watch' | 'free' | 'level' }.
+  Yard.prototype.setObjective = function (o) {
+    this.objective = o && o.text ? o : null;
+    this.objStatus = null;
+    this.renderObjective();
+  };
+  Yard.prototype.setObjectiveStatus = function (status, note) { this.objStatus = status ? { s: status, note: note || '' } : null; this.renderObjective(); };
+  Yard.prototype.renderObjective = function () {
+    if (!this.objEl) return;
+    var el = SE.ui.el, o = this.objective, box = SE.ui.clear(this.objEl), st = this.objStatus;
+    box.className = 'yard-objective' + (o ? ' show kind-' + (o.kind || 'build') : '') + (st ? ' ' + st.s : '');
+    if (!o) return;
+    var label = { job: 'Objective', build: 'Do this', watch: 'Do this', free: 'Free play', level: 'Goal' }[o.kind || 'build'] || 'Objective';
+    box.appendChild(el('div', { class: 'obj-kicker', text: (st && st.s === 'pass' ? '✔ Done' : st && st.s === 'fail' ? '✖ Not yet' : '🎯 ' + label) }));
+    box.appendChild(el('div', { class: 'obj-text', html: SE.ui.inline(o.text) }));
+    if (st && st.note) box.appendChild(el('div', { class: 'obj-note', html: SE.ui.inline(st.note) }));
+  };
+  function firstSentence(t) { t = String(t || '').replace(/\s+/g, ' ').trim(); var m = t.match(/^.{12,160}?[.!?](\s|$)/); return m ? m[0].trim() : t.slice(0, 160); }
+
+  /* ------------------------------------------------------ controls tour */
+  Yard.coachSeen = function () { try { return localStorage.getItem('se.yard.coach') === '1'; } catch (e) { return true; } };
+  Yard.prototype.showCoach = function () {
+    if (!this.coachEl) return;
+    var el = SE.ui.el, self = this, box = SE.ui.clear(this.coachEl);
+    var tips = [
+      ['🧰', 'Pick a part', 'from the bin under the yard, then click in the yard to place it.'],
+      ['🔧', 'Click a part', 'to set its numbers. Type units: 2.5 kN, 300 lb, 40 cm.'],
+      ['▶', 'Press Run.', 'The physics decides. Any build that does the job counts.'],
+      ['🖱', 'Drag', 'to move a part. R rotates, Delete removes. Scroll to zoom, right-drag to pan.']
+    ];
+    box.appendChild(el('div', { class: 'coach-card' }, [
+      el('div', { class: 'coach-title', text: 'How the yard works' }),
+      el('ol', { class: 'coach-list' }, tips.map(function (t) { return el('li', {}, [el('span', { class: 'coach-ico', text: t[0] }), el('span', { html: '<b>' + t[1] + '</b> ' + t[2] })]); })),
+      SE.ui.button('Got it', function () { try { localStorage.setItem('se.yard.coach', '1'); } catch (e) {} box.classList.remove('show'); }, 'primary small')
+    ]));
+    box.classList.add('show');
   };
   Yard.prototype.unmount = function () {
     this.dead = true;
@@ -290,6 +337,7 @@
     bar.appendChild(ov('forces', 'forces'));
     bar.appendChild(ov('weights', 'weights'));
     bar.appendChild(this.clockEl = el('span', { class: 'yard-clock mono' }));
+    bar.appendChild(btn('?', function () { self.showCoach(); }, 'ghost small yard-help', { title: 'How the yard works', 'aria-label': 'How the yard works' }));
     if (!this.ready() && this.mode === 'edit') bar.appendChild(el('span', { class: 'yard-err', text: '⚠ ' + this.built.errors[0].error }));
   };
 
@@ -300,11 +348,22 @@
     if (!entries.length) { this.binEl.style.display = 'none'; return; }
     this.binEl.style.display = '';
     var groups = {};
+    // a big bin (the manual library) shows one category at a time behind tabs
+    var cats = [];
+    entries.forEach(function (e) { var c = Y.partDef(e.type).category; if (cats.indexOf(c) < 0) cats.push(c); });
+    var tabbed = entries.length > 10 && cats.length > 2;
+    if (tabbed) {
+      if (cats.indexOf(this.binCat) < 0) this.binCat = cats[0];
+      bin.appendChild(el('div', { class: 'bin-tabs', role: 'tablist' }, cats.map(function (c) {
+        return el('button', { class: 'bin-tab' + (c === self.binCat ? ' on' : ''), role: 'tab', text: c, onclick: function () { self.binCat = c; self.refreshBin(); } });
+      })));
+    }
     entries.forEach(function (e, i) {
       var d = Y.partDef(e.type);
       var left = self.remaining(e, self.binSpec === 'library' ? null : i);
       var cat = d.category;
-      if (!groups[cat]) { groups[cat] = el('div', { class: 'bin-group' }, [el('span', { class: 'bin-cat', text: cat })]); bin.appendChild(groups[cat]); }
+      if (tabbed && cat !== self.binCat) return;
+      if (!groups[cat]) { groups[cat] = el('div', { class: 'bin-group' }, [tabbed ? null : el('span', { class: 'bin-cat', text: cat })]); bin.appendChild(groups[cat]); }
       var active = self.placing && self.placing.entry === e;
       var b = el('button', {
         class: 'bin-part' + (active ? ' active' : '') + (left <= 0 ? ' empty' : ''),

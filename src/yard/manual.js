@@ -7,12 +7,14 @@
  *   SE.content.registerProject('ch01', {
  *     id: 'P1', title, order, brief, conditions: [...], deeper: [...], debrief,
  *     yard: { site, design, camera, bin: 'library' (default) | [...] },
- *     jobs: [{ id: 'P1.lift', label: 'markup', goal, timeout, hints: [nudge, method, worked],
+ *     jobs: [{ id: 'P1.lift', label: 'markup', objective: 'short line pinned on the yard', goal, timeout, hints: [nudge, method, worked],
  *              margin(s) -> points off, grade: { part, key, spec }, design (fresh start),
  *              success: md, onFail: fn(ctx) -> md }],
  *     solutions: { 'P1.lift': { add: [...], set: {...} } }      // reference builds (tests)
  *   });
  *
+ * The project can set `pitch` (one or two sentences for the start card); the
+ * full brief and site conditions sit behind the Job card tab and the Guide.
  * Jobs are signed off one at a time. Pick a job, build, press Run: the
  * simulation judges it. Each job keeps the player's build when they move
  * on unless it gives its own `design`.
@@ -36,13 +38,14 @@
     this.body = el('div', { class: 'panel-body' });
     root.appendChild(el('div', { class: 'play-layout yard-layout' }, [this.yardEl, el('aside', { class: 'panel clipboard manual' }, [
       el('div', { class: 'clip' }),
-      el('div', { class: 'panel-head' }, [el('div', { class: 'panel-kicker', text: 'Manual · job card · ' + p.id }), el('h1', { class: 'panel-title', text: p.title })]),
+      el('div', { class: 'panel-head' }, [el('div', { class: 'panel-kicker', text: 'Manual · ' + p.id }),
+        el('div', { class: 'panel-head-row' }, [el('h1', { class: 'panel-title', text: p.title }), btn('📖 Guide', function () { self.openGuide(); }, 'ghost small guide-btn', { title: 'The full job card, site conditions and controls' })])]),
       this.tabs, this.inspector, this.body
     ])]));
     this.ctx = { save: this.save, project: p, values: {} };
     this.jobIndex = 0;
     this.makeYard(Object.assign({ bin: 'library' }, p.yard));
-    this.tabDefs = [{ id: 'brief', label: 'Job card' }, { id: 'jobs', label: 'Jobs' }, { id: 'debrief', label: 'Debrief' }];
+    this.tabDefs = [{ id: 'brief', label: 'Start' }, { id: 'jobs', label: 'Jobs' }, { id: 'debrief', label: 'Debrief' }];
     this.tabDefs.forEach(function (t) {
       var b = el('button', { class: 'tab', role: 'tab', text: t.label, onclick: function () { self.show(t.id); } });
       t.btn = b; self.tabs.appendChild(b);
@@ -73,13 +76,33 @@
 
   M.yardBrief = function () {
     var p = this.p, self = this;
+    var pitch = p.pitch || (Y.shorten ? Y.shorten(p.brief).short : p.brief);
+    this.yard.setObjective({ text: p.objective || (p.jobs.length + ' jobs to sign off. Any build that works counts.'), kind: 'level' });
     this.body.appendChild(el('div', { class: 'brief' }, [
       el('div', { class: 'who who-juno' }, [el('span', { class: 'who-badge', text: 'J' }), el('span', { class: 'who-name', text: 'Juno' }), el('span', { class: 'who-role', text: 'settlement chief' })]),
-      el('div', { class: 'step-body', html: md(p.brief) }),
-      p.conditions ? el('div', { class: 'conditions' }, [el('h3', { text: 'Site conditions' }), el('ul', {}, p.conditions.map(function (c) { return el('li', { html: inline(c) }); }))]) : null,
-      el('div', { class: 'muted small', html: inline('The whole parts library is in the bin under the yard. Build it, run it: the simulation decides. Hints cost score. No time limit.') }),
+      el('div', { class: 'step-body step-brief', html: md(pitch) }),
+      el('ol', { class: 'job-list' }, p.jobs.map(function (j) { return el('li', { html: inline(jobObjective(j)) }); })),
+      el('div', { class: 'muted small', html: inline('The whole parts library is in the bin. Build it any way you like and press ▶ Run: the simulation decides. Site numbers are in the 📖 Guide.') }),
       el('div', { class: 'btn-row' }, [btn('Start on the jobs ▸', function () { self.show('jobs'); }, 'primary')])
     ]));
+  };
+
+  function stripMd(t) { return String(t || '').replace(/\$[^$]*\$/g, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim(); }
+  function jobObjective(j) {
+    if (j.objective) return j.objective;
+    var t = stripMd(j.label), m = t.match(/^(.{8,140}?[.!?])(\s|$)/);
+    return m ? m[1] : t.slice(0, 140);
+  }
+
+  M.openGuide = function () {
+    var p = this.p, j = this.p.jobs[this.jobIndex], body = el('div', { class: 'guide-body' });
+    if (j) body.appendChild(el('div', {}, [el('h3', { text: 'This job' }), el('div', { class: 'guide-step step-body', html: md(j.label) })]));
+    if (p.conditions) body.appendChild(el('div', {}, [el('h3', { text: 'Site conditions' }), el('ul', {}, p.conditions.map(function (c) { return el('li', { html: inline(c) }); }))]));
+    body.appendChild(el('div', {}, [el('h3', { text: 'Job card' }), el('div', { class: 'step-body', html: md(p.brief) })]));
+    var y = this.yard;
+    body.appendChild(el('div', {}, [el('h3', { text: 'Controls' }), el('div', { class: 'step-body', html: md('Pick a part in the bin, then click the yard to place it. Connectors (cables, winches, pushes) take a click on each end. Click a part to set its numbers, with units. Drag to move, **R** rotates, **Delete** removes. Scroll to zoom, right-drag to pan.') }),
+      btn('Show the controls tour', function () { m.close(); y.showCoach(); }, 'ghost small')]));
+    var m = SE.ui.modal({ title: 'Guide · ' + p.id + ' ' + p.title, body: body, class: 'guide-modal' });
   };
 
   M.jobState = function (j) {
@@ -94,10 +117,11 @@
       var c = el('div', { class: 'deliverable' + (js.solved ? ' solved' : '') + (active ? ' active' : '') });
       c.appendChild(el('div', { class: 'deliverable-head' }, [
         el('span', { class: 'deliverable-num', text: String(i + 1) }),
-        el('div', { class: 'deliverable-label', html: md(j.label) }),
+        el('div', { class: 'deliverable-label', html: active ? md(j.label) : inline(jobObjective(j)) }),
         js.solved ? el('span', { class: 'grade grade-' + SE.scoring.grade(js.score), text: SE.scoring.grade(js.score) }) : null
       ]));
       if (!active) { c.appendChild(el('div', { class: 'btn-row' }, [btn(js.solved ? 'Redo this job' : 'Work on this job', function () { self.selectJob(i); }, 'ghost small')])); list.appendChild(c); return; }
+      c.appendChild(el('div', { class: 'muted small', html: inline('Any build that does the job counts. Numbers you need are in the job text and the 📖 Guide.') }));
       var hints = el('div', { class: 'hints' });
       for (var h = 0; h < js.hintTier; h++) hints.appendChild(hintEl(j, h));
       c.appendChild(hints);
@@ -131,6 +155,8 @@
 
   M.armJob = function () {
     var j = this.p.jobs[this.jobIndex];
+    this.yard.setObjective({ text: jobObjective(j), kind: 'job' });
+    if (this.jobState(j).solved) this.yard.setObjectiveStatus('pass');
     this.yard.goal = j.goal;
     this.yard.timeout = j.timeout || 30;
     this.yard.failedRuns = this.jobState(j).wrong;
