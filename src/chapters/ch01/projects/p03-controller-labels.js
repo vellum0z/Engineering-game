@@ -267,10 +267,9 @@
   var swlGoal = G.all(
     firmware('craneA', 'safe working load'),
     G.noBreaks(null, 'The overload sled was lifted past what the line can carry, and the line parted. The label let it through.'),
-    G.never(function (s) { var c = ctl(s, 'craneA'); return c && c.tripped ? 'The controller read a safe working load of ' + fmt(c.value, D.autoUnit(c.value, 'force'), 4) + ' and tripped on the ' + fmt(GEN * G_LOCAL, 'kN', 4) + ' generator as an overload. Nothing at the depot is light enough to lift now.' : null; }),
     G.never(function (s) { return loadY(s, 'sled') > 0.5 + 0.3 ? 'The overload sled (' + fmt(SLED * G_LOCAL, 'kN', 4) + ') is off the deck. The firmware should have refused it.' : null; }),
     G.holdFor('genUp', function (s) { return loadY(s, 'gen') > 0.5 + 1.9 && s.speed('gen') < 0.02; }, 0.5),
-    G.holdFor('sledRefused', function (s) { var c = ctl(s, 'craneB'); return c && c.tripped && loadY(s, 'sled') < 0.6; }, 0.5)
+    G.holdFor('sledDown', function (s) { return s.t > 3 && loadY(s, 'sled') < 0.6 && s.speed('sled') < 0.02; }, 0.5)
   );
 
   var travelGoal = G.all(
@@ -279,10 +278,6 @@
     G.never(function (s) {
       var hit = s.impacts.filter(function (i) { return (i.a === 'load' && i.b === 'craneHead') || (i.b === 'load' && i.a === 'craneHead'); })[0];
       return hit ? 'The controller thought it had ' + fmt(ctl(s, 'crane').value, 'm') + ' of travel. The block hit the gantry head at ' + hit.speed.toFixed(2) + ' m/s.' : null;
-    }),
-    G.never(function (s) {
-      var c = ctl(s, 'crane'), y = loadY(s, 'load') - 0.5;
-      return c && c.done && s.speed('load') < 0.01 && y < TRAVEL - 0.1 ? 'The winch stopped with the block only ' + fmt(Math.max(y, 0), 'm') + ' up: the controller thought ' + fmt(c.value, 'm') + ' was the whole travel. The loft door is at ' + TRAVEL + ' m.' : null;
     }),
     G.holdFor('atDoor', function (s) { var y = loadY(s, 'load') - 0.5; return y > TRAVEL - 0.1 && y < TRAVEL + 0.1 && s.speed('load') < 0.02; }, 0.5)
   );
@@ -293,12 +288,6 @@
     G.never(function (s) {
       var hit = s.impacts.filter(function (i) { return (i.a === 'load' || i.b === 'load') && i.speed > CRACK; })[0];
       return hit ? 'The tank landed at ' + hit.speed.toFixed(2) + ' m/s and its glass lining cracked. The controller read the creep speed as ' + fmt(Math.abs(ctl(s, 'crane').value), D.autoUnit(Math.abs(ctl(s, 'crane').value), 'speed')) + '.' : null;
-    }),
-    G.never(function (s) {
-      if (s.t < 40) return null;
-      var c = ctl(s, 'crane'), v = Math.abs(c.value), t = CREEP_H / Math.max(v, 1e-12);
-      var tt = t < 7200 ? (t / 60).toFixed(0) + ' min' : (t / 3600).toFixed(0) + ' h';
-      return 'After 40 s the tank is still hanging. At ' + fmt(v, 'm/s') + ' the last ' + CREEP_H + ' m takes ' + tt + '. The crew gives up and the dead don\'t.';
     }),
     G.holdFor('landed', function (s) { return loadY(s, 'load') < 0.52 && s.speed('load') < 0.01; }, 0.5)
   );
@@ -322,10 +311,10 @@
     firmware('crane', 'brake pressure'),
     G.noBreaks(),
     G.never(function (s) {
-      var c = ctl(s, 'crane'), d = ctl(s, 'crane').y0 - loadY(s, 'load') + 0;
+      var c = ctl(s, 'crane');
       if (!c) return null;
       var drop = s.memo.y0 == null ? (s.memo.y0 = loadY(s, 'load'), 0) : s.memo.y0 - loadY(s, 'load');
-      if (drop < 0.01) return null;
+      if (drop < 0.05) return null;
       if (c.burst) return 'The pump chased ' + fmt(c.value, 'MPa') + ', blew the ' + BURST / 1e6 + ' MPa burst disc and the brake let go. The generator is falling.';
       return 'At ' + fmt(c.value, D.autoUnit(c.value, 'pressure')) + ' the brake holds only ' + fmt(c.hold, 'kN') + ' against the generator\'s ' + fmt(GEN * G_LOCAL, 'kN') + '. It is sliding through the brake.';
     }),
@@ -339,11 +328,25 @@
     G.never(function (s) {
       var c = ctl(s, 'crane');
       var drop = s.memo.y0 == null ? (s.memo.y0 = loadY(s, 'load'), 0) : s.memo.y0 - loadY(s, 'load');
-      if (drop < 0.01) return null;
+      if (drop < 0.05) return null;
       return 'The motor let go after ' + fmt(c.value, 's', 4) + ', with the brake still ' + fmt(Math.max(DELAY - c.value, 0), 's') + ' from setting. The block is falling.';
     }),
     G.holdFor('handedOver', function (s) { var c = ctl(s, 'crane'); return c && c.released && !c.burnt && s.t > Math.max(c.brakeAt, c.motorOffAt) + 0.2; }, 1)
   );
+
+  // Why a run timed out, told from what the crane's controller did.
+  function whyNot(ctx, id) {
+    var st = ctx.result && ctx.result.state, c = st && ctl(st, id);
+    if (!c || c.halted || ctx.result.time < 1) return '';
+    var unit = D.autoUnit(Math.abs(c.value), SLOTS[DUTY_SLOT[c.duty]].q);
+    if (c.duty === 'lift' && c.tripped) return 'The controller read a safe working load of ' + fmt(c.value, unit, 4) + ' and tripped as soon as the load cell went past it.';
+    if (c.duty === 'travel' && c.done) return 'The controller stopped the winch after ' + fmt(c.value, unit) + ' of travel. The loft door is at ' + TRAVEL + ' m.';
+    if (c.duty === 'setdown') {
+      var v = Math.abs(c.value), t = CREEP_H / Math.max(v, 1e-12);
+      return 'At ' + fmt(v, 'm/s') + ' the last ' + CREEP_H + ' m takes ' + (t < 7200 ? (t / 60).toFixed(0) + ' min' : (t / 3600).toFixed(0) + ' h') + '. The crew gives up and the dead don\'t.';
+    }
+    return '';
+  }
 
   /* ------------------------------------------------------------ the project */
 
@@ -352,8 +355,8 @@
   var JOB_DESIGNS = {
     swl: design(
       plateAt('swl', -7, 3),
-      bay({ id: 'craneA', x: -2.5, head: 5, load: 'gen', loadY: 0.5, mass: GEN, loadLabel: 'generator', duty: 'lift', dials: { rating: '32.5 kN' } }),
-      bay({ id: 'craneB', x: 2.5, head: 5, load: 'sled', loadY: 0.5, mass: SLED, loadLabel: 'overload sled', duty: 'lift', dials: { rating: '32.5 kN' } })
+      bay({ id: 'craneA', x: -2.5, head: 5, load: 'gen', loadY: 0.5, mass: GEN, loadLabel: 'generator', duty: 'lift', label: 'generator hoist', dials: { rating: '32.5 kN' } }),
+      bay({ id: 'craneB', x: 2.5, head: 5, load: 'sled', loadY: 0.5, mass: SLED, loadLabel: 'overload sled', duty: 'lift', label: 'sled hoist', dials: { rating: '32.5 kN' } })
     ),
     travel: design(
       plateAt('travel', -5, 3),
@@ -384,18 +387,31 @@
       id: 'P3.' + slot, design: JOB_DESIGNS[slot],
       yard: { camera: o.camera, site: SITE },
       grade: { part: 'label', key: 'label', spec: o.spec },
+      onFail: function (ctx) { return whyNot(ctx, slot === 'swl' ? 'craneA' : 'crane'); },
       success: function (ctx) {
         var inst = ctx.yard.inst('label'), r = SE.checker.check(inst ? inst.dials.label : '', o.spec);
-        return o.ok + (r.correct ? '' : ' The rig could not tell the difference, but the inspector could: ' + (r.feedback || 'the label is off in its last figure.'));
+        return o.ok + (r.correct ? '' : ' The job works, but the inspector won\'t pass the label itself: ' + (r.feedback || 'it is off in its last figure.'));
       }
     }, o);
   }
   function set(text) { return { label: { label: text } }; }
+  // A second way: the label is legal but does less, and the player's own
+  // parts do the work (a winch of their own, or a prop under the load).
+  function ownWinch(x, y, load, dials) {
+    return [{ id: 'myHook', type: 'hook', x: x, y: y }, { id: 'myWinch', type: 'winch', a: { part: 'myHook', anchor: 'eye' }, b: { part: load, anchor: 'top' }, dials: dials }];
+  }
+  function prop(x, n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push({ id: 'prop' + i, type: 'crate', x: x, y: 0.5 + i, dials: { mass: '100 kg' } });
+    return out;
+  }
 
   SE.content.registerProject('ch01', {
     id: 'P3', order: 3,
     title: 'Controller Labels',
     subtitle: 'Relabel the depot crane after the fire',
+    objective: 'Six labels the strict firmware accepts and the crane obeys',
+    pitch: 'The crane\'s new firmware runs on its panel labels, exactly as written. Write each one in proper SI, run its test bay, and make the crane behave. How you get the job done is up to you; the label just has to be right.',
     brief: [
       'The fire in the north shed took the crane\'s control panel with it. Pell rebuilt the controller from salvage, and the firmware he flashed onto it is the strict kind: it reads every label **exactly as written** and runs the winch on what it read. A label it doesn\'t like, it refuses, and the crane locks out.',
       'The old cast plates survived, more or less. They\'re pre-war, in **kilogram-force** and **centimetres**, and some of the numbers came off the old controller\'s logs in awkward prefixes. I need six new labels in **proper SI**: one prefix, the number between 0.1 and 1000, no prefix under a fraction bar unless it\'s the kilogram. Each field is printed for a set number of figures, and the firmware won\'t take more or fewer.',
@@ -415,7 +431,8 @@
     yard: { site: SITE, design: JOB_DESIGNS.swl, camera: cam({ x: -9, y: -1 }, { x: 5, y: 6.5 }) },
     jobs: [
       job('swl', {
-        label: '**Safe working load** label, from the "' + SWL_KGF + ' kgf" plate. The rig lifts the ' + GEN + ' kg generator and must refuse the ' + SLED + ' kg overload sled.',
+        objective: 'Label the SWL: generator goes up, overload sled stays down',
+        label: 'The old plate says **' + SWL_KGF + ' kgf**. Type the new label on the plate (4 figures) and run the bay.',
         camera: cam({ x: -9, y: -1 }, { x: 5, y: 6.5 }),
         goal: swlGoal, timeout: 20,
         answer: '31.19 kN',
@@ -435,10 +452,11 @@
           'The kgf is defined with **standard gravity**, 1 kgf = 9.806 65 N exactly. Multiply, then choose the prefix that puts the number between 0.1 and 1000, and keep 4 figures.',
           '3180 × 9.806 65 = 31 185.1 N = 31.1851(10³) N. Four figures with the kilo prefix: **31.19 kN**.'
         ],
-        ok: 'Generator: lifted. Overload sled (' + fmt(SLED * G_LOCAL, 'kN', 4) + '): refused, as it should be.'
+        ok: 'The generator is up and the ' + fmt(SLED * G_LOCAL, 'kN', 4) + ' overload sled never left the deck.'
       }),
       job('travel', {
-        label: '**Hook travel** limit, from the "' + TRAVEL_CM + ' cm" plate. The block has to stop at the loft door, and the gantry head is only ' + HEAD_GAP + ' m above it.',
+        objective: 'Label the travel and stop the block at the loft door',
+        label: 'The old plate says **' + TRAVEL_CM + ' cm**. The gantry head is only ' + HEAD_GAP + ' m above the loft door.',
         camera: cam({ x: -7, y: -1 }, { x: 4, y: HEAD_TRAVEL + 1 }),
         goal: travelGoal, timeout: 25,
         answer: '7.35 m',
@@ -450,10 +468,11 @@
           'Centi is 10⁻². Convert to metres first, then check the number lands between 0.1 and 1000.',
           '735 cm = 735(10⁻²) m = **7.35 m**. (7350 mm has the right value but breaks the range rule.)'
         ],
-        ok: 'The winch cut out with the block level with the loft door, ' + HEAD_GAP + ' m short of the gantry head.'
+        ok: 'The block stopped level with the loft door, clear of the gantry head.'
       }),
       job('creep', {
-        label: '**Creep speed** for setting loads down, from the encoder log. The glass-lined tank cracks if it lands faster than ' + CRACK + ' m/s.',
+        objective: 'Label the creep speed and land the tank uncracked',
+        label: 'The encoder log says **' + ENC_STEP_UM + ' μm per tick, one tick every ' + ENC_TICK_MS.toFixed(1) + ' ms**. The tank cracks above ' + CRACK + ' m/s.',
         camera: cam({ x: -7, y: -1 }, { x: 4, y: 6 }),
         goal: creepGoal, timeout: 41,
         answer: '13.9 mm/s',
@@ -469,7 +488,8 @@
         ok: 'The tank settled onto the deck at a walking-pace creep. Not a mark on the lining.'
       }),
       job('rate', {
-        label: '**Cable spring rate**, from the "' + STIFF_N_PER_MM + ' N/mm" log entry. Before the latch lets go, the controller winds in the stretch the cable will take (weight ÷ rate), so the block shouldn\'t move.',
+        objective: 'Label the spring rate: latch lets go, block stays put',
+        label: 'The log says **' + STIFF_N_PER_MM + ' N/mm**. The controller winds in weight ÷ rate of stretch, then the latch lets go.',
         camera: cam({ x: -7, y: -1 }, { x: 4, y: 9 }),
         goal: rateGoal, timeout: 15,
         answer: '48.6 kN/m',
@@ -481,10 +501,11 @@
           'Replace "mm" with 10⁻³ m and carry the power of ten up to the numerator.',
           '48.6 N/(10⁻³ m) = 48.6(10³) N/m = **48.6 kN/m**.'
         ],
-        ok: 'Wound in ' + fmt(BLOCK * G_LOCAL / STIFF, 'mm') + ' of stretch, then the latch let go without a jolt.'
+        ok: 'The latch let go and the block didn\'t jolt. (The cable takes ' + fmt(BLOCK * G_LOCAL / STIFF, 'mm') + ' of stretch under it.)'
       }),
       job('brake', {
-        label: '**Brake accumulator pressure**, from the "' + BRAKE_KGF_CM2 + ' kgf/cm²" plate. The brake\'s grip goes with the pressure; the burst disc goes at 10 MPa.',
+        objective: 'Label the brake pressure and keep the generator hanging still',
+        label: 'The old plate says **' + BRAKE_KGF_CM2 + ' kgf/cm²**. Grip goes with pressure; the burst disc goes at 10 MPa.',
         camera: cam({ x: -7, y: -1 }, { x: 4, y: 7 }),
         goal: brakeGoal, timeout: 6,
         answer: '6.91 MPa',
@@ -501,10 +522,11 @@
           'Turn kgf into N with 9.806 65. Then remember the exponent applies to the prefix as well: cm² = (10⁻² m)² = 10⁻⁴ m².',
           '70.5 × 9.806 65 = 691.37 N on 10⁻⁴ m² gives 6.914(10⁶) Pa = **6.91 MPa**.'
         ],
-        ok: 'The brake holds ' + fmt(BRAKE_HOLD, 'kN') + ' against the generator\'s ' + fmt(GEN * G_LOCAL, 'kN') + '. It hangs still.'
+        ok: 'The generator hangs still. At the plate pressure the brake grips with ' + fmt(BRAKE_HOLD, 'kN') + '.'
       }),
       job('delay', {
-        label: '**Brake set time**, from the "' + BRAKE_DELAY_MS + ' ms" log entry. The motor holds the block until the label says the brake has set, then lets go.',
+        objective: 'Label the brake set time: motor hands over, nothing drops',
+        label: 'The log says **' + BRAKE_DELAY_MS + ' ms** (4 figures). The motor lets go when the label says the brake has set.',
         camera: cam({ x: -7, y: -1 }, { x: 4, y: 7 }),
         goal: delayGoal, timeout: 34,
         answer: '2.416 s',
@@ -517,13 +539,15 @@
           'Move the decimal point three places and change the prefix to match. Keep all four figures.',
           '2416 ms = 2.416(10³)(10⁻³) s = **2.416 s**.'
         ],
-        ok: 'The motor held until the brake set, then let go. The block didn\'t move.'
+        ok: 'The block didn\'t move through the handover.'
       })
     ],
     solutions: {
       'P3.swl': [
         { set: set('31.19 kN') },
         { set: set('31.20 kN') },                 // passes the rig; the grade marks the g slip
+        // a low label trips both cranes; the generator goes up on the player's own winch
+        { set: set('29.00 kN'), add: ownWinch(-2.5, 4.5, 'gen', { pull: '40 kN', speed: '0.3 m/s', rating: '50 kN', stop: '1.50 m' }) },
         { pass: false, set: set('31.19 N') },     // trips on the generator
         { pass: false, set: set('31.19 MN') },    // lifts the sled, line parts
         { pass: false, set: set('31185 N') },     // range rule: firmware halt
@@ -531,6 +555,8 @@
       ],
       'P3.travel': [
         { set: set('7.35 m') },
+        // the crane barely lifts it; the player's winch takes it to the door
+        { set: set('0.100 m'), add: ownWinch(0, HEAD_TRAVEL - 0.3, 'load', { pull: '40 kN', speed: '0.5 m/s', rating: '50 kN', stop: (HEAD_TRAVEL - 0.3 - (TRAVEL + 1)).toFixed(3) + ' m' }) },
         { pass: false, set: set('735 cm') },
         { pass: false, set: set('7350 mm') },
         { pass: false, set: set('73.5 m') },
@@ -538,6 +564,8 @@
       ],
       'P3.creep': [
         { set: set('13.9 mm/s') },
+        // the crane line pays out at once; the player's winch lowers the tank
+        { set: set('13.9 m/s'), add: ownWinch(0, 4.6, 'load', { pull: '100 kN', speed: '-0.03 m/s', rating: '150 kN' }) },
         { pass: false, set: set('13.9 μm/ms') },
         { pass: false, set: set('0.0139 m/s') },
         { pass: false, set: set('13.9 m/s') },
@@ -545,6 +573,7 @@
       ],
       'P3.rate': [
         { set: set('48.6 kN/m') },
+        { set: set('48.6 MN/m'), add: prop(0, 3) },   // far too stiff a rate, but the block already sits on a prop
         { pass: false, set: set('48.6 N/mm') },
         { pass: false, set: set('48.6 N/m') },
         { pass: false, set: set('48.6 MN/m') }
@@ -552,12 +581,14 @@
       'P3.brake': [
         { set: set('6.91 MPa') },
         { set: set('6.92 MPa') },
+        { set: set('69.1 kPa'), add: prop(0, 3) },    // a weak brake, but the generator sits on a prop
         { pass: false, set: set('69.1 kPa') },
         { pass: false, set: set('6.91 GPa') },
         { pass: false, set: set('0.00691 GPa') }
       ],
       'P3.delay': [
         { set: set('2.416 s') },
+        { set: set('1.000 s'), add: prop(0, 3) },     // early handover onto a prop
         { pass: false, set: set('2416 ms') },
         { pass: false, set: set('2.42 s') },
         { pass: false, set: set('2.416 ms') },
