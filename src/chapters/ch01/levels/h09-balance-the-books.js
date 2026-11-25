@@ -83,17 +83,17 @@
   function auditLines(text) {
     var A = audit(text);
     if (!A.ok) return ['Formula: ' + (text || '(none)'), A.error];
-    var lines = ['a = ' + show(A.rhs), 'Unit audit (a must be m/s²):'];
+    var lines = ['a = ' + show(A.rhs)];
     A.terms.forEach(function (t, i) {
       lines.push('  ' + (i ? (t.sign < 0 ? '− ' : '+ ') : (t.sign < 0 ? '−' : '')) + t.text + '  →  ' + t.units + (t.ok ? '  ✔' : '  ✘'));
     });
-    lines.push(A.homogeneous ? 'Every term in m/s²: balanced.' : 'Units do not balance.');
+    lines.push(A.homogeneous ? 'Every term in m/s²: balanced.' : 'Not all m/s²: units do not balance.');
     return lines;
   }
 
   Y.definePart({
     type: 'h09-controller', name: 'Brake controller', category: 'Controls', library: false,
-    blurb: 'Clip it onto a cart. As the run starts it reads the speed v, works out a from its formula, and drives the brake ram to give exactly that acceleration (negative brakes, positive drives). It plugs the numbers in as typed, units or no units.',
+    blurb: 'Brakes the cart it is clipped to by its formula for a, plugging in the numbers exactly as typed (negative brakes, positive drives).',
     size: { w: 0.6, h: 0.4 },
     connector: true, attach: true,
     dials: [
@@ -136,8 +136,8 @@
     plate: function (inst, built) {
       var lines = auditLines(inst.dials.formula);
       if (built && isFinite(built.a)) {
-        lines.push('With v = ' + f3(built.v0) + ' m/s it commands a = ' + (built.a > 0 ? '+' : '') + f3(built.a) + ' m/s²');
-        lines.push('Ram force ' + f3(Math.abs(built.F) / 1000) + ' kN of ' + f3(built.rating / 1000) + ' kN rated' + (built.blown ? ': TOO MUCH' : ''));
+        lines.push('v = ' + f3(built.v0) + ' m/s → a = ' + (built.a > 0 ? '+' : '') + f3(built.a) + ' m/s²');
+        if (built.blown) lines.push('Needs ' + f3(Math.abs(built.F) / 1000) + ' kN, ram rated ' + f3(built.rating / 1000) + ' kN: TOO MUCH');
       }
       return lines;
     },
@@ -247,6 +247,8 @@
     subtitle: 'Dimensional homogeneity',
     sections: ['1.5'],
     minutes: 20,
+    pitch: 'The depot plow brakes by whatever formula is typed into its controller. Make the units balance, then make it stop on the line.',
+    objective: 'Stop the plow on the line with a formula that balances',
     intro: [
       'The depot plow has no working speedometer and a brake controller that the last driver described as "moody". Hask has the logbook open on the hood.',
       '"Quartermaster won\'t let you add bolts to litres in her ledger, and physics won\'t let you add metres to seconds. Every term of a real equation is in the same currency. Learn to check that, and you\'ll catch half your algebra mistakes before they catch you."'
@@ -264,6 +266,12 @@
       'H9.governor': [
         { set: { ctl: { formula: 'a = -v^2/(2*s)' } } },
         { set: { ctl: { formula: 'a = -(v*v)/(2*s)' } } },
+        // half the braking from the controller, the other half from a hand ram: 2 kN back for 8 s
+        { set: { ctl: { formula: 'a = -v^2/(4*s)' } }, add: [{ type: 'push', a: { part: 'plow' }, dials: { force: '2 kN', angle: '180 deg', time: '8 s' } }] },
+        // the controller only holds it once stopped; two hand rams do all the braking
+        { set: { ctl: { formula: 'a = -v^2/(1000*s)' } }, add: [
+          { type: 'push', a: { part: 'plow' }, dials: { force: '2 kN', angle: '180 deg', time: '8 s' } },
+          { type: 'push', a: { part: 'plow' }, dials: { force: '2 kN', angle: '180 deg', time: '8 s' } }] },
         { pass: false, set: { ctl: { formula: 'a = -v^2/s' } } },
         { pass: false, set: { ctl: { formula: 'a = -1' } } },
         { pass: false, set: { ctl: { formula: 'a = v^2/(2*s)' } } }
@@ -271,19 +279,19 @@
     },
     steps: [
       {
-        type: 'say', who: 'hask',
-        text: 'The plow comes down the depot spur at **10 m/s**. Its brake controller reads the speed *v* as the plow passes the marker, then drives a brake ram to give whatever acceleration *a* its formula works out. The stop line is **25 m** ahead, and the controller should take **5 s** to stop.\n\nSomebody rewired it last week and typed the formula in from memory. The controller doesn\'t know physics. It plugs the numbers in, in SI, and does exactly what it gets.'
-      },
-      {
         type: 'build', who: 'hask',
         yard: { bin: [{ type: 'h09-controller', count: 1, dials: { formula: SLIP, s: '25 m', t: '5 s' } }] },
-        text: 'Take the **Brake controller** from the bin and click the plow to clip it on. Select it and look at its dials: the formula as it was typed in, **s = 25 m** and **t = 5 s**.',
+        objective: 'Clip the brake controller onto the plow',
+        brief: 'The plow comes in at 10 m/s and its controller brakes by formula. Clip the **Brake controller** from the bin onto the plow.',
+        text: 'The plow comes down the depot spur at **10 m/s**. Its brake controller reads the speed *v* as the plow passes the marker, then drives a brake ram to give whatever acceleration *a* its formula works out. The stop line is **25 m** ahead, and the controller should take **5 s** to stop.\n\nSomebody rewired it last week and typed the formula in from memory. The controller doesn\'t know physics. It plugs the numbers in, in SI, and does exactly what it gets.\n\nTake the **Brake controller** from the bin and click the plow to clip it on. Select it and look at its dials: the formula as it was typed in, **s = 25 m** and **t = 5 s**.',
         goalText: 'Controller clipped onto the plow',
         until: function (ctx) { return !!ctlInst(ctx) || (ctx.find('h09-controller') ? 'Clip it onto the **plow**.' : false); }
       },
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: DEPOT_GOAL, timeout: 20 },
+        objective: 'Run the plow on the formula as typed',
+        brief: 'Press **▶ Run** and watch the plow and the **commanded a** gauge.',
         text: 'Press **▶ Run** and watch the plow, and the **commanded a** gauge.',
         goalText: 'Run it',
         until: function (ctx, type) { return type === 'result' && !!ctx.result; },
@@ -295,6 +303,8 @@
       {
         type: 'build', who: 'hask',
         yard: { keep: true, goal: DEPOT_GOAL, timeout: 20 },
+        objective: 'Fix the formula so the plow stops in the box',
+        brief: 'The audit says the terms are m/s and m/s³, not m/s². Solve $s = v t + \\frac{1}{2}a t^2$ for *a*, type it in and run.',
         text: 'The audit puts each symbol\'s units in place of the symbol: *s* in m, *v* in m/s, *t* in s. The first term, 2s/t, comes out in **m/s**, a speed. The second, 2v/t², comes out in **m/s³**. Neither is an acceleration, and you can\'t even subtract one from the other. No number in front could fix that.\n\nRebuild the formula yourself. Start from where the plow is after time *t*, braking steadily from speed *v*:\n\n$s = v t + \\frac{1}{2}a t^2$\n\nSolve it for *a*, type it into the controller (use `*`, `/` and `^`, e.g. `a = 3*s/t^2`), check the audit, and run it.',
         goalText: 'The plow stops in the stop box',
         until: function (ctx, type) {
@@ -308,6 +318,7 @@
       },
       {
         type: 'rule', title: 'Every term in the same units',
+        brief: 'The slip mixed m/s and m/s³ and came out as full throttle. Your formula is m/s² term by term, and the minus sign brakes.',
         law: 's = v t + \\frac{1}{2}a t^{2} \\quad \\Rightarrow \\quad \\u{m} = \\u{(m/s)·s} + \\u{(m/s^2)·s^2} = \\u{m} + \\u{m}',
         eq: function () {
           return [
@@ -319,6 +330,7 @@
       },
       {
         type: 'reveal', kicker: 'Principle', title: 'Dimensional homogeneity',
+        brief: 'Every term of a real equation has the same units. Check it after every algebra step. The **dimension checker** (key **d**) is now in the workshop.',
         eq: 's = v t + \\frac{1}{2}a t^{2}',
         text: 'An equation that models something real has to be **dimensionally homogeneous**: every term carries the **same units**. Only then can the terms be added once numbers go in.\n\nAfter every algebra step, check the equation still balances. It catches a lot of slips before they reach the plow.\n\nThe workshop now has a **dimension checker** (key **d**) that audits any equation the way the controller does.',
         formula: 'ch01.homogeneity',
@@ -327,6 +339,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: DEPOT_GOAL, timeout: 20 },
+        objective: 'Crash the plow with a formula that balances',
+        brief: 'Type `a = 2*s/t^2 + 2*v/t` or `a = s/t^2 - v/t`. Both balance. Run one.',
         text: 'Now try two slips the audit **can\'t** see. Type either of these, read the audit, and run it:\n\n- the minus sign dropped: `a = 2*s/t^2 + 2*v/t`\n- the ½ forgotten: `a = s/t^2 - v/t`',
         goalText: 'A balanced formula that still misses',
         until: function (ctx, type) {
@@ -343,13 +357,16 @@
       },
       {
         type: 'reveal', kicker: 'Same check, bigger formula', title: 'Why G has such odd units',
+        brief: '*G* carries whatever units make Eq. 1–2 come out in newtons: m³/(kg·s²).',
         eq: 'F = G\\frac{m_1 m_2}{r^2} \\quad \\Rightarrow \\quad \\frac{\\u{m^3}}{\\u{kg·s^2}} \\cdot \\frac{\\u{kg·kg}}{\\u{m^2}} = \\u{kg·m/s^2} = \\u{N}',
         text: 'Newton\'s law of gravitation (Eq. 1–2) has to give a force, so *G* carries whatever units make that happen: $\\u{m^3/(kg·s^2)}$. Two of its three metres cancel the r², one kilogram cancels one of the two masses, and what is left is kg·m/s², exactly a newton.\n\nThat is also how to remember a constant\'s units: they are whatever makes the equation balance.'
       },
       {
         type: 'job', id: 'H9.governor', who: 'juno',
-        yard: { design: LONG.design, camera: LONG.camera, site: LONG.site, bin: [] },
-        text: 'The long spur\'s controller has **no timer**, only the distance to the line, **s = 32 m**, and the speed it reads, **8 m/s**. Its formula was copied off a cab note: `a = -v/(2*s)`.\n\nRead its audit, fix the formula so the plow stops in the box, and run it. The depot won\'t run a controller whose units don\'t balance, so `a = -1` won\'t do.',
+        yard: { design: LONG.design, camera: LONG.camera, site: LONG.site, bin: [{ type: 'push', count: 2, label: 'Hand ram', dials: { force: '1 kN', angle: '180 deg', time: '4 s' } }] },
+        objective: 'Stop the plow in the box. The controller\'s formula must balance',
+        brief: 'This controller has no timer: just s = 32 m and v = 8 m/s. Its cab-note formula doesn\'t balance. Fix it, or share the braking with the hand rams.',
+        text: 'The long spur\'s controller has **no timer**, only the distance to the line, **s = 32 m**, and the speed it reads, **8 m/s**. Its formula was copied off a cab note: `a = -v/(2*s)`.\n\nRead its audit, fix the formula so the plow stops in the box, and run it. The depot won\'t run a controller whose units don\'t balance, so `a = -1` won\'t do.\n\nYou also have two **hand rams** (pushes) you can clip on the plow. Any mix that stops the plow in the box counts.',
         goalText: 'Plow at rest in the stop box, formula balanced',
         goal: LONG_GOAL,
         timeout: 30,
@@ -364,8 +381,10 @@
       },
       {
         type: 'free', who: 'hask',
-        yard: { design: DEPOT.design, bin: [{ type: 'h09-controller', count: 1, dials: { formula: SLIP, s: '25 m', t: '5 s' } }], goal: DEPOT_GOAL, timeout: 20, poke: false },
-        text: 'The depot spur is yours, with a fresh controller.',
+        yard: { design: DEPOT.design, bin: [{ type: 'h09-controller', count: 1, dials: { formula: SLIP, s: '25 m', t: '5 s' } }, { type: 'push', count: 3, label: 'Hand ram' }, { type: 'speedo' }], goal: DEPOT_GOAL, timeout: 20, poke: false },
+        objective: 'Stop the plow on the depot line, any way you like',
+        brief: 'The depot spur is yours: a fresh controller, hand rams and a speed gauge.',
+        text: 'The depot spur is yours, with a fresh controller, three hand rams and a speed gauge.',
         prompts: [
           'Try `a = -v/t`. It balances. Does it stop on the line in 5 s? Why do these numbers make it agree with the long-spur formula?',
           'Try `a = -v^2/(2*s)` here. Then set **t = 4 s** with `a = 2*s/t^2 - 2*v/t`. What does the plow do?',
