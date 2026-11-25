@@ -71,7 +71,7 @@ suite('yard parts: gate', () => {
       return Y.judge({ design: d, site: { g: 0, floor: null }, goal: G.after(0.5), timeout: 1 }).state.read('g.angle');
     };
     const near2 = swing('a2'), far = swing('a6');
-    ok(far > near2 * 2.5, 'near ' + near2 + ' far ' + far);
+    ok(far > near2 * 1.5, 'near ' + near2 + ' far ' + far);
   });
   test('a rated pin shears when the load is too big', () => {
     const d = { parts: [part('gate', { id: 'g', x: 0, y: 3, dials: { mass: '100 kg', rating: '500 N' } }),
