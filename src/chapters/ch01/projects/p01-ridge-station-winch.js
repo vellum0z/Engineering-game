@@ -106,11 +106,22 @@
   var hoverGoal = G.all(
     G.never(function (s) {
       var b = s.breaks[0];
-      return b ? 'The winch line parted: it was dialled to ' + D.format(b.force, D.autoUnit(b.force, 'force'), 3, 'force') + ' and it breaks at 30 kN. The generator went into the pad.' : null;
+      if (!b) return null;
+      if (b.part === 'gov') return 'The winch line parted: it was dialled to ' + D.format(b.force, D.autoUnit(b.force, 'force'), 3, 'force') + ' and it breaks at 30 kN. The generator went into the pad.';
+      return 'Something snapped at ' + D.format(b.force, D.autoUnit(b.force, 'force'), 3, 'force') + '.';
     }),
+    siteGuard(G_SITE, 'The generator is on Cinder Ridge. A site marker can\'t change the gravity it hangs in.'),
     G.never(function (s) {
-      var extra = s.built.design.parts.filter(function (p) { return p.id !== 'gov' && ((p.a && p.a.part === 'gen') || (p.b && p.b.part === 'gen')); })[0];
-      return extra ? 'The ' + (extra.label || Y.partDef(extra.type).name.toLowerCase()) + ' is fixed to the generator. The pad crew needs it hanging free on the winch line alone, or the base plate won\'t seat.' : null;
+      // floating, not slung: nothing fixed may carry the load through a rope or pin
+      var body = s.body('gen'), W = body.m * G_SITE, sling = null;
+      s.world.joints.forEach(function (j) {
+        if (sling || j.broken || (j.bodyA !== body && j.bodyB !== body)) return;
+        var other = j.bodyA === body ? j.bodyB : j.bodyA;
+        if (!other || other.type !== 'static') return;
+        var r = j.reaction ? j.reaction() : null, F = r ? Math.hypot(r.force.x, r.force.y) : 0;
+        if (F > 0.02 * W) sling = (j.userData && j.userData.part) || 'a line';
+      });
+      return sling ? 'The generator is slung from a fixed point (the ' + labelOf(s, sling) + '). Slung, it can\'t float onto the bolts: hold it with a balanced pull, like the governor, a push or a counterweight.' : null;
     }),
     G.never(function (s) {
       var hit = touching(s, 'gen');
@@ -128,6 +139,11 @@
     }),
     G.after(BOLT_TIME)
   );
+  function labelOf(s, id) { var p = s.part(id); return p ? (p.inst.label || p.def.name.toLowerCase()) : String(id); }
+  // The job's place sets its gravity; a site marker moving the yard elsewhere doesn't count.
+  function siteGuard(g, text) {
+    return G.never(function (s) { return Math.abs(-s.world.gravity.y - g) > 1e-6 * g ? text : null; });
+  }
   var hoverMargin = function (s) { return Math.round(Math.min(20, s.peakOf('drift') * 1000)); };
 
   // The drift a failed hover shows, read back through Newton's second law.
@@ -160,10 +176,12 @@
   // Every crate stays on its scale through the check, and nothing is rejected.
   var CHECK_T = 2;
   var depotGoal = G.all(
+    siteGuard(G_STD, 'These crates are checked at the depot, at standard gravity. A site marker can\'t move the depot.'),
     G.never(function (s) {
       for (var i = 0; i < SPARES.length; i++) {
         var w = s.part('cw-' + SPARES[i].id);
         if (w && w.verdict && w.verdict.empty) return 'Nothing was standing on the ' + SPARES[i].name + ' scale at the check.';
+        if (w && w.verdict && w.verdict.untagged) return 'The depot checkweigher **rejected the ' + SPARES[i].name + '**: it has no weight tag.';
         if (w && w.verdict && !w.verdict.ok) return 'The depot checkweigher **rejected the ' + SPARES[i].name + '**: its tag is ' + offText(w.verdict.off) + ' against the scale. The line allows 0.15 %.';
       }
       return null;
@@ -175,6 +193,8 @@
 
   SE.content.registerProject('ch01', {
     id: 'P1', order: 1, title: 'Ridge Station Winch', subtitle: 'Weight is a local number',
+    objective: 'Float the 1850 kg generator still over the pad for 45 s',
+    pitch: 'The generator has to float dead still over the pad while the crew bolts it down. Up on the ridge, gravity is a little weaker than the number you know.',
     brief: [
       'The relay station on Cinder Ridge keeps our radio link to the coast caravans. Its generator died last winter. We have a rebuilt one, **1850 kg** on the nameplate, hanging on the gantry winch over the new pad.',
       'The pad crew needs the generator to **hover**, dead still, a metre above the bolts while they line up the base plate and torque it down. That takes **45 seconds**. The winch has a precision governor that holds whatever line tension you dial in. Dial the wrong number and the generator walks up or down on its own.',
@@ -186,18 +206,20 @@
       'Gravity at sea level, latitude φ: **g = 9.780327(1 + 0.0053024 sin²φ − 0.0000058 sin²2φ) m/s²**. Take off **3.086(10⁻⁶) m/s² per metre** of elevation.',
       'The governor dial shows **4 significant figures**. Its trim can absorb **±0.2 %** of the dialled tension; beyond that the load accelerates.',
       'The bolt holes line up within **±25 mm**. The gantry line breaks at **30 kN**.',
+      'The generator has to **float**: any balanced pull works (the governor, a push, a counterweight over a sheave, or a mix). A sling tied off to something fixed can\'t float onto the bolts, so it doesn\'t count.',
       'The backup winch is US-made: its tension dial reads **lb**, and in mass mode its controller wants the load in **slug** and multiplies by the g its own gravimeter measures.',
       'Spec-sheet weights use **standard gravity (9.81 m/s²)** so a tag reads the same at every depot. The depot checkweighers reject a tag more than **0.15 %** off.',
       'Conversion factors: 1 lb = 4.448 N, 1 slug = 14.59 kg.'
     ],
     yard: {
       site: { g: G_SITE, floor: 'concrete' },
-      camera: { fit: { lo: { x: -10, y: -0.5 }, hi: { x: 5, y: 8.5 } } },
+      camera: { fit: { lo: { x: -10, y: -0.5 }, hi: { x: 5, y: 9.8 } } },
       design: STATION
     },
     jobs: [
       {
-        id: 'P1.hover', label: '**Hover the generator** on the station governor for the 45 s bolt-up',
+        id: 'P1.hover', label: 'Float the generator within ±25 mm for 45 s. The station governor holds the line tension you dial.',
+        objective: 'Float the generator ±25 mm for 45 s, not slung',
         design: STATION,
         goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
         hints: [
@@ -209,7 +231,8 @@
         success: function (ctx) { return 'Bolted down without anyone touching the load. ' + trimNote(ctx) + '\n\nThat is statics: Newton\'s second law with **a = 0**, so T = W, and W = m g with *this* site\'s g.'; }
       },
       {
-        id: 'P1.lb', label: 'Same hover on the **US-made backup winch**, dialled in lb',
+        id: 'P1.lb', label: 'The same float on the US-made backup winch. Its dial is printed in **lb**.',
+        objective: 'Float it again on the backup winch (dial in lb)',
         design: BACKUP_LB,
         goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
         hints: [
@@ -221,7 +244,8 @@
         success: function (ctx) { return 'Held on the backup winch too. ' + trimNote(ctx) + ' A force is a force: 18.08 kN and 4066 lb are the same pull on the same line.'; }
       },
       {
-        id: 'P1.slug', label: 'Backup winch in **mass mode**: give its controller the generator\'s mass in slugs',
+        id: 'P1.slug', label: 'The backup winch in **mass mode**: it takes the load in **slug** and multiplies by the g it measures.',
+        objective: 'Float it with the backup winch in mass mode (slug)',
         design: BACKUP_SLUG,
         goal: hoverGoal, timeout: BOLT_TIME + 1, margin: hoverMargin,
         hints: [
@@ -233,9 +257,10 @@
         success: function (ctx) { return 'Held. The controller multiplied your mass by the ridge\'s own g and got the right pull. ' + trimNote(ctx) + ' Mass never changes with place, which is why the nameplate is in kg and not in newtons.'; }
       },
       {
-        id: 'P1.tags', label: '**Tag the spare parts** for the depot spec sheet: the timing crystal, the rotor bearing and the spare transformer',
+        id: 'P1.tags', label: 'Write a weight tag on each spare-part crate. The depot scale kicks off any crate whose tag is wrong.',
+        objective: 'Tag all three crates so the depot scale accepts them',
         design: DEPOT,
-        yard: { site: { g: G_STD, floor: 'concrete' }, camera: { fit: { lo: { x: -8, y: -0.5 }, hi: { x: 7, y: 3 } } } },
+        yard: { site: { g: G_STD, floor: 'concrete' }, camera: { fit: { lo: { x: -7.5, y: -0.3 }, hi: { x: 6.5, y: 4.2 } } } },
         goal: depotGoal, timeout: CHECK_T + 1.5,
         hints: [
           'Read the site conditions again: which g does the spec sheet use? These crates are being checked at the depot, not on the ridge.',
@@ -248,24 +273,34 @@
     solutions: {
       'P1.hover': [
         { set: { gov: { tension: '18.08 kN' } } },
+        // governor short of the weight, an upward push makes up the rest: 17 000 + 1084 = 18 084 N
+        { set: { gov: { tension: '17.00 kN' } }, add: [{ type: 'push', a: { part: 'gen' }, dials: { force: '1084 N', angle: '90 deg', time: '60 s' } }] },
+        // a counterweight on a cable over a sheave takes 315.5 kg × 9.775 = 3084 N; the governor the other 15 kN
+        { set: { gov: { tension: '15.00 kN' } }, add: [
+          { id: 'sh', type: 'sheave', x: 1.2, y: 5.3, dials: { size: '2.4 m' } },
+          { id: 'cw', type: 'counterweight', x: 2.4, y: 3.5, dials: { mass: '315.5 kg' } },
+          { type: 'cable', a: { part: 'gen', anchor: 'top' }, b: { part: 'cw', anchor: 'top' }, dials: { rating: '20 kN', route: 'over sheave' } }] },
         { pass: false, set: { gov: { tension: '18.15 kN' } } },     // 1850 × 9.81: climbs into the head block
         { pass: false, set: { gov: { tension: '18.08 MN' } } },     // prefix slip: the line parts
-        { pass: false, set: { gov: { tension: '18.08 kN' } }, add: [{ type: 'cable', a: { part: 'testhook', anchor: 'eye' }, b: { part: 'gen', anchor: 'top' }, dials: { rating: '50 kN' } }] }
+        { pass: false, set: { gov: { tension: '0 kN' } }, add: [{ type: 'cable', a: { part: 'testhook', anchor: 'eye' }, b: { part: 'gen', anchor: 'top' }, dials: { rating: '50 kN' } }] }
       ],
       'P1.lb': [
         { set: { gov: { tension: '4066 lb' } } },
+        { set: { gov: { tension: '3800 lb' } }, add: [{ type: 'push', a: { part: 'gen' }, dials: { force: '1182 N', angle: '90 deg', time: '60 s' } }] },   // 16 902 + 1182 N
         { pass: false, set: { gov: { tension: '4080 lb' } } },      // standard-g weight in lb
         { pass: false, set: { gov: { tension: '18084 lb' } } },     // forgot to convert: snaps
         { pass: false, set: { gov: { tension: '18.08 kN' } } }      // the dial only reads lb
       ],
       'P1.slug': [
         { set: { gov: { mass: '126.8 slug' } } },
+        { set: { gov: { mass: '120.0 slug' } }, add: [{ type: 'push', a: { part: 'gen' }, dials: { force: '970 N', angle: '90 deg', time: '60 s' } }] },   // 17 114 + 970 N
         { pass: false, set: { gov: { mass: '126.3 slug' } } },      // site weight / 32.2 ft/s²
         { pass: false, set: { gov: { mass: '1850 slug' } } },       // forgot to convert: snaps
         { pass: false, set: { gov: { mass: '1850 kg' } } }          // the controller only reads slug
       ],
       'P1.tags': [
         { set: { crystal: { tag: '728 mN' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 kN' } } },
+        { set: { crystal: { tag: '0.1637 lb' }, bearing: { tag: '0.626 kN' }, xfmr: { tag: '18.64 kip' } } },     // other units, same weights
         { pass: false, set: { crystal: { tag: '725 mN' }, bearing: { tag: '624 N' }, xfmr: { tag: '82.6 kN' } } },   // ridge g
         { pass: false, set: { crystal: { tag: '728 N' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 kN' } } },    // prefix slip
         { pass: false, set: { crystal: { tag: '728 mN' }, bearing: { tag: '626 N' }, xfmr: { tag: '82.9 N' } } }     // Mg read as a small mass
@@ -468,7 +503,7 @@
     size: { w: 1, h: 1 },
     dials: [
       { key: 'mass', label: 'Mass', q: 'mass', def: '1 kg', locked: true },
-      { key: 'tag', label: 'Weight tag', q: 'force', def: '' },
+      { key: 'tag', label: 'Weight tag', q: 'force', def: '', optional: true },
       { key: 'w', label: 'Width', q: 'length', def: '1 m', locked: true },
       { key: 'h', label: 'Height', q: 'length', def: '1 m', locked: true }
     ],
@@ -481,7 +516,7 @@
     draw: function (ctx, cam, built) {
       var c = built.body.c, s = cam.worldToScreen({ x: c.x, y: c.y + built.h / 2 + 0.35 });
       label(ctx, s, (built.inst.label || '') + ' · ' + built.inst.dials.mass);
-      label(ctx, cam.worldToScreen({ x: c.x, y: c.y + built.h / 2 + 0.12 }), 'tag ' + built.inst.dials.tag, '#e6b422');
+      label(ctx, cam.worldToScreen({ x: c.x, y: c.y + built.h / 2 + 0.12 }), built.inst.dials.tag ? 'tag ' + built.inst.dials.tag : 'no tag yet', '#e6b422');
     }
   });
 
@@ -514,7 +549,8 @@
         if (out.verdict !== null || world.time < CHECK_T - 1e-9) { if (out.verdict === null) out.reading = load().F; return; }
         var r = load(); out.reading = r.F;
         var crate = r.top && r.top.userData && r.top.userData.part, bp = crate && b.out.parts[crate];
-        if (!bp || bp.tag == null) { out.verdict = { ok: false, empty: true }; return; }
+        if (!bp) { out.verdict = { ok: false, empty: true }; return; }
+        if (bp.tag == null) { out.verdict = { ok: false, untagged: true }; out.kick = { body: r.top, until: world.time + 0.3 }; return; }
         var off = bp.tag / r.F - 1;
         out.verdict = { ok: Math.abs(off) <= 0.0015, off: off };
         if (!out.verdict.ok) out.kick = { body: r.top, until: world.time + 0.3 };
