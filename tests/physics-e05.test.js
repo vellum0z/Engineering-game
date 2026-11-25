@@ -463,3 +463,53 @@ suite('physics e05: lines holding a beam end', () => {
     near(r.F, r.R, 0.02, 'force');
   });
 });
+
+suite('physics e05: rods in the joint block', () => {
+  // a 3 m boom pinned to a wall, braced by a rod to a point 2 m below, a
+  // 100 kg load hung from a light 2 kg tip plate pinned to the boom
+  function bracedBoom() {
+    const w = world(), wall = w.add(new P.Body({ type: 'static', position: { x: 0, y: 5 }, shapes: [P.box(0.1, 2)] }));
+    const boom = w.add(new P.Body({ position: { x: 1.5, y: 6 }, shapes: [{ shape: P.box(1.5, 0.05), group: -9 }], mass: 20 }));
+    const tip = w.add(new P.Body({ position: { x: 3, y: 6 }, shapes: [{ shape: P.box(0.1, 0.1), group: -9 }], mass: 2 }));
+    w.addJoint(new P.RevoluteJoint({ bodyA: wall, bodyB: boom, worldAnchor: { x: 0, y: 6 } }));
+    w.addJoint(new P.RevoluteJoint({ bodyA: boom, bodyB: tip, worldAnchor: { x: 3, y: 6 } }));
+    const rod = w.addJoint(new P.DistanceJoint({ bodyA: wall, bodyB: tip, worldAnchorA: { x: 0, y: 4 }, localAnchorA: { x: 0, y: -1 }, localAnchorB: { x: 0, y: 0 } }));
+    const load = crate(w, 3, 3.5, 100);
+    const sling = w.addJoint(new P.DistanceJoint({ bodyA: tip, bodyB: load, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
+    return { w, rod, sling, tip, load };
+  }
+  test('a rod bracing a pinned boom is a row of the pins\' block, not a line block', () => {
+    const { w, rod, sling } = bracedBoom();
+    w.step(1 / 60);
+    ok(rod.block && rod.block.joints && rod.inJointBlock(), 'rod in the joint block');
+    ok(!rod.lineBlock, 'rod not in a line block');
+    ok(sling.lineBlock, 'sling still in a line block');
+  });
+  test('the braced boom holds 100 kg on a 2 kg tip: rod and tip within 5 mm, rod force = statics (within 2%)', () => {
+    // tip at (3, 6), rod from (0, 4): the rod carries the tip's load with
+    // F = W·|rod|/2 and half the boom's weight with F = W·|rod|/4
+    const { w, rod, tip } = bracedBoom();
+    let gap = 0, speed = 0;
+    for (let s = 0; s < 600; s++) {
+      w.step(1 / 60);
+      gap = Math.max(gap, Math.abs(rod.currentLength() - rod.length));
+      w.bodies.forEach(b => { speed = Math.max(speed, Math.hypot(b.v.x, b.v.y)); });
+    }
+    ok(gap < 5e-3, 'rod gap ' + (gap * 1000).toFixed(2) + ' mm');
+    ok(speed < 5, 'fastest body ' + speed.toFixed(2) + ' m/s');
+    near(-rod.tension(), (100 + 2) * g * Math.sqrt(13) / 2 + 20 * g * Math.sqrt(13) / 4, 0.02, 'rod compression');
+    ok(Math.abs(tip.c.y - 6) < 0.005, 'tip held at ' + tip.c.y.toFixed(4));
+  });
+  test('a chain of rods with no pins stays in the line blocks', () => {
+    const w = world(), c = ceiling(w);
+    let prev = c, anchor = { x: 0, y: -0.1 };
+    const rods = [];
+    for (let i = 0; i < 5; i++) {
+      const b = weight(w, 0, 9.5 - 0.5 * i, 0.5, 0.05);
+      rods.push(w.addJoint(new P.DistanceJoint({ bodyA: prev, bodyB: b, localAnchorA: anchor })));
+      prev = b; anchor = { x: 0, y: 0 };
+    }
+    w.step(1 / 60);
+    rods.forEach((r, i) => { ok(!r.inJointBlock() && r.lineBlock && !r.blockSlots().length, 'rod ' + i); });
+  });
+});

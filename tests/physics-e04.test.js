@@ -341,3 +341,95 @@ suite('physics E04: saving joints', () => {
     ok(Math.abs(w.bodies[2].c.x - B.bodies[2].c.x) < 1e-12, 'replay should match');
   });
 });
+
+suite('physics E04: builds nobody planned stay stable', () => {
+  function speeds(w) { let v = 0; w.bodies.forEach(b => { v = Math.max(v, M.len(b.v) + Math.abs(b.w)); }); return v; }
+  function floorWorld() {
+    const w = world();
+    w.add(new P.Body({ type: 'static', position: { x: 0, y: -0.5 }, shapes: [P.box(60, 0.5)] }));
+    return w;
+  }
+
+  test('a 1 kg box pinned through a long lever to a 3000 kg box: no blow-up in 10 s', () => {
+    // Pin halfway between them: 2.5 m lever on each side, mass ratio 3000.
+    [true, false].forEach(block => {
+      const w = floorWorld(); w.jointBlockSolve = block;
+      const big = w.add(new P.Body({ position: { x: 0, y: 2 }, shapes: [P.box(0.5, 0.5)], mass: 3000 }));
+      const small = w.add(new P.Body({ position: { x: 5, y: 2 }, shapes: [P.box(0.1, 0.1)], mass: 1 }));
+      w.addJoint(new P.RevoluteJoint({ bodyA: big, bodyB: small, worldAnchor: { x: 2.5, y: 2 } }));
+      let peak = 0;
+      w.run(10, 1 / 60, () => { peak = Math.max(peak, speeds(w)); });
+      ok(isFinite(peak) && peak < 30, (block ? 'group' : 'plain') + ' solve: peak speed ' + peak);
+    });
+  });
+
+  test('two pins between the same pair (over-constrained, as a weld): no blow-up, the pair holds together', () => {
+    [[0.5, 3], [0.7, 3.1]].forEach(second => {
+      const w = floorWorld();
+      const A = w.add(new P.Body({ position: { x: 0, y: 3 }, shapes: [P.box(0.5, 0.2)], mass: 10 }));
+      const B = w.add(new P.Body({ position: { x: 1, y: 3 }, shapes: [P.box(0.5, 0.2)], mass: 10 }));
+      const j1 = w.addJoint(new P.RevoluteJoint({ bodyA: A, bodyB: B, worldAnchor: { x: 0.5, y: 3 } }));
+      const j2 = w.addJoint(new P.RevoluteJoint({ bodyA: A, bodyB: B, worldAnchor: { x: second[0], y: second[1] } }));
+      const gapNow = () => Math.max(M.dist(j1.anchorA(), j1.anchorB()), M.dist(j2.anchorA(), j2.anchorB()));
+      let peak = 0, gap = 0;
+      w.run(10, 1 / 60, () => { peak = Math.max(peak, speeds(w)); gap = Math.max(gap, gapNow()); });
+      ok(isFinite(peak) && peak < 15, 'peak speed ' + peak);
+      // landing from 3 m opens the pins for a moment (a single pin does the same)
+      ok(gap < 0.02, 'pins opened by ' + (gap * 1000).toFixed(1) + ' mm on landing');
+      ok(gapNow() < 0.001, 'pins still open by ' + (gapNow() * 1000).toFixed(2) + ' mm at rest');
+    });
+  });
+
+  test('a light box welded far out between heavy ones (a star of long welds) settles without gaining energy', () => {
+    // high enough that no box starts inside the floor
+    const w = floorWorld();
+    const hub = w.add(new P.Body({ position: { x: 0, y: 5 }, shapes: [P.box(0.1, 0.1)], mass: 1 }));
+    for (let i = 0; i < 5; i++) {
+      const a = 2 * Math.PI * i / 5, p = { x: 4 * Math.cos(a), y: 5 + 4 * Math.sin(a) };
+      const b = w.add(new P.Body({ position: p, shapes: [P.box(0.3, 0.3)], mass: 2000 }));
+      w.addJoint(new P.WeldJoint({ bodyA: hub, bodyB: b, worldAnchor: M.lerp(hub.c, p, 0.5) }));
+    }
+    const E = () => w.bodies.reduce((e, b) => b.type === 'dynamic' ? e + b.kineticEnergy() + b.m * g * b.c.y : e, 0);
+    const E0 = E(); let Emax = E0, peak = 0;
+    w.run(8, 1 / 60, () => { Emax = Math.max(Emax, E()); peak = Math.max(peak, speeds(w)); });
+    ok(isFinite(peak) && peak < 20, 'peak speed ' + peak);
+    ok(Emax <= E0 + 0.01 * Math.abs(E0) + 1, 'energy rose from ' + E0.toFixed(0) + ' to ' + Emax.toFixed(0) + ' J');
+  });
+
+  function ramPair(def) {
+    const w = world({ gravity: { x: 0, y: 0 } });
+    const a = w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 } }));
+    const b = w.add(new P.Body({ position: { x: 1, y: 0 }, shapes: [{ shape: P.box(0.2, 0.2), sensor: true }], mass: def.mass }));
+    const ram = w.addJoint(new P.PrismaticJoint(Object.assign({ bodyA: a, bodyB: b, worldAnchor: { x: 1, y: 0 }, worldAxis: { x: 1, y: 0 } }, def.ram)));
+    return { w, b, ram };
+  }
+
+  test('a force ram follows F = ma over its whole stroke (no speed cap by default)', () => {
+    const F = 200, m = 2, a = F / m;
+    const { w, b, ram } = ramPair({ mass: m, ram: { motorForce: F, upperTranslation: 3 } });
+    ok(ram.maxRamSpeed === Infinity, 'default maxRamSpeed ' + ram.maxRamSpeed);
+    let worst = 0, steps = 0;
+    while (ram.translation() < 1.9 && steps++ < 600) {
+      const v0 = b.v.x;
+      w.step(1 / 60);
+      worst = Math.max(worst, Math.abs((b.v.x - v0) * 60 / a - 1));
+    }
+    ok(steps > 10 && worst < 0.01, 'acceleration off F/m by ' + (worst * 100).toFixed(2) + '% over ' + steps + ' steps');
+  });
+
+  test('a 20 kN ram on a 1 kg part is stopped by its stroke limit without gaining energy', () => {
+    const F = 20000, stroke = 0.5;
+    const { w, b, ram } = ramPair({ mass: 1, ram: { motorForce: F, upperTranslation: stroke } });
+    let Emax = 0;
+    w.run(2, 1 / 60, () => { Emax = Math.max(Emax, b.kineticEnergy()); });
+    ok(Emax <= F * stroke * 1.01, 'kinetic energy ' + Emax.toFixed(0) + ' J > ram work ' + F * stroke + ' J');
+    ok(Math.abs(ram.translation() - stroke) < 0.01 && M.len(b.v) < 0.1, 'held at ' + ram.translation().toFixed(3) + ' m, moving ' + M.len(b.v).toFixed(3) + ' m/s');
+  });
+
+  test('an explicit stroke speed limit (maxRamSpeed) stops a 20 kN ram on 1 kg from accelerating', () => {
+    const { w, ram } = ramPair({ mass: 1, ram: { motorForce: 20000, maxRamSpeed: 1.5 } });
+    let peak = 0;
+    w.run(2, 1 / 60, () => { peak = Math.max(peak, ram.speed()); });
+    ok(peak < 1.5 * 1.02, 'ram speed ' + peak);
+  });
+});

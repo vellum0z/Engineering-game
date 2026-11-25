@@ -76,12 +76,51 @@
   WeldJoint.prototype.solve = function (h, useBias) {
     if (this.angularSpring) this.solveAngular(h, useBias);
     if (this.linearSpring) this.solvePoint(h, useBias);
-    if (this.block) { if (this.blockLeader) P.jointBlock.solve(this.block, h, useBias); }
+    if (this.block) P.jointBlock.member(this, h, useBias);
     else this.blockSolveOwn(h, useBias);
   };
   WeldJoint.prototype.blockSolveOwn = function (h, useBias) {
+    if (!this.angularSpring && !this.linearSpring && this.axialK > 0) { this.solveRigid3(h, useBias); return; }
     if (!this.angularSpring) this.solveAngular(h, useBias);
     if (!this.linearSpring) this.solvePoint(h, useBias);
+  };
+
+  // A fully rigid weld on its own: point and angle solved together as one
+  // 3×3 block. Solving them one after the other converges very slowly when
+  // the anchor is far from a light body's centre (the two parts fight
+  // through the long lever arm).
+  WeldJoint.prototype.solveRigid3 = function (h, useBias) {
+    var A = this.bodyA, B = this.bodyB;
+    var a = this.frame(A, this.localAnchorA), b = this.frame(B, this.localAnchorB), rA = a.r, rB = b.r;
+    var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
+    var k11 = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
+    var k12 = -rA.y * rA.x * iA - rB.y * rB.x * iB;
+    var k22 = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
+    var k13 = -rA.y * iA - rB.y * iB, k23 = rA.x * iA + rB.x * iB, k33 = iA + iB;
+    var cd = P.relVel(A, B, rA, rB), c3 = B.w - A.w;
+    var bx = 0, by = 0, bw = 0, ms = 1, is = 0;
+    if (useBias) {
+      var soft = this.jointSoft;
+      bx = (b.p.x - a.p.x) * soft.biasRate; by = (b.p.y - a.p.y) * soft.biasRate;
+      var cap = P.capBias2(bx, by, P.MAX_JOINT_PUSH); bx *= cap; by *= cap;
+      bw = P.capBias(soft.biasRate * this.angle(), P.MAX_JOINT_TURN);
+      ms = soft.massScale; is = soft.impulseScale;
+    }
+    var r1 = cd.x + bx, r2 = cd.y + by, r3 = c3 + bw;
+    // K⁻¹ r by Cramer's rule (K is symmetric positive definite here)
+    var c11 = k22 * k33 - k23 * k23, c12 = k13 * k23 - k12 * k33, c13 = k12 * k23 - k13 * k22;
+    var det = k11 * c11 + k12 * c12 + k13 * c13;
+    if (!(det > 1e-12 * k11 * k22 * k33)) { this.solveAngular(h, useBias); this.solvePoint(h, useBias); return; }
+    var c22 = k11 * k33 - k13 * k13, c23 = k12 * k13 - k11 * k23, c33 = k11 * k22 - k12 * k12;
+    var x = (c11 * r1 + c12 * r2 + c13 * r3) / det;
+    var y = (c12 * r1 + c22 * r2 + c23 * r3) / det;
+    var z = (c13 * r1 + c23 * r2 + c33 * r3) / det;
+    var L = this.linearImpulse;
+    var ix = -ms * x - is * L.x, iy = -ms * y - is * L.y, iz = -ms * z - is * this.angularImpulse;
+    this.linearImpulse = M.v(L.x + ix, L.y + iy); this.angularImpulse += iz;
+    var pv = M.v(ix, iy);
+    P.applyPair(A, B, rA, rB, pv);
+    A.w -= iA * iz; B.w += iB * iz;
   };
 
   WeldJoint.prototype.solveAngular = function (h, useBias) {
@@ -92,7 +131,7 @@
       imp = P.springDelta(this.angularStiffness, this.angularDamping, h, C, Cdot, this.axialK, this.angularImpulse);
     } else {
       var bias = 0, ms = 1, is = 0;
-      if (useBias) { bias = this.jointSoft.biasRate * C; ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+      if (useBias) { bias = P.capBias(this.jointSoft.biasRate * C, P.MAX_JOINT_TURN); ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
       imp = -this.axialMass * ms * (Cdot + bias) - is * this.angularImpulse;
     }
     this.angularImpulse += imp;
@@ -114,6 +153,7 @@
       var bx = 0, by = 0, pms = 1, pis = 0;
       if (useBias) {
         bx = dx * this.jointSoft.biasRate; by = dy * this.jointSoft.biasRate;
+        var cap = P.capBias2(bx, by, P.MAX_JOINT_PUSH); bx *= cap; by *= cap;
         pms = this.jointSoft.massScale; pis = this.jointSoft.impulseScale;
       }
       var r = P.solve2(K, cd.x + bx, cd.y + by);
@@ -123,6 +163,8 @@
     P.applyPair(A, B, rA, rB, li);
   };
 
+  // Rows of its own (springs, motors, rams, limits) solved outside the group.
+  WeldJoint.prototype.blockActive = function () { return !!(this.angularSpring || this.linearSpring); };
   // Rigid rows for P.jointBlock: 0, 1 = anchor x, y; 2 = relative angle.
   WeldJoint.prototype.blockSlots = function () {
     var s = [];
@@ -134,7 +176,7 @@
     if (slot < 2) { P.pointRow(this, slot, r); return; }
     r.ja[0] = 0; r.ja[1] = 0; r.ja[2] = -1;
     r.jb[0] = 0; r.jb[1] = 0; r.jb[2] = 1;
-    r.C = this.angle();
+    r.C = this.angle(); r.angular = true;
   };
   WeldJoint.prototype.blockImpulse = function (slot) {
     return slot === 2 ? this.angularImpulse : (slot ? this.linearImpulse.y : this.linearImpulse.x);
@@ -142,6 +184,14 @@
   WeldJoint.prototype.blockAdd = function (slot, d) {
     if (slot === 2) this.angularImpulse += d;
     else this.linearImpulse = slot ? M.v(this.linearImpulse.x, this.linearImpulse.y + d) : M.v(this.linearImpulse.x + d, this.linearImpulse.y);
+  };
+
+  WeldJoint.prototype.postStep = function (dt) { if (this.blockLeader && this.block) P.jointBlock.guard(this.block, dt); };
+  WeldJoint.prototype.storedEnergy = function () {
+    var E = 0, c = this.angle(), d = this.offset();
+    if (this.angularStiffness > 0) E += 0.5 * this.angularStiffness * c * c;
+    if (this.linearStiffness > 0) E += 0.5 * this.linearStiffness * (d.x * d.x + d.y * d.y);
+    return E;
   };
 
   WeldJoint.prototype.force = function () { return M.len(this.linearImpulse) * this.invH; };

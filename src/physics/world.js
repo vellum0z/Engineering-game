@@ -55,6 +55,8 @@
       enableSleep: def.enableSleep !== false,
       breakHysteresis: def.breakHysteresis || 1
     };
+    // solve every joint of an island together (island.js)
+    this.islandSolve = def.islandSolve != null ? !!def.islandSolve : !!(P.island && P.island.defaultOn);
     this.bodies = [];
     this.joints = [];
     this.contacts = new Map();        // key -> contact
@@ -94,6 +96,7 @@
 
   /* ---------------------------------------------------------------- step */
   World.prototype.step = function (dt) {
+    if (this.islandSolve && P.island) return P.island.step(this, dt);
     var self = this, n = this.substeps, h = dt / n, invH = 1 / h, cfg = this.cfg, S = stages();
     this.dt = dt;
     CS = S.cs;

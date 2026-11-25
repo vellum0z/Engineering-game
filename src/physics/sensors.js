@@ -454,7 +454,11 @@
     world.joints.forEach(function (j) {
       if (j.broken || j.internal) return;
       var A = j.bodyA, B = j.bodyB;
-      if (j.type === 'winch') { input += j.lineTension() * j.speed * dt; return; }
+      if (j.type === 'winch') {
+        // the island solver substeps, and sums the drum's work as it goes
+        input += world.islandSolve && j.frameWork != null ? j.frameWork : j.lineTension() * j.speed * dt;
+        return;
+      }
       if (j.type === 'revolute' && j.enableMotor && j.motorTorque) {
         input += j.motorTorque() * (avgAt(B).w - avgAt(A).w) * dt;
       } else if (j.type === 'prismatic' && j.motorForceNow && (j.enableMotor || j.motorForce)) {
