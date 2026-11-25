@@ -350,7 +350,16 @@
   );
 
   var balanceGoal = GL.all(siteGuard(gMoonCalc, 'on the lunar platform'),
-    GL.never(function (s) { return pushesOn(s, 'survivor').length ? 'The lift jets are being refuelled. Balance the survivor with a counterweight over the sheave.' : null; }),
+    GL.never(function (s) { return pushesOn(s, 'survivor').length ? 'The lift jets are off for this test. Balance the survivor against a counterweight.' : null; }),
+    GL.never(function (s) {
+      // the objective says "against a counterweight": a line tied to the yard or a fixed part doesn't count
+      var fixed = linksTo(s, 'survivor').some(function (p) {
+        var other = p.inst.a && p.inst.a.part === 'survivor' ? p.inst.b : p.inst.a;
+        if (!other || !other.part || other.part === 'ground') return true;
+        var o = s.body(other.part); return !o || o.type === 'static';
+      });
+      return fixed ? 'That ties the survivor to something fixed. Balance them against a counterweight that hangs free.' : null;
+    }),
     function (s) {
       var dy = s.pos('survivor').y - 3.6;
       if (dy < -BAL_TOL) return { fail: 'The survivor sank **' + fmt(-dy, 'length', 'm') + '**. ' + (linksTo(s, 'survivor').length ? 'The counterweight is lighter than they are.' : 'Nothing is holding them.') };
@@ -363,6 +372,8 @@
   SE.content.registerProject('ch01', {
     id: 'P5', order: 5, title: 'Ghost Satellite & Moon Rig',
     subtitle: 'Gravity, here and elsewhere',
+    objective: 'Six annex jobs: fake the Moon, settle the rumour, wake the bench',
+    pitch: 'An old space-agency annex: a lunar rig, a gravity bench and a Moon platform, all running real physics. Every job is one law, F = G m₁m₂ / r², so build whatever gets the result.',
     brief: [
       'The scavengers broke into the old **space-agency training annex** past the rail spur. There\'s a lunar-gravity rig in the main hall, a gravity bench with two steel balls on it, a lunar training platform, and a wall of laminated placards nobody has checked in thirty years.',
       'There\'s also a rumour going round the depot: a dead satellite is coming down, and a piece of it "as heavy as a car" could flatten the water tower. People are losing sleep.',
@@ -377,11 +388,12 @@
       'The bench balls are cast steel, 450 kg each, radius 240 mm, **touching**. Its test masses are 40 kg and 65 kg with centres 1.20 m apart.',
       'The lunar platform\'s site marker is set to the Moon (the placard there says **5.32 ft/s²**). The survivor weighed **190 lb** on the depot scale.'
     ],
-    yard: yardFor({ site: RIG_SITE, design: RIG, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 9.5 } } } }),
+    yard: yardFor({ site: RIG_SITE, design: RIG, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 11 } } } }),
     jobs: [
       {
-        id: 'P5.rig', label: '**Lunar rig.** Hang a counterweight over the sheave so the **80 kg** trainee falls at the Moon\'s g. The placard says 1.62 m/s²; work it out from the Moon\'s mass and radius before you trust it.',
-        design: RIG, yard: yardFor({ site: RIG_SITE, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 9.5 } } } }),
+        id: 'P5.rig', objective: 'Make the 80 kg trainee fall at Moon g, here in the annex',
+        label: '**Lunar rig.** The 80 kg trainee should fall at the Moon\'s g while standing in the annex on Earth. Work the Moon\'s g out from its mass and radius (📖 Guide).',
+        design: RIG, yard: yardFor({ site: RIG_SITE, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 11 } } } }),
         goal: rigGoal, timeout: T_RIG + 0.5,
         hints: [
           'First the Moon: a body on its surface is pulled by the whole Moon, so $m g = G m M / R^2$. Then the rig: put a **crate** or a **counterweight** on the free side and a **Rope over a sheave** from the trainee\'s harness to the crate.',
@@ -397,8 +409,9 @@
         success: 'A lunar hop on an Earth floor. The placard holds up: $G M / R^2$ = ' + D.fmtNum(gMoonCalc, 4) + ' m/s², and the counterweight that fakes it is ' + D.fmtNum(mcIdeal, 3) + ' kg, not the ' + D.fmtNum(mcStatic, 3) + ' kg you\'d get by ignoring its inertia.'
       },
       {
-        id: 'P5.debris', label: '**The rumour.** On the test mast (400 km up) hang the **500 kg** debris dummy on a breakaway link that **holds its weight** there but **snaps** when it snags (the snag adds 400 N at t = 3 s).',
-        design: MAST, yard: yardFor({ site: ORBIT_SITE, camera: { fit: { lo: { x: -4, y: -1 }, hi: { x: 4, y: 7 } } } }),
+        id: 'P5.debris', objective: 'Hold the 500 kg dummy at 400 km, then let go on the snag',
+        label: '**The rumour.** Hang the **500 kg** dummy from the mast head at 400 km. It must hold while the dummy hangs, then let go when the snag adds **400 N** at t = 3 s.',
+        design: MAST, yard: yardFor({ site: ORBIT_SITE, camera: { fit: { lo: { x: -4, y: -1 }, hi: { x: 4, y: 8.5 } } } }),
         goal: debrisGoal, timeout: T_SNAG + 2.5,
         hints: [
           'A **Cable** is a breakaway link: it snaps above its rated breaking load. Its rating has to sit between the dummy\'s weight **at 400 km** and that weight plus 400 N.',
@@ -414,7 +427,8 @@
         success: 'The link held the dummy\'s **' + fmt(W_DEBRIS, 'force', 'kN') + '** (on the ground it would be ' + fmt(DEBRIS * G_EARTH, 'force', 'kN') + ') and let go on the snag. So a piece up there is still heavy: g at 400 km is ' + f3(gDebris) + ' m/s², about 89 % of the ground value. Orbiting things are not weightless; they are falling around the Earth. And most debris burns up long before it reaches a water tower.'
       },
       {
-        id: 'P5.bench', label: '**Gravity bench.** Ball B floats on an air bearing, touching ball A. Hold it still for **20 s** (the laser gauge allows 2 µm) with a push that exactly cancels A\'s pull.',
+        id: 'P5.bench', objective: 'Keep ball B within 2 µm of where it starts for 20 s',
+        label: '**Gravity bench.** Ball B floats free, touching ball A, and A pulls it in. Cancel that pull so the laser gauge sees under **2 µm** of drift in **20 s**.',
         design: BENCH, yard: yardFor({ site: BENCH_SITE, readouts: ['ballB.pull', 'ballB.drift'], camera: { fit: { lo: { x: -2, y: -0.2 }, hi: { x: 2, y: 2.4 } } } }),
         goal: benchGoal('ballB', T_BENCH, DRIFT_MAX, 'ball B'), timeout: T_BENCH + 1,
         hints: [
@@ -432,7 +446,8 @@
         success: 'Held to the micrometre. The pull between two 450 kg balls is **' + D.fmtNum(F_BALL * 1e6, 3) + ' µN' + '**, about the weight of a few grains of sand. That is why the bench needs an air bearing and a laser to see it at all.'
       },
       {
-        id: 'P5.coil', label: '**Bench controller.** The controller works the hold force out for itself from Eq. 1–2, but its memory lost **G**. Type G with units that make $G m_1 m_2 / r^2$ come out in newtons, in SI base units, and hold test mass B still for **30 s**.',
+        id: 'P5.coil', objective: 'Type G into the controller so mass B holds still for 30 s',
+        label: '**Bench controller.** It works out $G m_1 m_2 / r^2$ itself but lost **G**. Type G with units that make the answer come out in newtons (SI base units score best).',
         design: COIL, yard: yardFor({ site: BENCH_SITE, readouts: ['massB.pull', 'massB.drift', 'coil.force'], camera: { fit: { lo: { x: -1.6, y: -0.2 }, hi: { x: 1.6, y: 2.4 } } } }),
         goal: benchGoal('massB', T_COIL, COIL_DRIFT, 'test mass B'), timeout: T_COIL + 1,
         grade: { part: 'coil', key: 'G', spec: { value: G, unit: 'm^3/(kg·s^2)', sf: 3, form: 'any', expressIn: 'SI' } },
@@ -449,12 +464,13 @@
         success: 'The controller holds the mass against a pull of **' + D.fmtNum(F_AB * 1e6, 3) + ' µN' + '**. With G in $\\u{m^3/(kg·s^2)}$, $G m_1 m_2 / r^2$ is $\\u{m^3/(kg·s^2) · kg · kg / m^2 = kg·m/s^2}$: a newton. Change the masses or move them and it keeps up, because it is the law, not a number, that you gave it.'
       },
       {
-        id: 'P5.hover', label: '**Lunar platform: weight.** The suit\'s lift jet is rated in **pounds**. Set it to hover the survivor (190 lb on the depot scale) for **4 s** on the Moon without rising or sinking more than 15 cm.',
+        id: 'P5.hover', objective: 'Hover the survivor on lift jets alone for 4 s',
+        label: '**Lunar platform: weight.** The survivor weighed **190 lb** at the depot. Hover them on the Moon with lift jets (rated in pounds), within 15 cm for **4 s**. No lines on this test.',
         design: PAD, yard: yardFor({ site: MOON_SITE, camera: { fit: { lo: { x: -4, y: -0.5 }, hi: { x: 4, y: 5 } } } }),
         goal: hoverGoal, timeout: HOVER_T + 0.5,
         hints: [
           'Clip a **Push** onto the survivor pointing up (90°), lasting the whole test. To hover, it must equal their **weight on the Moon**.',
-          'The survivor\'s mass doesn\'t change on the trip. Get it from the Earth weight: $m = W / g = 190 / 32.2$ slug. On the Moon $W_m = m g_m$ with $g_m = 5.30$ ft/s².',
+          'The survivor\'s mass doesn\'t change on the trip. Get it from the Earth weight: $m = W / g = 190 / 32.2$ slug. On the Moon $W_m = m g_m$ with $g_m = 5.32$ ft/s².',
           '$m = 5.90$ slug, so $W_m = 5.90 \\times 5.32 = 31.4$ lb. Set the jet to **31.4 lb** at 90° for 4 s.'
         ],
         onFail: function (ctx) {
@@ -466,8 +482,9 @@
         success: 'Hovering. The survivor weighs about **' + D.fmtNum(W_MOON_LB, 3) + ' lb** on the Moon (' + D.fmtNum(mSlug, 3) + ' slug × 5.32 ft/s²), a sixth of the 190 lb the depot scale showed, because weight is $m g$ and only g changed. Work it in SI from the marker\'s ' + D.fmtNum(gMoonCalc, 4) + ' m/s² and you get ' + D.fmtNum(M_SURV * gMoonCalc / LBF, 3) + ' lb: the course constants are rounded, and the jet doesn\'t mind the difference.'
       },
       {
-        id: 'P5.balance', label: '**Lunar platform: mass.** The jets are being refuelled. Balance the same survivor over the platform sheave with a counterweight, so they stay within 5 cm for **4 s**.',
-        design: MOON_RIG, yard: yardFor({ site: MOON_SITE, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 8.5 } } } }),
+        id: 'P5.balance', objective: 'Balance the survivor against a counterweight, jets off',
+        label: '**Lunar platform: mass.** Jets are off. Balance the same survivor against a hanging counterweight so they stay within 5 cm for **4 s**.',
+        design: MOON_RIG, yard: yardFor({ site: MOON_SITE, extra: ['p05-rope'], camera: { fit: { lo: { x: -5, y: -0.5 }, hi: { x: 5, y: 10 } } } }),
         goal: balanceGoal, timeout: BAL_T + 0.5,
         hints: [
           'Put a **crate** or a **counterweight** on the free side and a **Rope over a sheave** to it. The rope pulls both sides equally, so when does nothing move?',
@@ -489,6 +506,8 @@
           { id: 'cw', type: 'crate', x: SHEAVE_R, y: 4.6, dials: { mass: '57.3 kg' } },
           { type: 'p05-rope', a: { part: 'trainee', anchor: 'top' }, b: { part: 'cw', anchor: 'top' } }
         ] },
+        // a different way: a steady upward push of m (g - g_moon) on the trainee
+        { add: [{ type: 'push', a: { part: 'trainee' }, dials: { force: '655 N', angle: '90 deg', time: '3 s' } }] },
         { pass: false, add: [
           { id: 'cw', type: 'crate', x: SHEAVE_R, y: 4.6, dials: { mass: '66.8 kg' } },
           { type: 'p05-rope', a: { part: 'trainee', anchor: 'top' }, b: { part: 'cw', anchor: 'top' } }
@@ -500,23 +519,31 @@
       ],
       'P5.debris': [
         { add: [{ type: 'cable', a: { part: 'mast', anchor: 'eye' }, b: { part: 'debris', anchor: 'top' }, dials: { rating: '4.5 kN' } }] },
-        { add: [{ type: 'cable', a: { part: 'mast', anchor: 'eye' }, b: { part: 'debris', anchor: 'top' }, dials: { rating: '4.4 kN' } }] },
+        { add: [{ type: 'winch', a: { part: 'mast', anchor: 'eye' }, b: { part: 'debris', anchor: 'top' }, dials: { rating: '4.5 kN', speed: '0 m/s', pull: '20 kN' } }] },
         { pass: false, add: [{ type: 'cable', a: { part: 'mast', anchor: 'eye' }, b: { part: 'debris', anchor: 'top' }, dials: { rating: '4.91 kN' } }] },
         { pass: false, add: [{ type: 'cable', a: { part: 'mast', anchor: 'eye' }, b: { part: 'debris', anchor: 'top' }, dials: { rating: '4.2 kN' } }] }
       ],
       'P5.bench': [
         { add: [{ type: 'push', a: { part: 'ballB' }, dials: { force: '58.6 uN', angle: '0 deg', time: '25 s' } }] },
+        // a different way: a weak spring to a hook, stretched to pull with the same force
+        { add: [{ id: 'hk', type: 'hook', x: R_BALL + 2, y: 1.2 }, { type: 'spring', a: { part: 'ballB' }, b: { part: 'hk', anchor: 'eye' }, dials: { k: '1 N/m', rest: (2 - F_BALL) + ' m', damping: 'none' } }] },
         { pass: false, add: [{ type: 'push', a: { part: 'ballB' }, dials: { force: '235 uN', angle: '0 deg', time: '25 s' } }] },
         { pass: false, add: [{ type: 'push', a: { part: 'ballB' }, dials: { force: '58.6 uN', angle: '0 deg', time: '2 s' } }] }
       ],
       'P5.coil': [
         { set: { coil: { G: '66.7(10^-12) m^3/(kg·s^2)' } } },
         { set: { coil: { G: '6.673e-11 N·m^2/kg^2' } } },
+        // the controller keeps up with heavier masses, because it has the law, not a number
+        { set: { coil: { G: '66.73(10^-12) m^3/(kg·s^2)' }, massA: { mass: '400 kg' }, massB: { mass: '20 kg' } } },
         { pass: false, set: { coil: { G: '6.67(10^-12) m^3/(kg·s^2)' } } },
         { pass: false, set: { coil: { G: '66.7(10^-12) N·m^2' } } }
       ],
       'P5.hover': [
         { add: [{ type: 'push', a: { part: 'survivor' }, dials: { force: '31.3 lb', angle: '90 deg', time: '5 s' } }] },
+        { add: [
+          { type: 'push', a: { part: 'survivor' }, dials: { force: '15.7 lb', angle: '90 deg', time: '5 s' } },
+          { type: 'push', a: { part: 'survivor' }, dials: { force: '70 N', angle: '90 deg', time: '5 s' } }
+        ] },
         { pass: false, add: [{ type: 'push', a: { part: 'survivor' }, dials: { force: '190 lb', angle: '90 deg', time: '5 s' } }] },
         { pass: false, add: [{ type: 'push', a: { part: 'survivor' }, dials: { force: '28 lb', angle: '90 deg', time: '5 s' } }] }
       ],
@@ -525,6 +552,12 @@
           { id: 'cw', type: 'crate', x: SHEAVE_R, y: 3.6, dials: { mass: '86.1 kg' } },
           { type: 'p05-rope', a: { part: 'survivor', anchor: 'top' }, b: { part: 'cw', anchor: 'top' } }
         ] },
+        // a different way: the library counterweight on a cable run over the sheave
+        { add: [
+          { id: 'cw', type: 'counterweight', x: SHEAVE_R, y: 3.6, dials: { mass: '5.90 slug' } },
+          { type: 'cable', a: { part: 'survivor', anchor: 'top' }, b: { part: 'cw', anchor: 'top' }, dials: { route: 'over sheave', rating: '5 kN' } }
+        ] },
+        { pass: false, add: [{ id: 'hk', type: 'hook', x: -SHEAVE_R, y: 5.5 }, { type: 'cable', a: { part: 'hk', anchor: 'eye' }, b: { part: 'survivor', anchor: 'top' } }] },
         { pass: false, add: [
           { id: 'cw', type: 'crate', x: SHEAVE_R, y: 3.6, dials: { mass: '14.2 kg' } },
           { type: 'p05-rope', a: { part: 'survivor', anchor: 'top' }, b: { part: 'cw', anchor: 'top' } }
