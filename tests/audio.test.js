@@ -44,7 +44,10 @@ suite('audio', () => {
 
   test('every sound named in the brief exists', () => {
     const want = ['snap', 'clang', 'thud', 'crash', 'stall', 'click', 'success', 'fail', 'unlock', 'stamp',
-      'ratchet', 'groan', 'whoosh', 'creak', 'splash', 'beep', 'typewriter', 'motor'];
+      'ratchet', 'groan', 'whoosh', 'creak', 'splash', 'beep', 'typewriter', 'motor',
+      // yard sounds (the yard plays good/bad on a result)
+      'place', 'pickup', 'select', 'remove', 'dial', 'hook', 'run', 'pause', 'reset', 'blocked',
+      'good', 'bad', 'poke', 'winch'];
     want.forEach(n => ok(SE.audio.names.indexOf(n) >= 0, 'missing sound ' + n));
   });
 
@@ -85,8 +88,13 @@ suite('audio', () => {
     try {
       eq(SE.audio.play('clang'), false, 'suspended context stays quiet');
       SE.audio.unlock();
-      SE.audio.names.forEach(n => eq(SE.audio.play(n, { pitch: 1.1, volume: 0.8 }), true, n));
-      eq(SE.audio.play('typewriter'), false, 'identical sound right away is rate-limited');
+      // in batches under the voice cap (voices free up on timers, not here)
+      SE.audio.names.forEach((n, i) => {
+        if (i && i % 20 === 0) { SE.audio._reset(); globalThis.AudioContext = Fake; SE.audio.play('click'); SE.audio.unlock(); }
+        eq(SE.audio.play(n, { pitch: 1.1, volume: 0.8 }), true, n);
+      });
+      const last = SE.audio.names[SE.audio.names.length - 1];
+      eq(SE.audio.play(last), false, 'identical sound right away is rate-limited');
       SE.audio.setEnabled(false);
       const before = Fake.count();
       eq(SE.audio.play('beep'), false, 'muted');
@@ -95,6 +103,57 @@ suite('audio', () => {
       SE.audio.ambient(true);
       eq(SE.audio.ambientOn, true);
       SE.audio.ambient(false);
+    } finally {
+      SE.audio._reset();
+      delete globalThis.AudioContext;
+    }
+  });
+
+  test('music: waits for unlock, follows sound and music settings, every bar builds', () => {
+    SE.audio._reset();
+    const Fake = makeFakeAudioContext();
+    globalThis.AudioContext = Fake;
+    try {
+      SE.audio.ambient(true);
+      eq(SE.audio.musicPlaying, false, 'no context yet');
+      SE.audio.play('click');          // creates the (suspended) context
+      SE.audio.ambient(true);
+      eq(SE.audio.musicPlaying, false, 'suspended: waits for unlock');
+      SE.audio.unlock();               // the fake resumes at once
+      SE.audio.ambient(true);
+      eq(SE.audio.musicPlaying, true, 'plays once unlocked');
+      // a full 32-bar loop and a bit, quiet and busy, builds without bad calls
+      SE.audio._musicSteps(16 * 36);
+      SE.audio.setIntensity(1); eq(SE.audio.intensity, 1);
+      SE.audio._musicSteps(16 * 36);
+      SE.audio.duck(1);
+      SE.audio.setMusic(false); eq(SE.audio.musicPlaying, false, 'music setting off');
+      SE.audio.setMusic(true); eq(SE.audio.musicPlaying, true, 'back on');
+      SE.audio.setEnabled(false); eq(SE.audio.musicPlaying, false, 'muting sound stops music');
+      SE.audio.setEnabled(true); eq(SE.audio.musicPlaying, true);
+      SE.audio.ambient(false); eq(SE.audio.musicPlaying, false);
+    } finally {
+      SE.audio._reset();
+      delete globalThis.AudioContext;
+    }
+  });
+
+  test('yard hooks: build, run and reset events play without touching the yard', () => {
+    SE.audio._reset();
+    const Fake = makeFakeAudioContext();
+    globalThis.AudioContext = Fake;
+    try {
+      SE.audio.play('click'); SE.audio.unlock();
+      const y = new SE.yard.Yard({ parts: 'library' });
+      let heard = 0; const real = SE.audio.play;
+      SE.audio.play = function () { heard++; return real.apply(this, arguments); };
+      try {
+        y.emit('place', { part: { type: 'block' } });
+        y.emit('dial', {});
+        y.emit('run', {}); eq(SE.audio.intensity, 1, 'run picks the music up');
+        y.emit('reset', {}); eq(SE.audio.intensity, 0, 'reset calms it');
+        ok(heard >= 4, 'sounds played: ' + heard);
+      } finally { SE.audio.play = real; }
     } finally {
       SE.audio._reset();
       delete globalThis.AudioContext;

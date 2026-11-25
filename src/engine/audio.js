@@ -6,6 +6,7 @@
  * No audio files are loaded, so the game still works from file://.
  *
  * Signal chain:  voice -> master gain -> gentle compressor -> speakers.
+ *                music notes -> music bus (with a duck gain) -> master.
  *
  * The AudioContext is created lazily, inside play() or unlock() only.
  * At load time this file touches nothing, so it is safe in Node and in
@@ -23,9 +24,8 @@
   var enabled = true;
   var volume = 0.7;
 
-  // Ambient bed state.
+  // Music: ambient(true) asks for it; it plays while sound and music are on.
   var ambientWanted = false;
-  var amb = null;          // { gain, nodes[], timer }
 
   // Rate limiting: last start time per sound name (in ms, wall clock) and
   // the minimum spacing for each. Fast UI sounds get short gaps; long,
@@ -35,7 +35,9 @@
     typewriter: 45, click: 40, beep: 60, ratchet: 50, motor: 120,
     snap: 120, clang: 60, thud: 90, crash: 200, stall: 400,
     success: 250, fail: 250, unlock: 300, stamp: 150, groan: 700,
-    whoosh: 80, creak: 250, splash: 200
+    whoosh: 80, creak: 250, splash: 200,
+    place: 60, pickup: 60, select: 50, remove: 60, dial: 30, hook: 60, run: 200, pause: 120,
+    reset: 200, blocked: 300, good: 400, bad: 400, poke: 150, winch: 55
   };
   var DEFAULT_GAP = 50;
   var MAX_VOICES = 24;     // hard cap on overlapping sounds
@@ -384,72 +386,366 @@
       osc.start(t); osc.stop(t + 0.55);
       noise(out, t, { filter: 'bandpass', f: 1800 * p, q: 3, gain: 0.06, attack: 0.05, decay: 0.45 });
       return t + 0.55;
+    },
+
+    // ---- yard sounds: short, bright and friendly, so building and
+    // ---- testing feels like tinkering rather than being graded.
+
+    // A part set down in the yard: a solid little thunk with a tick of metal.
+    place: function (out, t, p) {
+      p *= rnd(0.94, 1.06);
+      tone(out, t, { type: 'sine', f: 190 * p, f2: 95 * p, sweep: 0.07, gain: 0.55, decay: 0.11 });
+      noise(out, t, { filter: 'lowpass', f: 1400 * p, q: 0.8, gain: 0.28, decay: 0.04 });
+      return metal(out, t + 0.004, 760 * p, 0.05, 0.16, [1, 2.76]);
+    },
+
+    // Picking a part from the bin: a rising "bloop".
+    pickup: function (out, t, p) {
+      tone(out, t, { type: 'sine', f: 480 * p, f2: 980 * p, sweep: 0.07, gain: 0.272, decay: 0.09 });
+      return tone(out, t + 0.05, { type: 'triangle', f: 1320 * p, gain: 0.085, decay: 0.06 });
+    },
+
+    // Selecting a part: a soft two-step blip.
+    select: function (out, t, p) {
+      tone(out, t, { type: 'triangle', f: 988 * p, gain: 0.153, decay: 0.05 });
+      return tone(out, t + 0.035, { type: 'triangle', f: 1319 * p, gain: 0.119, decay: 0.07 });
+    },
+
+    // Taking a part away: a falling pop.
+    remove: function (out, t, p) {
+      noise(out, t, { filter: 'bandpass', f: 1800 * p, q: 2, gain: 0.15, decay: 0.03 });
+      return tone(out, t, { type: 'sine', f: 720 * p, f2: 210 * p, sweep: 0.12, gain: 0.2, decay: 0.14 });
+    },
+
+    // Turning a dial: a crisp detent tick.
+    dial: function (out, t, p) {
+      noise(out, t, { filter: 'bandpass', f: 4200 * p, q: 5, gain: 0.374, decay: 0.012 });
+      return tone(out, t, { type: 'triangle', f: 2100 * p, gain: 0.068, decay: 0.02 });
+    },
+
+    // Clipping the first end of a cable or winch line onto an anchor.
+    hook: function (out, t, p) {
+      noise(out, t, { filter: 'highpass', f: 3000 * p, q: 0.7, gain: 0.204, decay: 0.015 });
+      return metal(out, t + 0.002, 1250 * p, 0.09, 0.22, [1, 2.76, 5.4]);
+    },
+
+    // Run: a lever clunks over and the machine winds up with a bright ding.
+    run: function (out, t, p) {
+      tone(out, t, { type: 'sine', f: 150 * p, f2: 80 * p, sweep: 0.06, gain: 0.45, decay: 0.1 });
+      noise(out, t, { filter: 'bandpass', f: 1600 * p, q: 1.5, gain: 0.25, decay: 0.035 });
+      tone(out, t + 0.05, { type: 'sawtooth', f: 180 * p, f2: 520 * p, sweep: 0.22, gain: 0.07, decay: 0.24, lp: 1800 });
+      tone(out, t + 0.24, { type: 'triangle', f: 1047 * p, gain: 0.12, decay: 0.25 });
+      return tone(out, t + 0.31, { type: 'triangle', f: 1568 * p, gain: 0.1, decay: 0.35 });
+    },
+
+    // Pause: two notes stepping down.
+    pause: function (out, t, p) {
+      tone(out, t, { type: 'triangle', f: 880 * p, gain: 0.09, decay: 0.06 });
+      return tone(out, t + 0.07, { type: 'triangle', f: 659 * p, gain: 0.08, decay: 0.09 });
+    },
+
+    // Reset: a quick tape-rewind zip back to the start.
+    reset: function (out, t, p) {
+      noise(out, t, { filter: 'bandpass', f: 3500 * p, f2: 500 * p, sweep: 0.24, q: 2.5, gain: 0.22, decay: 0.26 });
+      tone(out, t, { type: 'triangle', f: 1100 * p, f2: 330 * p, sweep: 0.24, gain: 0.07, decay: 0.26 });
+      return tone(out, t + 0.27, { type: 'sine', f: 523 * p, gain: 0.1, decay: 0.08 });
+    },
+
+    // The build can't run yet: a gentle "nuh-uh", not an alarm.
+    blocked: function (out, t, p) {
+      tone(out, t, { type: 'square', f: 392 * p, gain: 0.05, decay: 0.08, lp: 1600 });
+      return tone(out, t + 0.11, { type: 'square', f: 330 * p, gain: 0.05, decay: 0.12, lp: 1400 });
+    },
+
+    // Objective met: a bouncy marimba run up the scale and a bell on top.
+    good: function (out, t, p) {
+      var notes = [698, 880, 1047, 1397], end = t;
+      for (var i = 0; i < notes.length; i++) {
+        var ti = t + i * 0.075;
+        tone(out, ti, { type: 'sine', f: notes[i] * p, gain: 0.2, decay: 0.32 });
+        end = Math.max(end, tone(out, ti, { type: 'sine', f: notes[i] * p * 3.9, gain: 0.04, decay: 0.06 }));
+      }
+      tone(out, t + 0.33, { type: 'triangle', f: 1760 * p, gain: 0.08, attack: 0.005, decay: 0.6 });
+      tone(out, t + 0.33, { type: 'triangle', f: 2093 * p, gain: 0.06, attack: 0.005, decay: 0.7 });
+      return Math.max(end, metal(out, t + 0.33, 1397 * p, 0.06, 0.9, [1, 2.76]));
+    },
+
+    // Objective not met: a playful "wah-wah" that says "try again", with a
+    // little wobble so it reads as a shrug, not a punishment.
+    bad: function (out, t, p) {
+      var steps = [[415, 392], [370, 330]], end = t;
+      for (var i = 0; i < steps.length; i++) {
+        var ti = t + i * 0.2;
+        var osc = ctx.createOscillator(); osc.type = 'triangle';
+        osc.frequency.setValueAtTime(steps[i][0] * p, ti);
+        osc.frequency.exponentialRampToValueAtTime(steps[i][1] * p, ti + 0.18);
+        var lfo = ctx.createOscillator(); lfo.frequency.value = 7;
+        var lg = ctx.createGain(); lg.gain.value = i ? 8 * p : 0;
+        lfo.connect(lg); lg.connect(osc.frequency);
+        var f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 4;
+        f.frequency.setValueAtTime(400, ti);
+        f.frequency.linearRampToValueAtTime(1800, ti + 0.06);
+        f.frequency.exponentialRampToValueAtTime(500, ti + 0.2 + i * 0.15);
+        var g = env(ti, 0.2, 0.01, 0.2 + i * 0.2, out);
+        osc.connect(f); f.connect(g);
+        var stop = ti + 0.25 + i * 0.22;
+        osc.start(ti); lfo.start(ti); osc.stop(stop); lfo.stop(stop);
+        end = stop;
+      }
+      return end;
+    },
+
+    // Grabbing a body mid-run with the mouse: a springy boing.
+    poke: function (out, t, p) {
+      var osc = ctx.createOscillator(); osc.type = 'sine';
+      osc.frequency.setValueAtTime(220 * p, t);
+      osc.frequency.exponentialRampToValueAtTime(330 * p, t + 0.05);
+      var lfo = ctx.createOscillator(); lfo.frequency.setValueAtTime(18, t);
+      lfo.frequency.exponentialRampToValueAtTime(6, t + 0.3);
+      var lg = ctx.createGain(); lg.gain.setValueAtTime(40 * p, t);
+      lg.gain.exponentialRampToValueAtTime(2, t + 0.3);
+      lfo.connect(lg); lg.connect(osc.frequency);
+      var g = env(t, 0.16, 0.004, 0.3, out);
+      osc.connect(g);
+      osc.start(t); lfo.start(t); osc.stop(t + 0.33); lfo.stop(t + 0.33);
+      return t + 0.33;
+    },
+
+    // Winch drum turning: one gear tooth plus a short motor buzz.
+    winch: function (out, t, p) {
+      noise(out, t, { filter: 'bandpass', f: 2400 * p, q: 6, gain: 0.306, decay: 0.02 });
+      return tone(out, t, { type: 'sawtooth', f: 110 * p, gain: 0.085, decay: 0.05, lp: 900 });
     }
   };
 
-  // --------------------------------------------------------------- ambient
-  // Wind: looping noise through a lowpass whose cutoff is swept by a slow
-  // LFO. Drone: two detuned low saws, heavily filtered. Every so often a
-  // groan plays far away (quiet and dark). The whole bed sits very low.
+  // ----------------------------------------------------------------- music
+  // A light, bouncy loop for the yard: junk-percussion drums (a kick, a
+  // tin-can snare, bottle-cap hats), a plucky bass, offbeat keyboard stabs
+  // and a marimba melody in F major. Everything is synthesized and
+  // scheduled a little ahead of time on the audio clock.
+  //
+  // Form, 32 bars at 104 BPM (about 74 s), then it loops with fresh
+  // melodies in sections 2 and 3 (the hook in section 1 stays the same):
+  //   1  A  hook melody        Fmaj7  Dm7  Gm7  C7
+  //   2  A  new melody         (same chords)
+  //   3  B  new melody         Bbmaj7 Am7  Gm7  C7
+  //   4  A  breather: no melody, a few bell answers
+  // Intensity 0 (building) keeps the drums light; intensity 1 (a run in
+  // progress) adds 16th-note hats, a shaker and a bell counter-line.
 
-  function startAmbient() {
-    if (amb || !getCtx()) return;
-    try {
-      var t = ctx.currentTime;
-      var bed = ctx.createGain();
-      bed.gain.setValueAtTime(0.0001, t);
-      bed.gain.linearRampToValueAtTime(0.05, t + 3);
-      bed.connect(master);
-      var nodes = [];
+  var BPM = 104;
+  var STEP = 60 / BPM / 4;       // one 16th note, in seconds
+  var SWING = 0.16;              // late offbeat 16ths, as a fraction of a step
+  var LOOKAHEAD = 0.25;          // seconds scheduled ahead of the clock
+  var MUSIC_LEVEL = 0.26;        // music bus gain under the master volume
 
-      var wind = ctx.createBufferSource(); wind.buffer = noiseBuf; wind.loop = true;
-      var wf = ctx.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 500; wf.Q.value = 1.5;
-      var lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
-      var lfoG = ctx.createGain(); lfoG.gain.value = 300;
-      lfo.connect(lfoG); lfoG.connect(wf.frequency);
-      var wg = ctx.createGain(); wg.gain.value = 0.9;
-      wind.connect(wf); wf.connect(wg); wg.connect(bed);
-      wind.start(t); lfo.start(t);
-      nodes.push(wind, lfo);
+  var CHORDS = {
+    F: [53, 57, 60, 64], Dm: [50, 53, 57, 60], Gm: [55, 58, 62, 65], C: [48, 52, 55, 58],
+    Bb: [46, 50, 53, 57], Am: [45, 48, 52, 55]
+  };
+  var ROOT = { F: 41, Dm: 38, Gm: 43, C: 36, Bb: 46, Am: 45 };
+  var PROG_A = ['F', 'Dm', 'Gm', 'C'], PROG_B = ['Bb', 'Am', 'Gm', 'C'];
+  // F major pentatonic (F G A C D) from D4 up to C6.
+  var SCALE = [];
+  for (var m = 62; m <= 84; m++) if ([5, 7, 9, 0, 2].indexOf(m % 12) >= 0) SCALE.push(m);
+  // Melody rhythms: [step, length in steps].
+  var MOTIFS = [
+    [[0, 2], [2, 2], [4, 3], [7, 1], [8, 4]],
+    [[0, 3], [3, 3], [6, 2], [8, 2], [10, 4]],
+    [[2, 2], [4, 2], [6, 1], [7, 3], [10, 2], [12, 4]],
+    [[0, 2], [3, 1], [4, 4], [10, 2], [12, 2], [14, 2]]
+  ];
+  var ENDING = [[0, 3], [3, 3], [6, 10]];
 
-      var df = ctx.createBiquadFilter(); df.type = 'lowpass'; df.frequency.value = 180;
-      var dg = ctx.createGain(); dg.gain.value = 0.25;
-      df.connect(dg); dg.connect(bed);
-      [55, 55.4, 82.6].forEach(function (f) {
-        var o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
-        o.connect(df); o.start(t); nodes.push(o);
-      });
+  var musicOn = true;            // the player's music setting
+  var intensity = 0;
+  var mus = null;                // { bus, duck, timer, step, next, loop, phrases }
 
-      // Distant groans go through their own dark filter at low gain.
-      var far = ctx.createBiquadFilter(); far.type = 'lowpass'; far.frequency.value = 600;
-      var farG = ctx.createGain(); farG.gain.value = 0.35;
-      far.connect(farG); farG.connect(bed);
+  function mfreq(n) { return 440 * Math.pow(2, (n - 69) / 12); }
 
-      amb = { gain: bed, nodes: nodes, far: far, timer: null };
-      scheduleGroan();
-    } catch (e) { amb = null; }
+  // Small seeded generator so a melody is the same every time it repeats.
+  function seeded(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var x = Math.imul(s ^ (s >>> 15), 1 | s);
+      x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function nearestScale(n) {
+    var best = 0;
+    for (var i = 1; i < SCALE.length; i++) if (Math.abs(SCALE[i] - n) < Math.abs(SCALE[best] - n)) best = i;
+    return best;
+  }
+  function nearestChordTone(idx, chord) {
+    var pcs = CHORDS[chord].map(function (n) { return n % 12; });
+    var best = idx, d = 99;
+    for (var i = 0; i < SCALE.length; i++) {
+      if (pcs.indexOf(SCALE[i] % 12) < 0) continue;
+      if (Math.abs(i - idx) < d) { d = Math.abs(i - idx); best = i; }
+    }
+    return best;
   }
 
-  function scheduleGroan() {
-    if (!amb || typeof setTimeout === 'undefined') return;
-    amb.timer = later(function () {
-      if (!amb) return;
-      try { SOUNDS.groan(amb.far, ctx.currentTime + 0.05, rnd(0.8, 1.05)); } catch (e) { /* ignore */ }
-      scheduleGroan();
-    }, rnd(12000, 30000));
+  // One 4-bar phrase: bars 1 and 3 share a contour (call and answer), bar 4
+  // lands on a long chord tone. Returns per bar a list of [step, len, midi].
+  function makePhrase(seed, prog) {
+    var r = seeded(seed);
+    var a = MOTIFS[Math.floor(r() * MOTIFS.length)];
+    var b = MOTIFS[Math.floor(r() * MOTIFS.length)];
+    var moves = [-2, -1, -1, 1, 1, 2, 0];
+    var contour = a.map(function () { return moves[Math.floor(r() * moves.length)]; });
+    var start = 4 + Math.floor(r() * 4);
+    function bar(rhythm, chord, cont, from) {
+      var idx = nearestChordTone(from, chord), out = [];
+      for (var i = 0; i < rhythm.length; i++) {
+        if (i) idx = Math.max(0, Math.min(SCALE.length - 1, idx + (cont ? cont[i] : moves[Math.floor(r() * moves.length)])));
+        if (i === rhythm.length - 1) idx = nearestChordTone(idx, chord);
+        out.push([rhythm[i][0], rhythm[i][1], SCALE[idx]]);
+      }
+      return out;
+    }
+    var b1 = bar(a, prog[0], contour, start);
+    var b2 = bar(b, prog[1], null, nearestScale(b1[b1.length - 1][2]));
+    var b3 = bar(a, prog[2], contour, start + 1);
+    var b4 = bar(ENDING, prog[3], null, nearestScale(b3[b3.length - 1][2]));
+    return [b1, b2, b3, b4];
   }
 
-  function stopAmbient() {
-    if (!amb) return;
-    var a = amb; amb = null;
+  // -- instruments; each writes into `out` at time t
+  function mKick(out, t, g) {
+    tone(out, t, { type: 'sine', f: 150, f2: 46, sweep: 0.11, gain: 0.6 * g, decay: 0.22 });
+    noise(out, t, { filter: 'lowpass', f: 1800, q: 0.7, gain: 0.12 * g, decay: 0.012 });
+  }
+  function mCan(out, t, g) {       // tin-can snare
+    noise(out, t, { filter: 'bandpass', f: 2300, q: 1.1, gain: 0.32 * g, decay: 0.09 });
+    tone(out, t, { type: 'triangle', f: 340, f2: 290, sweep: 0.06, gain: 0.16 * g, decay: 0.07 });
+    metal(out, t, 560, 0.035 * g, 0.12, [1, 2.3]);
+  }
+  function mHat(out, t, g, open) {
+    noise(out, t, { filter: 'highpass', f: 7500, q: 0.7, gain: 0.11 * g, decay: open ? 0.11 : 0.025 });
+  }
+  function mShaker(out, t, g) {
+    noise(out, t, { filter: 'bandpass', f: 5200, q: 1.5, gain: 0.05 * g, attack: 0.012, decay: 0.045 });
+  }
+  function mBass(out, t, n, len) {
+    var f = mfreq(n), d = Math.min(0.32, len * STEP * 0.95);
+    tone(out, t, { type: 'triangle', f: f, gain: 0.42, attack: 0.004, decay: d });
+    tone(out, t, { type: 'sawtooth', f: f, gain: 0.09, attack: 0.004, decay: d * 0.7, lp: 520, q: 2 });
+  }
+  function mKeys(out, t, chord, g) {
+    var v = CHORDS[chord];
+    for (var i = 0; i < v.length; i++) {
+      tone(out, t, { type: 'triangle', f: mfreq(v[i] + 12), gain: 0.045 * g, attack: 0.003, decay: 0.16 });
+      tone(out, t, { type: 'sine', f: mfreq(v[i] + 24), gain: 0.012 * g, attack: 0.003, decay: 0.09 });
+    }
+  }
+  function mMarimba(out, t, n, len, g) {
+    var f = mfreq(n), d = Math.min(0.55, 0.18 + len * STEP * 0.5);
+    tone(out, t, { type: 'sine', f: f, gain: 0.2 * g, attack: 0.002, decay: d });
+    tone(out, t, { type: 'sine', f: f * 3.93, gain: 0.04 * g, attack: 0.001, decay: 0.05 });
+    noise(out, t, { filter: 'bandpass', f: f * 2, q: 4, gain: 0.03 * g, decay: 0.01 });
+  }
+  function mBell(out, t, n, g) {
+    var f = mfreq(n);
+    tone(out, t, { type: 'sine', f: f, gain: 0.05 * g, attack: 0.003, decay: 0.7 });
+    tone(out, t, { type: 'sine', f: f * 2.76, gain: 0.015 * g, attack: 0.002, decay: 0.3 });
+  }
+
+  function phraseFor(section, loop) {
+    var key = section + ':' + (section === 0 ? 0 : loop);
+    if (!mus.phrases[key]) mus.phrases[key] = makePhrase(1013 + section * 7919 + (section === 0 ? 0 : loop * 104729), section === 2 ? PROG_B : PROG_A);
+    return mus.phrases[key];
+  }
+
+  function scheduleStep(k, t) {
+    var out = mus.bus;
+    var s = k % 16, barN = Math.floor(k / 16) % 32, loop = Math.floor(k / 512);
+    var section = Math.floor(barN / 8), inPhrase = barN % 4, inSection = barN % 8;
+    var prog = section === 2 ? PROG_B : PROG_A;
+    var chord = prog[inPhrase];
+    var hot = intensity > 0;
+    var fill = inSection === 7;
+
+    // drums
+    if (s === 0 || s === 8 || (s === 6 && barN % 2) || (s === 14 && inPhrase === 3 && !fill) || (s === 11 && hot && barN % 2 === 0)) mKick(out, t, s === 0 ? 1 : 0.8);
+    if (s === 4 || s === 12) mCan(out, t, 1);
+    if (fill && s >= 13) mCan(out, t, 0.45 + (s - 13) * 0.2);
+    if (s === 15 && barN % 4 === 1) mCan(out, t, 0.25);
+    if (s % 2 === 0) mHat(out, t, s % 4 === 2 ? 1 : 0.6, s === 14 && inPhrase === 1);
+    else if (hot) mHat(out, t, 0.35);
+    if (hot && s % 2 === 1) mShaker(out, t, 1);
+
+    // bass: root, a bounce up the octave and a walk into the next chord
+    var root = ROOT[chord];
+    var nextChord = inPhrase === 3 ? (section === 1 ? PROG_B[0] : PROG_A[0]) : prog[inPhrase + 1];
+    var bassPat = { 0: [root, 3], 3: [root, 2], 6: [root + 7, 2], 8: [root + 12, 2], 10: [root, 2], 14: [ROOT[nextChord] - 1, 2] };
+    if (bassPat[s] && !(s === 14 && inPhrase !== 3 && barN % 2 === 0)) mBass(out, t, bassPat[s][0], bassPat[s][1]);
+
+    // offbeat stabs give the loop its upbeat lilt
+    if (s === 2 || s === 6 || s === 10 || s === 14) mKeys(out, t, chord, s === 6 || s === 14 ? 1 : 0.65);
+
+    // melody
+    if (section < 3) {
+      var ph = phraseFor(section, loop)[inPhrase];
+      var g = hot ? 1 : 0.8;
+      for (var i = 0; i < ph.length; i++) if (ph[i][0] === s) mMarimba(out, t, ph[i][2], ph[i][1], g);
+    } else if ((s === 0 || s === 3 || s === 6) && inPhrase % 2 === 1) {
+      var tones = CHORDS[chord];
+      mBell(out, t, tones[[3, 2, 1][s / 3]] + 24, 1);
+    }
+    // bell counter-line while a run is going
+    if (hot && section < 3 && s === 8 && inPhrase % 2 === 0) mBell(out, t, CHORDS[chord][2] + 24, 0.9);
+    if (fill && s === 15) mBell(out, t, 89, 0.8);
+  }
+
+  function pump() {
+    if (!mus || !ctx) return;
+    var t = ctx.currentTime;
+    // After the tab sleeps the clock runs ahead: skip, don't burst.
+    if (mus.next < t - 0.05) { var miss = Math.ceil((t - mus.next) / STEP); mus.step += miss; mus.next += miss * STEP; }
+    while (mus.next < t + LOOKAHEAD) {
+      var when = mus.next + (mus.step % 2 ? SWING * STEP : 0);
+      try { scheduleStep(mus.step, when); } catch (e) { /* ignore */ }
+      mus.step++;
+      mus.next += STEP;
+    }
+  }
+
+  function startMusic() {
+    if (mus || !musicOn || !getCtx()) return;
     try {
-      if (a.timer) clearTimeout(a.timer);
       var t = ctx.currentTime;
-      a.gain.gain.cancelScheduledValues(t);
-      a.gain.gain.setTargetAtTime(0.0001, t, 0.5);
-      a.nodes.forEach(function (n) { try { n.stop(t + 2.5); } catch (e) { /* ignore */ } });
-      later(function () { try { a.gain.disconnect(); } catch (e) { /* ignore */ } }, 3000);
+      var bus = ctx.createGain();
+      bus.gain.setValueAtTime(0.0001, t);
+      bus.gain.linearRampToValueAtTime(MUSIC_LEVEL, t + 1.5);
+      var duck = ctx.createGain(); duck.gain.value = 1;
+      // a touch of lowpass keeps the loop soft behind the sound effects
+      var tone_ = ctx.createBiquadFilter(); tone_.type = 'lowpass'; tone_.frequency.value = 9000;
+      bus.connect(tone_); tone_.connect(duck); duck.connect(master);
+      mus = { bus: bus, duck: duck, timer: null, step: 0, next: t + 0.1, phrases: {} };
+      pump();
+      mus.timer = setInterval(pump, 40);
+      if (mus.timer && mus.timer.unref) mus.timer.unref();
+    } catch (e) { mus = null; }
+  }
+
+  function stopMusic() {
+    if (!mus) return;
+    var a = mus; mus = null;
+    try {
+      clearInterval(a.timer);
+      var t = ctx.currentTime;
+      a.bus.gain.cancelScheduledValues(t);
+      a.bus.gain.setTargetAtTime(0.0001, t, 0.25);
+      later(function () { try { a.duck.disconnect(); } catch (e) { /* ignore */ } }, 2000);
     } catch (e) { /* ignore */ }
+  }
+
+  function syncMusic() {
+    if (ambientWanted && enabled && musicOn && ctx && ctx.state !== 'suspended') startMusic();
+    else stopMusic();
   }
 
   // ------------------------------------------------------------ public API
@@ -496,10 +792,8 @@
         if (!getCtx()) return;
         if (ctx.state === 'suspended' && ctx.resume) {
           var r = ctx.resume();
-          if (r && r.then) r.then(function () { if (ambientWanted && enabled) startAmbient(); }, function () {});
-        } else if (ambientWanted && enabled) {
-          startAmbient();
-        }
+          if (r && r.then) r.then(syncMusic, function () {});
+        } else syncMusic();
       } catch (e) { /* ignore */ }
     },
 
@@ -507,8 +801,7 @@
       try {
         enabled = !!on;
         applyMaster();
-        if (!enabled) stopAmbient();
-        else if (ambientWanted && ctx && ctx.state !== 'suspended') startAmbient();
+        syncMusic();
       } catch (e) { /* ignore */ }
     },
 
@@ -526,24 +819,54 @@
     ambient: function (on) {
       try {
         ambientWanted = !!on;
-        if (!ambientWanted) { stopAmbient(); return; }
-        if (enabled && ctx && ctx.state !== 'suspended') startAmbient();
+        syncMusic();
       } catch (e) { /* ignore */ }
-    }
+    },
+
+    // The player's music setting, separate from sound effects.
+    setMusic: function (on) {
+      try { musicOn = !!on; syncMusic(); } catch (e) { /* ignore */ }
+    },
+
+    // 0 while building, 1 while a run is going (busier drums, bells).
+    setIntensity: function (n) { intensity = n > 0 ? 1 : 0; },
+
+    // Dip the music for a moment so a jingle stands out.
+    duck: function (seconds) {
+      try {
+        if (!mus || !ctx) return;
+        var t = ctx.currentTime, g = mus.duck.gain;
+        g.cancelScheduledValues(t);
+        g.setTargetAtTime(0.35, t, 0.04);
+        g.setTargetAtTime(1, t + (seconds || 1.2), 0.4);
+      } catch (e) { /* ignore */ }
+    },
+
+    // True when a call to play() can be heard (context running, sound on).
+    live: function () { return !!(enabled && ctx && ctx.state === 'running'); }
   };
 
   Object.defineProperty(audio, 'enabled', { get: function () { return enabled; }, set: audio.setEnabled, enumerable: true });
   Object.defineProperty(audio, 'volume', { get: function () { return volume; }, set: audio.setVolume, enumerable: true });
   Object.defineProperty(audio, 'ambientOn', { get: function () { return ambientWanted; }, enumerable: true });
+  Object.defineProperty(audio, 'musicOn', { get: function () { return musicOn; }, enumerable: true });
+  Object.defineProperty(audio, 'musicPlaying', { get: function () { return !!mus; }, enumerable: true });
+  Object.defineProperty(audio, 'intensity', { get: function () { return intensity; }, enumerable: true });
 
   // Drops the context and all state. Used by tests that swap in a fake
   // AudioContext; the game never needs it.
   audio._reset = function () {
-    try { stopAmbient(); } catch (e) { /* ignore */ }
+    try { stopMusic(); } catch (e) { /* ignore */ }
     try { if (ctx && ctx.close) ctx.close(); } catch (e) { /* ignore */ }
-    ctx = master = comp = noiseBuf = null; amb = null;
+    ctx = master = comp = noiseBuf = null; mus = null;
     failed = false; ambientWanted = false; active = 0; lastPlayed = {};
-    enabled = true; volume = 0.7;
+    enabled = true; volume = 0.7; musicOn = true; intensity = 0;
+  };
+  // Tests: schedule `steps` 16ths of music right now (no timer needed).
+  audio._musicSteps = function (steps) {
+    if (!mus) return 0;
+    for (var i = 0; i < steps; i++) { scheduleStep(mus.step, mus.next); mus.step++; mus.next += STEP; }
+    return mus.step;
   };
 
   SE.audio = audio;
