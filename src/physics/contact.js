@@ -141,8 +141,15 @@
     }
   }
 
+  // A beam or truss solver (structures.js) took this contact over this step.
+  function claimed(ct) {
+    var w = ct.structureSolver && ct.fa.body.world;
+    return !!w && ct.structureStep === w.stepCount;
+  }
+
   /* ----------------------------------------------------------- warm start */
   function warmStartContact(ct) {
+    if (claimed(ct)) return;               // solved with its beam or truss (structures.js)
     var A = ct.fa.body, B = ct.fb.body, n = ct.normal, t = ct.tangent;
     var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
     var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
@@ -166,6 +173,7 @@
 
   /* ---------------------------------------------------------------- solve */
   function solveContact(ct, invH, useBias, cfg) {
+    if (claimed(ct)) return 0;             // solved with its beam or truss (structures.js)
     var A = ct.fa.body, B = ct.fb.body, n = ct.normal, nx = n.x, ny = n.y, tx = ct.tangent.x, ty = ct.tangent.y;
     var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
     var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
