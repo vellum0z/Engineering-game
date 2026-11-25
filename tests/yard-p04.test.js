@@ -7,9 +7,10 @@ const SE = globalThis.SE, Y = SE.yard, B = SE.physics.bench;
 const P4 = SE.content.chapter('ch01').projects.find(p => p.id === 'P4');
 const K = P4.keys;
 const job = id => P4.jobs.find(j => j.id === id);
-function run(id, dials) {
+function run(id, dials, add) {
   const j = job(id), d = Y.cloneDesign(j.design);
   Object.assign(d.parts[0].dials, dials);
+  (add || []).forEach(q => d.parts.push(Y.makeInstance(q.type, q)));
   return Y.judge({ design: d, site: P4.yard.site, goal: j.goal, timeout: j.timeout });
 }
 
@@ -23,14 +24,20 @@ suite('P4 calibration bench (yard)', () => {
     near(K.AREA.value, 7105.2228, 1e-9);
     eq(K.AREA_SF, 4);
   });
-  test('every job is a manual yard job with a graded setting', () => {
+  test('every job has an objective, a short label and at least two passing builds', () => {
     eq(P4.jobs.length, 5);
-    P4.jobs.forEach(j => { ok(j.goal && j.design && j.grade && j.hints.length === 3, j.id); });
+    ok(P4.objective && P4.pitch);
+    P4.jobs.forEach(j => {
+      ok(j.goal && j.design && j.objective && j.hints.length === 3, j.id);
+      ok(j.objective.split(/\s+/).length <= 12, j.id + ' objective is short');
+      ok(j.label.length < 260, j.id + ' label is short');
+      ok(P4.solutions[j.id].filter(b => b.pass !== false).length >= 2, j.id + ' has two ways');
+    });
     ok(P4.jobs.every(j => !j.choices && !j.spec), 'no answer boxes');
   });
-  test('the reference figures also grade correct', () => {
-    const want = { 'P4.feed': '18.2 mm/s', 'P4.press': '43.8 MPa', 'P4.cut': '2.06 m', 'P4.stay': '6.417 m', 'P4.area': '7105 mm^2' };
-    P4.jobs.forEach(j => { ok(SE.checker.check(want[j.id], j.grade.spec).correct, j.id); });
+  test('only the stamp is graded on what was typed', () => {
+    eq(P4.jobs.filter(j => j.grade).map(j => j.id).join(), 'P4.area');
+    ok(SE.checker.check('7105 mm^2', job('P4.area').grade.spec).correct);
   });
   test('feed: the table stops where the real screw takes it', () => {
     const r = run('P4.feed', { feed: '18.2 mm/s' }), t = r.state.part('table');
@@ -64,6 +71,20 @@ suite('P4 calibration bench (yard)', () => {
     eq(run('P4.cut', { board3: '2.07 m', board11: '2.38 m' }).state.part('walk').rule, 'up');
     eq(run('P4.cut', { board3: '2.06 m', board11: '2.37 m' }).state.part('walk').rule, 'truncate');
     near(B.fenceDrift(L, 3, 'book').drift, 0.013, 1e-6);
+  });
+  test('feed: a post on the bed stops the table where it stands', () => {
+    const r = run('P4.feed', { feed: '17 mm/s' }, [{ type: 'post', x: 0.54, y: 1.4 }]), t = r.state.part('table');
+    ok(r.pass && t.blocked, r.reason); near(t.hole, 0.465, 1e-6);
+  });
+  test('press: a tank on the inlet drives the ram; one elsewhere does nothing', () => {
+    const tank = x => [{ type: 'tank', x, y: 0.5, dials: { pressure: '6360 psi' } }];
+    const r = run('P4.press', {}, tank(-0.95));
+    ok(r.pass && r.state.part('press').tank, r.reason);
+    ok(/stalls/.test(run('P4.press', {}, tank(-3)).reason));
+  });
+  test('stay: from the tip, 2L/9 to the mm also lands within the play', () => {
+    ok(run('P4.stay', { mark: '1.833 m', from: 'tip' }).pass);
+    ok(!run('P4.stay', { mark: '6.417 m', from: 'tip' }).pass);
   });
   test('stay: the pin goes home within 0.5 mm of the node, so the 4th figure matters', () => {
     ok(run('P4.stay', { mark: '6417 mm' }).pass);
