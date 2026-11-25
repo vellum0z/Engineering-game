@@ -259,17 +259,20 @@
   // A running ram keeps both bodies awake (sleeping skips joints whose
   // bodies are all asleep).
   PrismaticJoint.prototype.postStep = function (dt) { if (this.blockLeader && this.block) P.jointBlock.guard(this.block, dt); };
-  // Most work the ram or motor can do in a step, for the energy guard:
-  // force times the speed it is allowed to drive at. A ram's speed is the
-  // one it started the step with plus what its own force adds in the step
-  // (not the speed at the end, which a blow-up would make as large as it
-  // likes).
+  // Translation clamped to the stroke: a ram does work only over its stroke.
+  PrismaticJoint.prototype.strokePosition = function () {
+    var t = this.translation();
+    return this.enableLimit ? Math.min(Math.max(t, this.lowerTranslation), this.upperTranslation) : t;
+  };
+  // Most work the ram or motor can do in a step, for the energy guard. A
+  // ram's work is its force times how far it moved along its stroke this
+  // step (and no faster than its stroke speed limit), so a ram can never be
+  // credited with energy that a blow-up of its geometry made.
   PrismaticJoint.prototype.driveWork = function (dt) {
     var v = Math.abs(this.speed()), W = 0;
     if (this.motorForce !== 0) {
-      var F = Math.abs(this.motorForce), vr = v;
-      if (this.stepSpeed0 != null) vr = Math.min(v, this.stepSpeed0 + F * dt * (this.stepAxialInvMass || 0));
-      W += F * Math.min(vr, this.maxRamSpeed) * dt;
+      var travel = this.stepTranslation0 != null ? Math.abs(this.strokePosition() - this.stepTranslation0) : v * dt;
+      W += Math.abs(this.motorForce) * Math.min(travel, this.maxRamSpeed * dt);
     }
     if (this.enableMotor) W += Math.abs(this.motorImpulse * this.invH) * Math.min(v, Math.abs(this.motorSpeed)) * dt;
     return W;
@@ -282,13 +285,9 @@
     if (this.motorForce !== 0 || (this.enableMotor && this.motorSpeed !== 0 && this.maxMotorForce > 0)) {
       this.bodyA.wake(); this.bodyB.wake();
     }
-    // speed at the start of the step and the axial inverse mass, so the
-    // energy guard can bound what the ram may add this step (driveWork)
-    if (this.motorForce !== 0) {
-      var A = this.bodyA, B = this.bodyB, g = this.geometry();
-      this.stepSpeed0 = Math.abs(this.speed());
-      this.stepAxialInvMass = A.invM + B.invM + A.invI * g.a1 * g.a1 + B.invI * g.a2 * g.a2;
-    }
+    // where the ram starts the step, so the energy guard knows how far it
+    // pushed (driveWork)
+    if (this.motorForce !== 0) this.stepTranslation0 = this.strokePosition();
   };
 
   P.PrismaticJoint = PrismaticJoint;
