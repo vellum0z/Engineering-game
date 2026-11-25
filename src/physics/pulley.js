@@ -217,6 +217,7 @@
       return r;
     }
     if (j.type !== 'distance' || j.maxMotorForce > 0) return null;
+    if (j.inJointBlock && j.inJointBlock()) return null;   // a row of the pins' and welds' block (distance.js)
     if (P.structures && P.structures.claims && P.structures.claims(j)) return null;   // a beam or truss solves it (structures.js)
     if (!j.linePath) j.linePath = new RopePath([{ a: { body: j.bodyA, local: j.localAnchorA }, b: { body: j.bodyB, local: j.localAnchorB }, k: 1 }]);
     if (j.spring) {
