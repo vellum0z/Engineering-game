@@ -319,3 +319,111 @@ suite('physics e05: line blocks (winch line, hook block and sling solved togethe
     ok(sling.lastForce < 250e3, 'settled ' + sling.lastForce.toFixed(0));
   });
 });
+
+suite('physics e05: mixed chains hold their lengths', () => {
+  // a fuzz-style hanging chain: links of 0.4 m on light nodes, a heavy load
+  // at the bottom, dropped from straight and left to bounce for 10 s
+  function chain(kinds, nodeMass, load, opts) {
+    opts = opts || {};
+    const w = world(), top = w.add(new P.Body({ type: 'static', position: { x: 0, y: 20 }, shapes: [P.box(0.5, 0.15)] }));
+    let prev = top, anchor = { x: 0, y: -0.15 }, y = 19.85;
+    const joints = [];
+    kinds.forEach((kind, i) => {
+      y -= 0.4;
+      const b = w.add(new P.Body({ position: { x: opts.dx ? opts.dx * (i + 1) : 0.01 * Math.sin(i * 1.7), y }, shapes: [{ shape: P.circle(0.05), group: -7 }], mass: nodeMass }));
+      const def = { bodyA: prev, bodyB: b, localAnchorA: anchor, localAnchorB: { x: 0, y: 0 } };
+      if (kind === 'rope') def.rope = true;
+      if (typeof kind === 'number') { def.stiffness = kind; def.damping = opts.damping || 0; }
+      joints.push(w.addJoint(new P.DistanceJoint(def)));
+      prev = b; anchor = { x: 0, y: 0 };
+    });
+    const crateBody = load ? w.add(new P.Body({ position: { x: prev.c.x, y: y - 0.6 }, shapes: [P.box(0.3, 0.3)], mass: load })) : null;
+    if (crateBody) joints.push(w.addJoint(new P.DistanceJoint({ bodyA: prev, bodyB: crateBody, localAnchorB: { x: 0, y: 0.3 }, rope: true })));
+    return { w, joints, load: crateBody };
+  }
+  function energy(w) {
+    let E = 0;
+    w.bodies.forEach(b => { if (b.type === 'dynamic') E += b.kineticEnergy() + b.m * g * b.c.y; });
+    w.joints.forEach(j => { if (j.stiffness > 0) { const x = j.geometry().L - j.length; E += 0.5 * j.stiffness * x * x; } });
+    return E;
+  }
+  function watch(w, joints, seconds) {
+    let gap = 0, speed = 0;
+    for (let s = 0; s < seconds * 60; s++) {
+      w.step(1 / 60);
+      joints.forEach(j => { if (!j.rope && !(j.stiffness > 0)) gap = Math.max(gap, Math.abs(j.geometry().L - j.length)); });
+      w.bodies.forEach(b => { speed = Math.max(speed, Math.hypot(b.v.x, b.v.y)); });
+    }
+    return { gap, speed };
+  }
+  test('rods and ropes on 0.2 kg nodes under a 450 kg load bouncing on two soft springs: rods drift < 5 cm, nothing whips about', () => {
+    // the load stretches the 1300 N/m spring by metres; at the bottom of
+    // each bounce the rods above carry twice its weight (the light nodes'
+    // sideways mode is then far stiffer than one substep can follow)
+    const kinds = ['rope', 'rod', 'rod', 'rod', 'rod', 'rope', 'rod', 4000, 'rod', 'rod', 'rope', 'rod', 'rod', 'rod', 'rod', 1300, 'rod', 'rod', 'rope'];
+    const { w, joints } = chain(kinds, 0.2, 450);
+    const r = watch(w, joints, 10);
+    ok(r.gap < 0.05, 'worst rod gap ' + (r.gap * 100).toFixed(1) + ' cm');
+    ok(r.speed < 20, 'fastest body ' + r.speed.toFixed(1) + ' m/s');
+  });
+  test('a 25-link rod, rope and spring chain swinging with a 300 kg load: rods drift < 5 cm', () => {
+    const kinds = [];
+    for (let i = 0; i < 25; i++) kinds.push(['rod', 'rope', 'rod', 20000][i % 4]);
+    const { w, joints } = chain(kinds, 0.3, 300, { dx: 0.15 });
+    const r = watch(w, joints, 10);
+    ok(r.gap < 0.05, 'worst rod gap ' + (r.gap * 100).toFixed(1) + ' cm');
+  });
+  test('stiff springs (2e5 N/m on 0.2 kg nodes) never gain energy: 10 undamped links with a 20 kg load, swinging', () => {
+    const kinds = []; for (let i = 0; i < 10; i++) kinds.push(2e5);
+    const { w } = chain(kinds, 0.2, 20, { dx: 0.2 });
+    const E0 = energy(w);
+    let Emax = E0;
+    for (let s = 0; s < 600; s++) { w.step(1 / 60); Emax = Math.max(Emax, energy(w)); }
+    ok(Emax <= E0 + 0.01 * Math.abs(E0) + 1, 'gained ' + (Emax - E0).toFixed(2) + ' J of ' + E0.toFixed(0));
+  });
+  test('soft springs mixed with stiff ones (200 to 2e5 N/m, light nodes) never gain energy', () => {
+    const kinds = [2e5, 300, 'rod', 5e4, 'rope', 800, 2e5, 'rod', 1500, 2e5];
+    const { w } = chain(kinds, 0.2, 50, { dx: 0.1, damping: 0 });
+    const E0 = energy(w);
+    let Emax = E0;
+    for (let s = 0; s < 600; s++) { w.step(1 / 60); Emax = Math.max(Emax, energy(w)); }
+    ok(Emax <= E0 + 0.01 * Math.abs(E0) + 1, 'gained ' + (Emax - E0).toFixed(2) + ' J of ' + E0.toFixed(0));
+  });
+  test('two slings side by side from one hook to one lifting eye share the load equally (within 1%)', () => {
+    const w = world(), c = ceiling(w);
+    const hook = w.add(new P.Body({ position: { x: 0, y: 8 }, shapes: [P.box(0.15, 0.15)], mass: 10 }));
+    const load = crate(w, 0, 6, 2000);
+    w.addJoint(new P.WinchJoint({ bodyA: c, bodyB: hook, localAnchorB: { x: 0, y: 0.15 }, brake: true }));
+    const s1 = w.addJoint(new P.DistanceJoint({ bodyA: hook, localAnchorA: { x: 0, y: -0.15 }, bodyB: load, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
+    const s2 = w.addJoint(new P.DistanceJoint({ bodyA: hook, localAnchorA: { x: 0, y: -0.15 }, bodyB: load, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
+    w.run(2);
+    near(s1.tension() + s2.tension(), 2000 * g, 0.01, 'total');
+    near(s1.tension(), s2.tension(), 0.01, 'each');
+  });
+});
+
+suite('physics e05: winch at its cap while paying out', () => {
+  // the yard's case: a 2400 kg crate thrown up at 0.8 m/s under a winch
+  // on a fixed hook, paying out at 0.03 m/s; the line is slack at first,
+  // then snatches tight as the crate falls back
+  function lower(pull) {
+    const w = world();
+    const hk = w.add(new P.Body({ type: 'static', position: { x: 0, y: 8 }, shapes: [P.box(0.2, 0.2)] }));
+    const c = w.add(new P.Body({ position: { x: 0, y: 4 }, velocity: { x: 0, y: 0.8 }, shapes: [P.box(0.5, 0.5)], mass: 2400 }));
+    const line = w.addJoint(new P.WinchJoint({ bodyA: hk, localAnchorA: { x: 0, y: -0.2 }, bodyB: c, localAnchorB: { x: 0, y: 0.5 }, reelSpeed: -0.03, maxPull: pull, brake: true }));
+    return { w, c, line };
+  }
+  test('pull > weight (40 kN): catches the falling load and lowers it at the set speed, tension = weight (within 1%)', () => {
+    const { w, c, line } = lower(40e3);
+    w.run(1);
+    near(c.v.y, -0.03, 0.02, 'vy after 1 s:');
+    near(line.lineTension(), 2400 * g, 0.01, 'tension:');
+  });
+  test('pull < weight (20 kN): the load runs down at (W − pull)/m = 1.48 m/s², tension = pull, nowhere near free fall', () => {
+    const { w, c, line } = lower(20e3);
+    w.run(0.8);
+    near(line.lineTension(), 20e3, 0.01, 'tension:');
+    ok(c.v.y > -3, 'vy ' + c.v.y.toFixed(2) + ' (free fall would be ' + (-g * 0.8).toFixed(2) + ')');
+    ok(line.slipping, 'slipping');
+  });
+});
