@@ -320,3 +320,32 @@ suite('physics E03: fast bodies (continuous collision)', () => {
     ok(b.c.y > 0.05, 'fell through to y = ' + b.c.y);
   });
 });
+
+suite('physics E03: slow parts and thin walls, mass-ratio limit', () => {
+  test('10 cm parts at 3–30 m/s never pass a 5 mm–2 cm wall, static or dynamic (84 cases)', () => {
+    let through = 0, n = 0;
+    for (const v of [3, 10, 30]) for (const th of [0.005, 0.02]) for (const dyn of [false, true]) for (const round of [false, true]) for (const hs of [0.05, 0.025]) {
+      const w = world(); ground(w);
+      const wall = w.add(new P.Body({ type: dyn ? 'dynamic' : 'static', position: { x: 2, y: 0.5 }, mass: dyn ? 20 : undefined, shapes: [P.box(th / 2, 0.5)] }));
+      const b = w.add(new P.Body({ position: { x: 0, y: 0.5 }, velocity: { x: v, y: 0 }, mass: 1, shapes: [round ? P.circle(hs) : P.box(hs, hs)] }));
+      let crossed = false;
+      // only while the wall still stands: a thin dynamic wall may tip over the part
+      w.run(1, DT, () => { if (Math.abs(wall.angle) < 0.05 && b.c.x > wall.c.x && b.c.y > 0 && b.c.y < 1) crossed = true; });
+      n++; if (crossed) through++;
+    }
+    ok(through === 0, through + ' of ' + n + ' passed through');
+  });
+  // The soft contact under a heavy load is compliant in tilt (k ∝ the light
+  // body's mass), so an off-centre heavy crate tips off a light one beyond
+  // about 1:150. P.diagnose flags stacks past that ratio.
+  test('1:150 heavy-on-light, load 10 cm off centre: light crate sinks < 2 cm and stays put (< 5 cm) for 10 s', () => {
+    for (const off of [-0.1, 0, 0.1]) {
+      const w = world(); ground(w);
+      const small = w.add(new P.Body({ position: { x: 0, y: 0.25 }, shapes: [P.box(0.25, 0.25)], mass: 1, material: 'cargo' }));
+      w.add(new P.Body({ position: { x: off, y: 0.92 }, shapes: [P.box(0.5, 0.4)], mass: 150, material: 'cargo' }));
+      w.run(10);
+      ok(0.25 - small.c.y < 0.02, 'sank ' + (0.25 - small.c.y));
+      ok(Math.abs(small.c.x) < 0.05, 'squeezed to x = ' + small.c.x);
+    }
+  });
+});
