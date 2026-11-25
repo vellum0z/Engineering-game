@@ -264,6 +264,19 @@
     return s;
   }
 
+  // A rope whose far end is a node of a longer line (a cable's last link)
+  // is left to the line blocks (pulley.js), which solve the whole line
+  // directly; taking only its last link would split the line between two
+  // solvers that fight over the light node.
+  function lineNode(world, j, bodies) {
+    var o = bodies.has(j.bodyA) ? j.bodyB : j.bodyA;
+    if (!o || o.type !== 'dynamic' || bodies.has(o)) return false;
+    for (var i = 0; i < world.joints.length; i++) {
+      var k = world.joints[i];
+      if (k !== j && !k.broken && (k.bodyA === o || k.bodyB === o) && (k.type === 'distance' || k.type === 'winch' || k.type === 'pulley')) return true;
+    }
+    return false;
+  }
   // Distance joints the solver can take over: rods, inextensible ropes and
   // springs given by a stiffness (k or EA). Motors, extra limits and
   // frequency-only springs stay with the joint.
@@ -376,7 +389,7 @@
         var owner = claim.get(j);
         if (owner && owner !== self && owner.lineBlockStep === step) return;   // another structure has it
         var dm = distMode(j);
-        if (!dm) return;
+        if (!dm || lineNode(world, j, bodies)) return;
         claim.set(j, self);
         j.structureStep = step;
         if (j._sSolver !== self || j._sLambda == null) { j._sLambda = dm.sign * j.axial(); j._sSolver = self; }
@@ -951,7 +964,11 @@
       world.joints.forEach(function (s) { if (s.type === 'structure') s.bodySet.forEach(function (b) { set.add(b); }); });
       world._sBodies = set; world._sBodiesStep = world.stepCount; world._sBodiesTime = world.time;
     }
-    return world._sBodies.has(j.bodyA) || world._sBodies.has(j.bodyB);
+    var held = world._sBodies.has(j.bodyA) ? j.bodyA : world._sBodies.has(j.bodyB) ? j.bodyB : null;
+    if (!held) return false;
+    var own = null;
+    world.joints.forEach(function (s) { if (s.type === 'structure' && s.bodySet.has(held)) own = s.bodySet; });
+    return !lineNode(world, j, own);
   }
 
   P.structures = { beam: beam, truss: truss, claims: claims };
