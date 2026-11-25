@@ -263,9 +263,10 @@
       var g = groups.get(key);
       if (g.length < MAX_ROWS) g.push(r);
     });
-    var soft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h);
+    var soft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h), held = new Set();
+    world.joints.forEach(function (s) { if (s.type === 'structure' && s.bodySet && !s.broken) s.bodySet.forEach(function (b) { held.add(b); }); });
     groups.forEach(function (g) {
-      var blk = { rows: g, leader: g[0].joint, step: world.stepCount, beta: soft.biasRate, h: h, pointed: null };
+      var blk = { rows: g, leader: g[0].joint, step: world.stepCount, beta: soft.biasRate, h: h, pointed: null, held: held.size ? held : null };
       g.forEach(function (r) { r.joint.lineBlock = blk; r.joint.linePeak = 0; });
     });
   }
@@ -351,18 +352,55 @@
     lever.forEach(function (kRot, B) { if (kRot * B.invI * h * h > 1) pointed.push(B); });
     return pointed;
   }
+  /*
+   * A beam or truss segment a line pulls on (a cable tied to a beam end) is
+   * held by its structure's own direct solve, which keeps it from turning
+   * against its neighbours. Solved as a free 8 kg segment the block would
+   * spin it about the anchor each substep and the two solvers fight (the
+   * beam end flew about by metres). So inside the block such a body moves
+   * but doesn't turn: the line's twist on it is handed over as an outside
+   * impulse, which the structure takes up through the beam.
+   */
   function updateRows(blk) {
     var rows = blk.rows;
     for (var i = 0; i < rows.length; i++) rows[i].path.update();
     (blk.pointed || []).forEach(function (B) {
       rows.forEach(function (r) { var x = r.path.bodies.indexOf(B); if (x >= 0) r.path.ang[x] = 0; });
     });
+    if (blk.held) rows.forEach(function (r) {
+      var pth = r.path;
+      r.held = null;
+      for (var x = 0; x < pth.bodies.length; x++) {
+        if (!blk.held.has(pth.bodies[x])) continue;
+        if (!pth.ang[x]) continue;
+        (r.held || (r.held = [])).push({ x: x, body: pth.bodies[x], ang: pth.ang[x] });
+        pth.ang[x] = 0;
+      }
+    });
+  }
+  function heldRate(r) {
+    var u = 0;
+    if (r.held) r.held.forEach(function (e) { u += e.ang * e.body.w; });
+    return u;
+  }
+  function heldPull(r, imp) {
+    if (r.held && imp) r.held.forEach(function (e) {
+      e.body.w -= e.body.invI * e.ang * imp;
+    });
+  }
+  // put the held bodies' terms back, so readouts see the whole line
+  function restoreRows(blk) {
+    blk.rows.forEach(function (r) {
+      if (r.held) r.held.forEach(function (e) { r.path.ang[e.x] = e.ang; });
+      r.held = null;
+    });
   }
 
   function warmStartBlock(blk) {
     if (!blk.pointed) { blk.rows.forEach(function (r) { r.path.update(); }); blk.pointed = pointBodies(blk, blk.h); }
     updateRows(blk);
-    blk.rows.forEach(function (r) { r.path.pull(rowAcc(r)); });
+    blk.rows.forEach(function (r) { var a = rowAcc(r); r.path.pull(a); heldPull(r, a); });
+    restoreRows(blk);
   }
 
   /*
@@ -390,22 +428,35 @@
         ends.get(B).push({ row: r, own: pr[0], other: pr[1], k: run.k });
       });
     });
+    // bodies held by anything outside the block (a beam's own solver, pins,
+    // welds) are solved elsewhere: a kink row reads their speed but doesn't
+    // push them, or the two solvers would fight over them
+    var mine = new Set(blk.rows.map(function (r) { return r.joint; })), world = blk.leader.bodyA.world || blk.leader.bodyB.world;
+    blk.foreign = new Set();
+    world.joints.forEach(function (j) {
+      if (mine.has(j) || j.broken) return;
+      [j.bodyA, j.bodyB].forEach(function (B) { if (B && ends.has(B)) blk.foreign.add(B); });
+      if (j.bodySet) j.bodySet.forEach(function (B) { if (ends.has(B)) blk.foreign.add(B); });
+    });
     var nodes = [];
-    ends.forEach(function (list, B) { if (list.length === 2) nodes.push({ body: B, sides: list }); });
+    ends.forEach(function (list, B) { if (list.length === 2 && !blk.foreign.has(B)) nodes.push({ body: B, sides: list }); });
     return nodes;
   }
   // a row over up to three body points: rate = Σ c_i · n · v(p_i)
-  function KinkPath(pts, n) {
+  function KinkPath(pts, n, foreign) {
     var bodies = [], lin = [], ang = [];
+    this.fixedRate = 0;
+    var self = this;
     pts.forEach(function (pt) {
       var B = pt.e.body;
       if (!B || B.type !== 'dynamic') return;
+      if (foreign.has(B)) { self.fixedRate += pt.c * M.dot(n, B.velocityAt(pt.p)); return; }
       var x = bodies.indexOf(B), r = M.sub(pt.p, B.c), l = M.scale(n, pt.c), a = M.cross(r, l);
       if (x < 0) { bodies.push(B); lin.push(l); ang.push(a); } else { lin[x] = M.add(lin[x], l); ang[x] += a; }
     });
     this.bodies = bodies; this.lin = lin; this.ang = ang;
   }
-  KinkPath.prototype.rate = RopePath.prototype.rate;
+  KinkPath.prototype.rate = function () { return RopePath.prototype.rate.call(this) + this.fixedRate; };
   KinkPath.prototype.pull = RopePath.prototype.pull;
   function kinkRows(blk, h) {
     if (!blk.kinks) blk.kinks = kinkNodes(blk);
@@ -420,7 +471,7 @@
       // a sharp bend is not a kink of a taut line
       if (M.dot(M.sub(pb, pa), M.sub(pc, pb)) < 0.9 * L1 * L2) return;
       var n = M.v(-ch.y / cl, ch.x / cl), al = L2 / (L1 + L2), be = L1 / (L1 + L2);
-      var path = new KinkPath([{ e: s1.own, p: pb, c: 1 }, { e: s1.other, p: pa, c: -al }, { e: s2.other, p: pc, c: -be }], n);
+      var path = new KinkPath([{ e: s1.own, p: pb, c: 1 }, { e: s1.other, p: pa, c: -al }, { e: s2.other, p: pc, c: -be }], n, blk.foreign);
       path.bodies.forEach(function (B, x) { if (pointed.indexOf(B) >= 0) path.ang[x] = 0; });
       var w = 0;
       path.bodies.forEach(function (B, x) { w += B.invM * M.lenSq(path.lin[x]) + B.invI * path.ang[x] * path.ang[x]; });
@@ -462,7 +513,7 @@
         if ((r.kind !== 'rod' && !(e > 0)) || !(over > 0)) continue;
         act.push(i); s.push(e > 0 ? over : -over);
       }
-      if (!act.length) return;
+      if (!act.length) { restoreRows(blk); return; }
       var K = new Array(n);
       for (var a = 0; a < act.length; a++) {
         i = act[a]; K[i] = [];
@@ -485,6 +536,7 @@
       moved.forEach(function (_, B) { B.q = M.rot(B.angle); });
     }
     updateRows(blk);
+    restoreRows(blk);
   }
 
   function solveBlock(blk, h, useBias) {
@@ -497,7 +549,7 @@
     if (useBias) { var kinks = kinkRows(blk, h); if (kinks.length) { rows = rows.concat(kinks); n = rows.length; } }
     var acc = new Array(n), lo = new Array(n), hi = new Array(n), rhs = new Array(n), fixed = new Array(n);
     for (i = 0; i < n; i++) {
-      var r = rows[i], j = r.joint, u = r.path.rate(), L;
+      var r = rows[i], j = r.joint, u = r.path.rate() + heldRate(r), L;
       acc[i] = rowAcc(r); lo[i] = r.lo; hi[i] = rowCap(r);
       if (r.kind === 'kink') { fixed[i] = false; rhs[i] = u; continue; }
       if (r.kind === 'winch') { u += j.speed; L = j.length; }
@@ -562,12 +614,14 @@
     for (i = 0; i < n; i++) {
       var next = M.clamp(acc[i] + d[i], lo[i], hi[i]);
       rows[i].path.pull(next - acc[i]);
+      heldPull(rows[i], next - acc[i]);
       if (!rows[i].joint) continue;
       rows[i].joint[rows[i].field] = next;
       // Solved rigidly, a snatch lasts a single substep; breakage reads the
       // step's largest pull so a line still snaps on it.
       if (!useBias) rows[i].joint.linePeak = Math.max(rows[i].joint.linePeak || 0, Math.abs(next));
     }
+    restoreRows(blk);
     if (useBias) lines.forEach(function (r) { if (r.joint.afterBlock) r.joint.afterBlock(h); });
     else projectBlock(blk);
   }
