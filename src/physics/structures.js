@@ -648,15 +648,20 @@
       case 'spring': case 'uniSpring':
         if (r.kind === 'cn' && r.C > 0) return -(v + r.C / h) - r.gamma * rowLambda(r);   // speculative gap
         return -(v + r.beta * r.C) - r.gamma * rowLambda(r);
+      // Rigid, one-sided and friction rows carry gamma only to keep the
+      // matrix well posed (RIGID_EPS). Its -gamma·λ term is a compliance
+      // velocity, so it is left out where no position term balances it (the
+      // relax pass, and friction always): otherwise a loaded row at rest
+      // keeps a creep speed of gamma·λ and its bodies never sleep.
       case 'rigid':
         // position correction capped like contact push-out, so a joint torn
         // open by a violent hit closes gently instead of adding energy
-        return -(v + (useBias ? M.clamp(br * r.C, -maxPush, maxPush) : 0) + r.drift / h) - r.gamma * rowLambda(r);
+        return -(v + (useBias ? M.clamp(br * r.C, -maxPush, maxPush) : 0) + r.drift / h) - (useBias ? r.gamma * rowLambda(r) : 0);
       case 'uni':
-        if (r.C > 0) return -(v + r.C / h) - r.gamma * rowLambda(r);   // open: may close, not overshoot
-        return -(v + (useBias ? Math.max(br * r.C, -maxPush) : 0)) - r.gamma * rowLambda(r);
+        if (r.C > 0) return -(v + r.C / h);   // open: may close, not overshoot
+        return -(v + (useBias ? Math.max(br * r.C, -maxPush) : 0)) - (useBias ? r.gamma * rowLambda(r) : 0);
       default:                                                   // friction
-        return -(v - r.target) - r.gamma * rowLambda(r);
+        return -(v - r.target);
     }
   }
 
@@ -784,13 +789,24 @@
   }
   function loadsApi(s, pointOf) {
     s.loads = [];
+    // A sleeping body keeps its load as part of the rest it fell asleep in,
+    // so an unchanged load is not put back on it (applyForce would wake it
+    // every step); a changed one is, and wakes it.
     s.applyLoads = function () {
       s.loads.forEach(function (ld) {
         var at = pointOf(ld);
-        if (at && (ld.F.x || ld.F.y)) at.body.applyForce(ld.F, at.point);
+        if (!at || !(ld.F.x || ld.F.y)) return;
+        var a = ld._applied, pos = ld.x != null ? ld.x : ld.node;
+        var same = a && a.body === at.body && a.pos === pos && a.x === ld.F.x && a.y === ld.F.y;
+        if (at.body.awake === false && same) return;
+        at.body.applyForce(ld.F, at.point);
+        ld._applied = { body: at.body, pos: pos, x: ld.F.x, y: ld.F.y };
       });
     };
-    s.clearLoads = function () { s.loads.length = 0; };
+    s.clearLoads = function () {
+      s.loads.forEach(function (ld) { if (ld._applied) ld._applied.body.wake(); });
+      s.loads.length = 0;
+    };
   }
 
   /* ------------------------------------------------------------------ beam */
