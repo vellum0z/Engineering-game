@@ -52,7 +52,7 @@
   }
   var FENCE = {
     site: FENCE_SITE,
-    camera: { fit: { lo: { x: -0.8, y: -0.6 }, hi: { x: 8.6, y: 1.6 } } },
+    camera: { fit: { lo: { x: -0.5, y: -0.6 }, hi: { x: 8.4, y: 1.4 } } },
     poke: false,
     readouts: ['fence.gap', 'fence.flat'],
     design: fenceDesign(CLERK)
@@ -115,6 +115,8 @@
     subtitle: 'Significant figures, rounding and honest numbers',
     sections: ['1.5'],
     minutes: 25,
+    pitch: 'Cut six boards for the palisade and drill a stay hole in a boom. The saw and the drill do exactly what your numbers say.',
+    objective: 'Shut the palisade and seat the mast boom',
     intro: [
       'The measuring bench is a door laid over two oil drums, a steel tape, a caliper in a velvet box nobody remembers stealing, and Hask.',
       '"A number on a cut list is a promise about how well we know something. Write too few figures and the wall has gaps. Write too many and you\'re lying. Round the wrong way, a little at a time, and the dead walk through the hole you made with arithmetic."'
@@ -130,14 +132,22 @@
     // Reference builds for the scored jobs (checked by tests/yard.test.js).
     solutions: {
       'H10.fence': [
+        // the course rule, board by board
         { set: { fence: cuts(BOOK) } },
+        // a carpenter's way: round the 5s up, then cut the last board to the space left
+        { set: { fence: cuts(['1.25 m', '1.38 m', '1.43 m', '1.17 m', '1.29 m', '1.32 m']) } },
+        // the same course-rule cuts written in millimetres and engineering notation
+        { set: { fence: cuts(['1.24(10^3) mm', '1380 mm', '143 cm', '1.16 m', '1290 mm', '1.34 m']) } },
         { pass: false, set: { fence: cuts(UP) } },
         { pass: false, set: { fence: cuts(CHOP) } },
         { pass: false, set: { fence: cuts(['1.25 m', '1.38 m', '1.43 m', '1.16 m', '1.29 m', '1.34 m']) } },
         { pass: false, set: { fence: cuts(['1.245 m', '1.375 m', '1.432 m', '1.165 m', '1.288 m', '1.335 m']) } }
       ],
       'H10.boom': [
+        // full precision, rounded once to 3 s.f.
         { set: { boom: { hole: '6.37 m' } } },
+        // full precision kept all the way to the drill
+        { set: { boom: { hole: '6369.9 mm' } } },
         { set: { boom: { hole: '6370 mm' } } },
         { pass: false, set: { boom: { hole: '6.40 m' } } },
         { pass: false, set: { boom: { hole: '6.36 m' } } },
@@ -146,19 +156,18 @@
     },
     steps: [
       {
-        type: 'say', who: 'hask',
-        text: 'Juno wants the east palisade rebuilt by dark: six salvaged boards, end to end between two posts we already set. The posts went in at the **true** board lengths, read off the tape to the millimetre. The boards get cut from a list.\n\nThe saw\'s stops are every **centimetre**, so it can only cut to three figures: 1.24 m, 1.25 m, never 1.245 m. Before anything gets cut, you and I are going to agree on what a number on that list actually *says*.'
-      },
-      {
         type: 'watch', who: 'hask',
         yard: { design: FENCE.design, goal: G.after(4) },
-        text: 'Here is the list the clerk wrote out. Select the palisade to see it: the tape said **1245 mm** for board 1, and he tidied it to **1200 mm**. "The zeros are just filler," he says.\n\nThe saw doesn\'t know that. Press **▶ Run** and watch the end post (the inset on the right).',
+        objective: 'Build the palisade from the clerk\'s cut list',
+        brief: 'The clerk tidied the tape reading **1245 mm** to **1200 mm**. Press **▶ Run** and watch the end post close-up.',
+        text: 'Juno wants the east palisade rebuilt by dark: six salvaged boards, end to end between two posts we already set. The posts went in at the **true** board lengths, read off the tape to the millimetre. The boards get cut from a list.\n\nThe saw\'s stops are every **centimetre**, so it can only cut to three figures: 1.24 m, 1.25 m, never 1.245 m.\n\nHere is the list the clerk wrote out. Select the palisade to see it: the tape said **1245 mm** for board 1, and he tidied it to **1200 mm**. "The zeros are just filler," he says.\n\nThe saw doesn\'t know that. Press **▶ Run** and watch the end post (the inset on the right).',
         goalText: 'Build the palisade from the clerk\'s list',
         until: function (ctx, type) { return type === 'result' && !!ctx.result; },
         after: function (ctx) { var st = ctx.result.state.part('fence').status(); return 'The saw cut **1200 mm** as exactly 1.200 m, and the boards closed up with a **' + cm(st.gap) + ' cm** gap at the end post. Read cold, "1200 mm" could mean two, three or four figures, and the saw took it as four.'; }
       },
       {
         type: 'reveal', kicker: 'Rule', title: 'Significant figures and engineering notation',
+        brief: 'Trailing zeros on a whole number are ambiguous: 1200 could be 2, 3 or 4 figures. Write **1.24 m** or **1.24(10³) mm** and there is no doubt.',
         eq: '48\\u{ }600 \\quad \\to \\quad 48.6(10^{3}) \\quad \\t{or} \\quad 48.60(10^{3}) \\quad \\t{or} \\quad 48.600(10^{3})',
         text: [
           'The number of **significant figures** in a number is how accurately it is known.',
@@ -172,6 +181,8 @@
       {
         type: 'build', who: 'hask',
         yard: { design: fenceDesign(CLERK), goal: G.after(4) },
+        objective: 'Cut boards 3 and 5 to three figures',
+        brief: 'Board 3 read **1432 mm**, board 5 read **1288 mm**. Click the palisade and set them to **1.43 m** and **1.29 m**.',
         text: 'Give the saw three honest figures where it\'s easy. Board 3 read **1432 mm** and board 5 read **1288 mm**: the dropped digit is clearly below or above 5.\n\nSet board 3 to **1.43 m** and board 5 to **1.29 m**. Leave the rest for a moment.',
         goalText: 'Boards 3 and 5 cut to three figures',
         until: function (ctx) {
@@ -185,6 +196,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(4) },
+        objective: 'Round all four 5s up, then run',
+        brief: 'Boards 1, 2, 4 and 6 read exactly on a 5. Push each one up (**1.25, 1.38, 1.17, 1.34 m**) and press **▶ Run**.',
         text: 'The other four all read **exactly on a 5**: 1245, 1375, 1165 and 1335 mm. Dead centre between two saw stops.\n\nMost people were taught to push a 5 up. Do that: set boards 1, 2, 4 and 6 to **1.25, 1.38, 1.17 and 1.34 m**, then Run.',
         goalText: 'Round all four 5s up, and run',
         until: function (ctx, type) {
@@ -197,6 +210,7 @@
       },
       {
         type: 'reveal', kicker: 'Rule', title: 'Rounding off',
+        brief: 'Dropped digit over 5: round up. Under 5: leave it. **Exactly 5**: an even digit before it stays, an odd one goes up.',
         text: [
           'Look at the first digit you are dropping:',
           '- **More than 5** (or a 5 with anything nonzero after it): round up. 6.417**8** → 6.42.',
@@ -210,6 +224,8 @@
       {
         type: 'job', id: 'H10.fence', who: 'juno',
         yard: { design: fenceDesign(UP), goal: fenceGoal },
+        objective: 'Shut the palisade: six boards flat, no end gap',
+        brief: 'Cut all six boards so the run fills the posts exactly. Tape readings: **1245, 1375, 1432, 1165, 1288, 1335 mm**. The saw only stops on whole centimetres.',
         text: 'Juno wants the palisade **shut**: every board flat, no gap at the end post you could get a hand through.\n\nCut all six boards to **three figures** with the rounding rule. The tape readings are painted on each board: **1245, 1375, 1432, 1165, 1288 and 1335 mm**.',
         goalText: 'Six boards flat, end gap under 5 mm',
         goal: fenceGoal,
@@ -226,11 +242,17 @@
           var sum = 0; for (var i = 1; i <= 6; i++) sum += ctx.si('fence', 'b' + i);
           return 'Your list adds up to **' + f3(sum) + ' m**. The posts are **7.84 m** apart.';
         },
-        success: 'Shut tight. Two of the 5s went down and two went up, so the halves cancelled instead of piling up at the end post.'
+        success: function (ctx) {
+          var book = BOOK.every(function (t, i) { return Math.abs(ctx.si('fence', 'b' + (i + 1)) - parseFloat(t)) < 1e-9; });
+          return book ? 'Shut tight. Two of the 5s went down and two went up, so the halves cancelled instead of piling up at the end post.' :
+            'Shut tight, your way. The course rule gets there with no trimming at all: two of the 5s go down and two go up, so the halves cancel.';
+        }
       },
       {
         type: 'free', who: 'hask',
         yard: { design: fenceDesign(BOOK), goal: null },
+        objective: 'Free play: cut the palisade any way you like',
+        brief: 'Try chopping every board, or typing a tape reading straight in.',
         text: 'The palisade is yours. Cut it any way you like and run it again.',
         prompts: [
           'Chop every board instead (1.24, 1.37, 1.43, 1.16, 1.28, 1.33 m). Why is chopping always short?',
@@ -239,19 +261,18 @@
         ]
       },
       {
-        type: 'say', who: 'hask',
-        text: 'One more trap, and it catches clever people. The lookout mast\'s raking boom needs a stay. Its tip sits **3.53 m** up and **6.78 m** out from the heel pin; the boom is laced in **6** equal bays and the stay bolts on at **node 5**.\n\nThe clerk\'s sheet works it out in six lines: square the rise and the reach, add them, take the root for the boom length, split it into bays, count along five. He rounds every line to three figures as he goes, "because three figures is what we report".'
-      },
-      {
         type: 'watch', who: 'hask',
         yard: { design: boomDesign('6.40 m'), camera: BOOM.camera, readouts: BOOM.readouts, goal: G.after(3) },
-        text: 'His sheet says **6.40 m**, and that is where the stay hole is drilled. The stay plate is slotted, ±6 mm of play, which is generous.\n\nPress **▶ Run** to lower the boom onto its pins. The caliper inset shows the stay pin up close.',
+        objective: 'Lower the boom drilled at the clerk\'s 6.40 m',
+        brief: 'The clerk rounded every line of his sheet to 3 figures and drilled the stay hole at **6.40 m**. Press **▶ Run** to lower the boom onto its pins.',
+        text: 'One more trap, and it catches clever people. The lookout mast\'s raking boom needs a stay. Its tip sits **3.53 m** up and **6.78 m** out from the heel pin; the boom is laced in **6** equal bays and the stay bolts on at **node 5**.\n\nThe clerk\'s sheet works it out in six lines: square the rise and the reach, add them, take the root for the boom length, split it into bays, count along five. He rounds every line to three figures as he goes, "because three figures is what we report".\n\nHis sheet says **6.40 m**, and that is where the stay hole is drilled. The stay plate is slotted, ±6 mm of play, which is generous.\n\nPress **▶ Run** to lower the boom onto its pins. The caliper inset shows the stay pin up close.',
         goalText: 'Lower the boom drilled at 6.40 m',
         until: function (ctx, type) { return type === 'result' && !!ctx.result; },
         after: function (ctx) { var st = ctx.result.state.part('boom').status(); return 'The caliper puts the hole **' + f3(st.offset * 1000) + ' mm** past the pin, against ±6 mm of play. The boom sits up on the stay pin, **' + f3(st.lift * 1000) + ' mm** off its rest.'; }
       },
       {
         type: 'rule', title: 'Round once, at the end',
+        brief: 'Each line built on a rounded line, so six small nudges added up to 30 mm. Keep full precision and round only the final answer.',
         law: '\\t{full precision through the sheet, then } 3 \\t{ s.f.}',
         eq: function () {
           var a = sheet(0), b = sheet(3);
@@ -266,6 +287,8 @@
       {
         type: 'job', id: 'H10.boom', who: 'hask',
         yard: { design: boomDesign('6.40 m'), camera: BOOM.camera, readouts: BOOM.readouts, goal: boomGoal },
+        objective: 'Seat the boom on both pins',
+        brief: 'Work out $s = \\frac{5}{6}\\sqrt{h^{2} + r^{2}}$ with h = 3.53 m, r = 6.78 m at full precision. Type it into the boom\'s **Stay hole** and run.',
         text: 'Work it out again, full precision on every line: $s = \\frac{5}{6}\\sqrt{h^{2} + r^{2}}$ with h = 3.53 m and r = 6.78 m. Round only the final answer, to **3 s.f.**\n\nSelect the boom, type your answer into **Stay hole**, and lower it.',
         goalText: 'The boom seats on both pins',
         goal: boomGoal,
@@ -282,6 +305,8 @@
       {
         type: 'free', who: 'hask',
         yard: { design: { parts: [Object.assign({}, boomDesign('6.37 m').parts[0], { open: ['hole', 'play', 'rise', 'reach', 'bays', 'node'] })] }, camera: BOOM.camera, readouts: BOOM.readouts, goal: null },
+        objective: 'Free play: reshape the boom and drill anywhere',
+        brief: 'Every boom setting is open now. Try closing the slot to 1 mm.',
         text: 'The boom is yours now: change the rise, the reach, the bays, the node and the play in the slot, and drill where you like.',
         prompts: [
           'Close the slot down to **1 mm** of play. Does 6.37 m still seat? How many figures does the hole need now?',
