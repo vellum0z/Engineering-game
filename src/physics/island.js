@@ -293,15 +293,20 @@
 
   function prismaticAdapter(j) {
     var A = j.bodyA, B = j.bodyB, bs = [A, B], o = {};
-    var pp = new Row(bs), an = angular(new Row(bs)), sp = new Row(bs), mo = new Row(bs), lw = new Row(bs), up = new Row(bs);
-    mo.vel = true; lw.lo = 0; up.hi = 0;
+    var pp = new Row(bs), an = angular(new Row(bs)), sp = new Row(bs), mo = new Row(bs), lw = new Row(bs), up = new Row(bs), rm = new Row(bs);
+    mo.vel = true; rm.vel = true; lw.lo = 0; up.hi = 0;
     function axis() { var l = j.localAxisA; return { x: A.q.c * l.x - A.q.s * l.y, y: A.q.s * l.x + A.q.c * l.y }; }
     return {
-      joint: j, rows: [pp, an, sp, mo, lw, up],
+      joint: j, rows: [pp, an, sp, mo, lw, up, rm],
       update: function () {
         an.on = canTurn(A, B);
         sp.on = j.stiffness > 0 || j.damping > 0; sp.k = j.stiffness; sp.c = j.damping;
         mo.on = j.enableMotor && j.maxMotorForce > 0; mo.vt = j.motorSpeed; mo.lo = -j.maxMotorForce; mo.hi = j.maxMotorForce;
+        // a force ram with a stroke speed limit pushes up to its force toward
+        // that speed; without one it is a plain constant push (kick, below)
+        rm.on = j.motorForce !== 0 && j.maxRamSpeed < Infinity;
+        rm.vt = j.motorForce > 0 ? j.maxRamSpeed : -j.maxRamSpeed;
+        rm.lo = Math.min(j.motorForce, 0); rm.hi = Math.max(j.motorForce, 0);
         lw.on = j.enableLimit && j.lowerTranslation > -Infinity;
         up.on = j.enableLimit && j.upperTranslation < Infinity;
       },
@@ -309,13 +314,13 @@
         anchors(j, o);
         var a = axis(), tr = a.x * o.dx + a.y * o.dy;
         along(pp, o, -a.y, a.x, true); pp.C = -a.y * o.dx + a.x * o.dy;
-        along(sp, o, a.x, a.y, true); mo.J.set(sp.J); lw.J.set(sp.J); up.J.set(sp.J);
+        along(sp, o, a.x, a.y, true); mo.J.set(sp.J); rm.J.set(sp.J); lw.J.set(sp.J); up.J.set(sp.J);
         sp.C = tr - j.restTranslation; lw.C = tr - j.lowerTranslation; up.C = tr - j.upperTranslation;
         an.C = B.angle - A.angle - j.referenceAngle;
       },
       // force-controlled ram: a constant push along the axis, through B's anchor
       kick: function (hh) {
-        if (!j.motorForce) return;
+        if (!j.motorForce || rm.on) return;
         anchors(j, o);
         var a = axis(), imp = j.motorForce * hh, ax = o.rax + o.dx, ay = o.ray + o.dy;
         if (A._isl) { A.v = M.v(A.v.x - A.invM * imp * a.x, A.v.y - A.invM * imp * a.y); A.w -= A.invI * imp * (ax * a.y - ay * a.x); }
@@ -326,6 +331,7 @@
         j.perpImpulse = pp.total; j.angularImpulse = an.total;
         j.springImpulse = sp.total; j.motorImpulse = mo.total;
         j.lowerImpulse = lw.total; j.upperImpulse = -up.total;
+        j.ramImpulse = rm.on ? rm.total : j.motorForce * h;
       }
     };
   }
