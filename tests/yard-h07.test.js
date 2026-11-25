@@ -54,11 +54,11 @@ suite('H7 trade ledger', () => {
     near((W + strap) / A / psi, 46.9, 0.05);
   });
 
-  test('every job has a passing and a failing reference build', () => {
+  test('every job has two passing reference builds and a failing one', () => {
     SE.content.walkSteps(lv.steps, s => {
       if (s.type !== 'job') return;
       const sol = lv.solutions[s.id] || [];
-      ok(sol.some(b => b.pass !== false) && sol.some(b => b.pass === false), s.id);
+      ok(sol.filter(b => b.pass !== false).length >= 2 && sol.some(b => b.pass === false), s.id);
     });
   });
 });
