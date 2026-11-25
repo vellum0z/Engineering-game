@@ -143,6 +143,11 @@
   var MAX_NEWTON = 30;
   var HUB_ROWS = 9;            // a body with this many rows gets unknowns of its own
   var EPS = 1e-9;              // relative compliance that keeps redundant rows solvable
+  // Rigid rows give by this fraction of their own diagonal per unit impulse
+  // in the position stage, in the equation as well as the matrix: redundant
+  // rows (two pins on one pair) then share a load instead of building up
+  // equal and opposite impulses. It is micrometres under the hardest pull.
+  var EPS_POS = 1e-5;
   var MAX_SUBSTEPS = 32;       // steady substeps per frame
   var MAX_SPLIT = 1024;        // finest a single substep may be cut, per frame
   var BUDGET = 8;              // substeps tried per frame, at most this many times maxSubsteps
@@ -823,7 +828,7 @@
     for (k = 0; k < rows.length; k++) {
       var r = rows[k], d = r.pos;
       if (inSystem(r, stage)) {
-        diag[d] += (!stage && r.el) ? r.gam / h : EPS * (stage ? Math.abs(diag[d]) : r.kd);
+        diag[d] += (!stage && r.el) ? r.gam / h : (stage ? EPS * Math.abs(diag[d]) : EPS_POS * r.kd);
         if (!(diag[d] !== 0) && !r._hubbed) diag[d] = 1;          // nothing it could move
       } else diag[d] = 1;
     }
@@ -962,7 +967,7 @@
   function residual(r, h) {
     if (r.vel) return h * (rowVel(r, r.D) - r.vt);
     if (r.el) return (r.nc ? 0 : r.C) + r.gam * r.lam + r.beta * r.C0;
-    return r.C - r.tgt;
+    return r.C - r.tgt + h * EPS_POS * r.kd * r.lam;
   }
 
   function keepBest(isl) {
@@ -1535,8 +1540,8 @@
     world.joints.forEach(function (j) {
       var a = j._islandAdapter;
       if (!a) return;
-      var v = new Float64Array(5 * a.rows.length);
-      a.rows.forEach(function (r, i) { v[5 * i] = r.lam; v[5 * i + 1] = r.mu; v[5 * i + 2] = r.ps; v[5 * i + 3] = r.vs; v[5 * i + 4] = r.total; });
+      var v = new Float64Array(6 * a.rows.length);
+      a.rows.forEach(function (r, i) { v[6 * i] = r.lam; v[6 * i + 1] = r.mu; v[6 * i + 2] = r.ps; v[6 * i + 3] = r.vs; v[6 * i + 4] = r.total; v[6 * i + 5] = r.kd; });
       out.rows.set(j, v);
       if (a.save) out.extra.set(j, a.save());
     });
@@ -1553,7 +1558,7 @@
       var v = saved.rows.get(j), a = j._islandAdapter;
       if (!v) { j._islandAdapter = undefined; return; }
       if (!a) a = adapterOf(j);
-      a.rows.forEach(function (r, i) { r.lam = v[5 * i]; r.mu = v[5 * i + 1]; r.ps = v[5 * i + 2]; r.vs = v[5 * i + 3]; r.total = v[5 * i + 4]; });
+      a.rows.forEach(function (r, i) { r.lam = v[6 * i]; r.mu = v[6 * i + 1]; r.ps = v[6 * i + 2]; r.vs = v[6 * i + 3]; r.total = v[6 * i + 4]; r.kd = v[6 * i + 5]; });
       if (a.load && saved.extra.has(j)) a.load(saved.extra.get(j));
     });
   }
