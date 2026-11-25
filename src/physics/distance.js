@@ -74,6 +74,10 @@
   // a running length motor keeps its bodies awake
   DistanceJoint.prototype.preStep = function () {
     if (this.maxMotorForce > 0 && this.motorSpeed !== 0) { this.bodyA.wake(); this.bodyB.wake(); }
+    // joint-block membership is read fresh at the start of each step, not
+    // from a readout taken between steps (before a part was moved or thrown)
+    var world = this.bodyA.world || this.bodyB.world;
+    if (world) world._rodJBStep = -1;
   };
 
   DistanceJoint.prototype.isRigid = function () { return !this.spring && this.minLength >= this.maxLength; };
@@ -105,37 +109,60 @@
   function plainRod(j) {
     return j.type === 'distance' && !j.broken && j.isRigid() && !j.rope && !(j.maxMotorForce > 0);
   }
+  // An inextensible rope (no spring, no motor, no lower limit) joins while it
+  // is taut: at its length, not shortening, pulling, and not pushed by the
+  // block last step. As an equality row it can push within a step it goes slack in; it
+  // then reads slack and leaves (its push is dropped, see prepare).
+  function plainRope(j) {
+    return j.type === 'distance' && !j.broken && j.rope && !j.spring && !(j.maxMotorForce > 0) &&
+      !(j.minLength > 0) && j.maxLength < Infinity;
+  }
+  var SLACKENING = 0.1;   // m/s: a rope shortening faster than this is going slack
+  function taut(j, world) {
+    // to join it must have pulled last step (in its line block or on its
+    // own); once in, it stays while it doesn't push
+    if (!(j.upperImpulse > 0 || (j._jbRope === world.stepCount - 1 && j.upperImpulse >= 0))) return false;
+    var g = j.geometry();
+    if (g.L < j.maxLength - P.LINEAR_SLOP) return false;
+    return M.dot(P.relVel(j.bodyA, j.bodyB, g.rA, g.rB), g.axis) > -SLACKENING;
+  }
   function dyn(b) { return b && b.type === 'dynamic' && (b.invM > 0 || b.invI > 0); }
-  function jointBlockBodies(world) {
+  // The joints that are rows of the joint block this step, worked out once
+  // per step: rods and taut ropes reaching pinned, welded or sliding parts,
+  // through each other (a sling under a hook block pinned to a boom joins).
+  function jointBlockRows(world) {
     if (world._rodJBStep === world.stepCount && world._rodJBTime === world.time) return world._rodJB;
-    var set = new Set(), rods = [];
+    var set = new Set(), lines = [], rows = new Set();
     world.joints.forEach(function (j) {
       if (j.broken) return;
-      if (j.type === 'distance') { if (plainRod(j)) rods.push(j); return; }
+      if (j.type === 'distance') {
+        if ((plainRod(j) || (plainRope(j) && taut(j, world))) && !(P.structures && P.structures.claims && P.structures.claims(j))) lines.push(j);
+        return;
+      }
       if (!j.blockSlots || !j.blockSlots().length) return;
       if (dyn(j.bodyA)) set.add(j.bodyA);
       if (dyn(j.bodyB)) set.add(j.bodyB);
     });
-    // rods reach through each other: a rod between two rods on a pinned frame joins too
     for (var grew = set.size > 0; grew;) {
       grew = false;
-      rods.forEach(function (j) {
+      lines.forEach(function (j) {
+        if (rows.has(j)) return;
         var a = dyn(j.bodyA) && set.has(j.bodyA), b = dyn(j.bodyB) && set.has(j.bodyB);
-        if (a === b) return;
-        if (!a && dyn(j.bodyA)) { set.add(j.bodyA); grew = true; }
-        if (!b && dyn(j.bodyB)) { set.add(j.bodyB); grew = true; }
+        if (!a && !b) return;
+        rows.add(j); grew = true;
+        if (j.rope) j._jbRope = world.stepCount;
+        if (dyn(j.bodyA)) set.add(j.bodyA);
+        if (dyn(j.bodyB)) set.add(j.bodyB);
       });
     }
-    world._rodJB = set; world._rodJBStep = world.stepCount; world._rodJBTime = world.time;
-    return set;
+    world._rodJB = rows; world._rodJBStep = world.stepCount; world._rodJBTime = world.time;
+    return rows;
   }
-  // true if this rod is a row of the joint block this step
+  // true if this rod or taut rope is a row of the joint block this step
   DistanceJoint.prototype.inJointBlock = function () {
     var world = this.bodyA.world || this.bodyB.world;
-    if (!world || world.jointBlockSolve === false || !plainRod(this) || !P.jointBlock) return false;
-    if (P.structures && P.structures.claims && P.structures.claims(this)) return false;   // a beam or truss has it
-    var set = jointBlockBodies(world);
-    return set.has(this.bodyA) || set.has(this.bodyB);
+    if (!world || world.jointBlockSolve === false || !P.jointBlock || !(plainRod(this) || plainRope(this))) return false;
+    return jointBlockRows(world).has(this);
   };
 
   DistanceJoint.prototype.prepare = function (h, cfg) {
@@ -144,6 +171,9 @@
     // every distance joint registers, so the joint block always has its
     // leader; only a rod inJointBlock() gives it a row
     if (P.jointBlock) P.jointBlock.prepare(this);
+    // a rope the joint block made push last step is slack now: it left the
+    // block (membership was read above, before this reset) and only pulls
+    if (this.rope && this.upperImpulse < 0) { this.inJointBlock(); this.upperImpulse = 0; }
     if (P.lineBlocks && P.lineBlocks.prepare(this, h, cfg)) {
       // solved with its neighbours as one block (pulley.js); its pull is upperImpulse
       this.impulse = 0; this.springImpulse = 0; this.lowerImpulse = 0; this.motorImpulse = 0;
@@ -280,7 +310,7 @@
 
     if (this.isRigid()) { if (!(skipRod && this.inJointBlock())) this.impulse = rigid(this.length, this.impulse); return; }
     if (this.minLength > 0) this.lowerImpulse = limit(this.minLength, this.lowerImpulse, 1);
-    if (this.maxLength < Infinity) this.upperImpulse = limit(this.maxLength, this.upperImpulse, -1);
+    if (this.maxLength < Infinity && !(skipRod && this.inJointBlock())) this.upperImpulse = limit(this.maxLength, this.upperImpulse, -1);
   };
 
   // Joint block rows (revolute.js): slot 0 is the rod's length, along A -> B.
@@ -289,10 +319,11 @@
     var g = this.geometry(), cA = M.cross(g.rA, g.axis), cB = M.cross(g.rB, g.axis);
     r.ja[0] = -g.axis.x; r.ja[1] = -g.axis.y; r.ja[2] = -cA;
     r.jb[0] = g.axis.x; r.jb[1] = g.axis.y; r.jb[2] = cB;
-    r.C = g.L - this.length; r.drift = 0;
+    r.C = g.L - (this.rope ? this.maxLength : this.length); r.drift = 0;
   };
-  DistanceJoint.prototype.blockImpulse = function () { return this.impulse; };
-  DistanceJoint.prototype.blockAdd = function (slot, d) { this.impulse += d; };
+  // a rope's pull is upperImpulse (> 0 pulls the ends together, against the axis)
+  DistanceJoint.prototype.blockImpulse = function () { return this.rope ? -this.upperImpulse : this.impulse; };
+  DistanceJoint.prototype.blockAdd = function (slot, d) { if (this.rope) this.upperImpulse -= d; else this.impulse += d; };
   // No late re-projection for distance joints: a rod has no rows of its
   // own, and re-projecting after every spring or rope member (rigid, no
   // push) let a hub of springs and rods drift apart by decimetres.

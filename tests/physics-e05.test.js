@@ -2,7 +2,7 @@
 // Rigging: ropes, pulleys, block and tackle, winches and cables, checked
 // against the closed-form results a statics or dynamics course uses.
 const { suite, test, near, ok } = require('./harness');
-const P = globalThis.SE.phys;
+const P = globalThis.SE.phys, M = globalThis.SE.pmath;
 const g = 9.81;
 
 function world() { return new P.World({ gravity: { x: 0, y: -g } }); }
@@ -467,24 +467,50 @@ suite('physics e05: lines holding a beam end', () => {
 suite('physics e05: rods in the joint block', () => {
   // a 3 m boom pinned to a wall, braced by a rod to a point 2 m below, a
   // 100 kg load hung from a light 2 kg tip plate pinned to the boom
-  function bracedBoom() {
+  function bracedBoom(loadMass) {
     const w = world(), wall = w.add(new P.Body({ type: 'static', position: { x: 0, y: 5 }, shapes: [P.box(0.1, 2)] }));
     const boom = w.add(new P.Body({ position: { x: 1.5, y: 6 }, shapes: [{ shape: P.box(1.5, 0.05), group: -9 }], mass: 20 }));
     const tip = w.add(new P.Body({ position: { x: 3, y: 6 }, shapes: [{ shape: P.box(0.1, 0.1), group: -9 }], mass: 2 }));
     w.addJoint(new P.RevoluteJoint({ bodyA: wall, bodyB: boom, worldAnchor: { x: 0, y: 6 } }));
     w.addJoint(new P.RevoluteJoint({ bodyA: boom, bodyB: tip, worldAnchor: { x: 3, y: 6 } }));
     const rod = w.addJoint(new P.DistanceJoint({ bodyA: wall, bodyB: tip, worldAnchorA: { x: 0, y: 4 }, localAnchorA: { x: 0, y: -1 }, localAnchorB: { x: 0, y: 0 } }));
-    const load = crate(w, 3, 3.5, 100);
+    const load = crate(w, 3, 3.5, loadMass || 100);
     const sling = w.addJoint(new P.DistanceJoint({ bodyA: tip, bodyB: load, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
     return { w, rod, sling, tip, load };
   }
-  test('a rod bracing a pinned boom is a row of the pins\' block, not a line block', () => {
+  test('a rod bracing a pinned boom and the taut sling under it are rows of the pins\' block, not a line block', () => {
     const { w, rod, sling } = bracedBoom();
     if (w.islandSolve) return;          // the island solver has no joint or line blocks: every row is in one solve
-    w.step(1 / 60);
+    w.step(1 / 60); w.step(1 / 60);   // the sling joins once it has pulled for a step
     ok(rod.block && rod.block.joints && rod.inJointBlock(), 'rod in the joint block');
     ok(!rod.lineBlock, 'rod not in a line block');
-    ok(sling.lineBlock, 'sling still in a line block');
+    ok(sling.inJointBlock() && !sling.lineBlock, 'taut sling in the joint block');
+  });
+  test('boom tip: a 2 kg tip plate on a 500 kg sling holds still: rod, pins and sling within 1 mm, rod force = statics (within 2%)', () => {
+    const { w, rod, sling, tip, load } = bracedBoom(500);
+    let gap = 0, pin = 0, speed = 0;
+    for (let s = 0; s < 600; s++) {
+      w.step(1 / 60);
+      if (s < 30) continue;   // after the first half second (the sling joins on its second step)
+      gap = Math.max(gap, Math.abs(rod.currentLength() - rod.length), Math.max(0, sling.currentLength() - sling.maxLength));
+      w.joints.forEach(j => { if (j.type === 'revolute') pin = Math.max(pin, M.dist(j.anchorA(), j.anchorB())); });
+      if (s > 60) speed = Math.max(speed, Math.hypot(load.v.x, load.v.y), Math.hypot(tip.v.x, tip.v.y));
+    }
+    ok(gap < 1e-3, 'line gap ' + (gap * 1000).toFixed(2) + ' mm');
+    ok(pin < 1e-3, 'pin gap ' + (pin * 1000).toFixed(2) + ' mm');
+    ok(speed < 0.05, 'still moving at ' + speed.toFixed(3) + ' m/s');
+    near(-rod.tension(), (500 + 2) * g * Math.sqrt(13) / 2 + 20 * g * Math.sqrt(13) / 4, 0.02, 'rod compression');
+    near(sling.tension(), 500 * g, 0.02, 'sling');
+  });
+  test('a sling that goes slack leaves the joint block and never pushes', () => {
+    const { w, sling, load } = bracedBoom();
+    w.step(1 / 60); w.step(1 / 60);
+    ok(sling.inJointBlock(), 'taut at first');
+    load.v = { x: 0, y: 3 };   // thrown up: the sling goes slack
+    let pushed = 0, left = false;
+    for (let s = 0; s < 20; s++) { w.step(1 / 60); if (!sling.inJointBlock()) left = true; pushed = Math.min(pushed, sling.tension()); }
+    ok(left, 'left the block while slack');
+    ok(pushed > -1e-6 * 500 * g * 60, 'pushed with ' + pushed.toFixed(1) + ' N');
   });
   test('the braced boom holds 100 kg on a 2 kg tip: rod and tip within 5 mm, rod force = statics (within 2%)', () => {
     // tip at (3, 6), rod from (0, 4): the rod carries the tip's load with
