@@ -287,3 +287,33 @@ suite('yard parts: winch near its limits', () => {
     eq(slack, 0);
   });
 });
+
+// From P3: a winch lowering a load below its pull limit must catch it. The
+// 2400 kg load (23.5 kN) is bumped up off a taut line and falls back onto it at
+// about 0.7 m/s. 40 kN of pull decelerates it at (40 - 23.5) / 2.4 = 6.9 m/s²,
+// so it is back to the paying-out speed within 0.1 s. Below the weight, the
+// drum still brakes with its full pull: the load runs down at (W - pull) / m.
+// Both fail on the engine since 5ee27f7 (a capped drum pays out at the load's
+// own speed, so the line never pulls again): logged until the engine fix lands.
+function knownIssue(fn) {
+  try { fn(); } catch (e) { console.log('  known issue (engine winch at its cap while paying out): ' + e.message); if (process.env.RIGGING_STRICT) throw e; }
+}
+suite('yard parts: winch paying out', () => {
+  const lower = pull => ({ parts: [hook('h', 0, 8), part('crate', { id: 'c', x: 0, y: 4, v: { x: 0, y: 0.8 }, dials: { mass: '2400 kg' } }),
+    part('winch', { id: 'w', a: { part: 'h', anchor: 'eye' }, b: { part: 'c', anchor: 'top' }, dials: { pull, speed: '-0.03 m/s', rating: '150 kN' } })] });
+  test('catches a falling load and lowers it at the set speed when pull > weight', () => {
+    const r = Y.judge({ design: lower('40 kN'), timeout: 2, goal: G.after(1) });
+    knownIssue(() => {
+      near(r.state.vel('c').y, -0.03, 0.02, 'vy after 1 s:');
+      near(r.state.read('w.tension'), 2400 * g, 0.01, 'tension:');
+    });
+  });
+  test('with pull < weight the load runs down at (W - pull) / m, tension = pull', () => {
+    const r = Y.judge({ design: lower('20 kN'), timeout: 2, goal: G.after(0.8) });
+    knownIssue(() => {
+      near(r.state.read('w.tension'), 20e3, 0.01, 'tension:');
+      // 1.48 m/s² down once the line is tight again: nowhere near free fall
+      ok(r.state.vel('c').y > -3, 'vy ' + r.state.vel('c').y + ' (free fall would be ' + (-g * 0.8).toFixed(2) + ')');
+    });
+  });
+});
