@@ -267,30 +267,43 @@ suite('physics e06: stability and cost', () => {
     bm.bodies.forEach(b => ok(isFinite(b.c.x) && isFinite(b.c.y), 'NaN'));
     ok(Math.abs(bm.bodies[29].v.y) < 1e-3 && Math.abs(bm.bodies[15].v.y) < 1e-3, 'still moving ' + bm.bodies[15].v.y);
   });
-  test('a 200-body scene of beams and a truss steps in under 4 ms', () => {
-    const w = world(9.81);
+  // Timed against a reference scene in the same test, as E02 does, so a busy
+  // or cold machine (the first full run after a merge) doesn't fail it. The
+  // 4 ms target is printed here and gated in tests/bench-physics.js.
+  test('a 200-body scene of beams and a truss steps within 3x a 200-link chain (and under 12 ms); 4 ms is the bench target', () => {
+    const sw = world(9.81); sw.cfg.enableSleep = false;      // time the solver, not a sleeping scene
     for (let k = 0; k < 4; k++) {
-      P.structures.beam(w, { start: { x: 0, y: k * 3 }, end: { x: 8, y: k * 3 }, section: { b: 0.1, h: 0.2 },
+      P.structures.beam(sw, { start: { x: 0, y: k * 3 }, end: { x: 8, y: k * 3 }, section: { b: 0.1, h: 0.2 },
         material: 'steel', segments: 40, supports: [{ at: 'start', type: 'pin' }, { at: 'end', type: 'roller' }] });
     }
     const nodes = []; for (let i = 0; i <= 6; i++) nodes.push({ x: 2 * i, y: 20 }, { x: 2 * i, y: 22 });
     const members = [];
     for (let i = 0; i < 6; i++) members.push([2 * i, 2 * i + 2], [2 * i + 1, 2 * i + 3], [2 * i, 2 * i + 1], [2 * i, 2 * i + 3]);
     members.push([12, 13]);
-    P.structures.truss(w, { nodes, members, material: 'steel', area: 2e-3, I: 1e-6, supports: [{ node: 0 }, { node: 12, type: 'roller' }] });
-    ok(w.bodies.length >= 200, 'only ' + w.bodies.length + ' bodies');
-    // warm up, then the median of five timed batches (0.5 to 1.5 s, before
-    // the beams settle and sleep), so JIT and GC pauses left over from other
-    // suites don't decide the result
-    w.run(0.5);
-    const batches = [];
-    for (let b = 0; b < 5; b++) {
-      const t0 = process.hrtime.bigint();
-      w.run(0.2);
-      batches.push(Number(process.hrtime.bigint() - t0) / 1e6 / 12);
+    P.structures.truss(sw, { nodes, members, material: 'steel', area: 2e-3, I: 1e-6, supports: [{ node: 0 }, { node: 12, type: 'roller' }] });
+    ok(sw.bodies.length >= 200, 'only ' + sw.bodies.length + ' bodies');
+    // reference: 20 pinned chains of 10 links swinging (bench-physics 'chain')
+    const cw = world(9.81); cw.cfg.enableSleep = false;
+    const top = cw.add(new P.Body({ type: 'static', position: { x: 0, y: 20 }, shapes: [P.box(20, 0.1)] }));
+    for (let c = 0; c < 20; c++) {
+      let prev = top; const x0 = -19.5 + 2 * c;
+      for (let k = 0; k < 10; k++) {
+        const link = cw.add(new P.Body({ position: { x: x0 + 0.2 + 0.4 * k, y: 19.9 }, shapes: [{ shape: P.box(0.2, 0.04), group: -(c + 1) }], mass: 1 }));
+        cw.addJoint(new P.RevoluteJoint({ bodyA: prev, bodyB: link, worldAnchor: { x: x0 + 0.4 * k, y: 19.9 } }));
+        prev = link;
+      }
     }
-    const ms = batches.slice().sort((x, y) => x - y)[2];
-    ok(ms < 4, ms.toFixed(2) + ' ms per step (median of ' + batches.map(x => x.toFixed(2)).join(', ') + ')');
+    // warm both up, then interleave five timed batches of each and take the
+    // medians, so both see the same JIT and GC state
+    sw.run(0.5); cw.run(0.5);
+    const batch = w => { const t0 = process.hrtime.bigint(); w.run(0.2); return Number(process.hrtime.bigint() - t0) / 1e6 / 12; };
+    const sb = [], cb = [];
+    for (let k = 0; k < 5; k++) { sb.push(batch(sw)); cb.push(batch(cw)); }
+    const med = a => a.slice().sort((x, y) => x - y)[2];
+    const ms = med(sb), ref = med(cb);
+    console.log(`    beams + truss ${ms.toFixed(2)} ms/step, chain ${ref.toFixed(2)} ms/step, ratio ${(ms / ref).toFixed(2)} (bench target 4 ms)`);
+    ok(ms < 3 * ref, `${ms.toFixed(2)} ms per step, over 3x the chain's ${ref.toFixed(2)} ms`);
+    ok(ms < 12, ms.toFixed(2) + ' ms per step');
   });
 });
 
@@ -402,5 +415,56 @@ suite('physics e06: ropes, props and pins on a beam', () => {
     rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 2);
     ok(rope.structureStep == null, 'a structure took the rope over');
     ok(rope.tension() > 0, 'the rope carries nothing');
+  });
+});
+
+// A beam at rest under a coupled rope or prop must really stop: rigid and
+// one-sided rows keep no creep speed, and standing loads don't wake it.
+// Pinned-roller timber beam, 4 m, 80 × 120 mm, 2 kN at mid-span, held up
+// again at a = 3 m. Compatibility at a: R·δaa = vP(a) + vw(a).
+suite('physics e06: a supported beam comes to rest', () => {
+  const L = 4, a = 3, Pl = 2000, g = 9.81;
+  function build(kind, sleep) {
+    const w = new P.World({ gravity: { x: 0, y: -g }, enableSleep: !!sleep });
+    const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: L, y: 3 }, section: { b: 0.08, h: 0.12 },
+      material: 'timber', segments: 20, supports: [{ at: 'start', type: 'pin' }, { at: 'end', type: 'roller' }] });
+    bm.load(L / 2, { x: 0, y: -Pl });
+    let rope = null, prop = null;
+    if (kind === 'rope') {
+      const hook = w.add(new P.Body({ type: 'static', position: { x: a, y: 5 } })), pt = bm.pointAt(a);
+      rope = w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: pt.body, localAnchorB: pt.body.localPoint({ x: a, y: 3 }), rope: true }));
+    } else {
+      prop = w.add(new P.Body({ type: 'static', position: { x: a, y: 3 - 0.06 - 0.02 }, shapes: [{ shape: P.circle(0.02), material: 'frictionless' }] }));
+    }
+    const reaction = () => rope ? rope.tension()
+      : [...w.contacts.values()].filter(k => k.fa.body === prop || k.fb.body === prop).reduce((s, k) => s + (k.normalForce || 0), 0);
+    return { w, bm, reaction, q: bm.bodies[0].m / bm.dx * g };
+  }
+  // simply supported deflections (down positive) at x: point load Q at b, and q
+  const vPt = (EI, Q, b, x) => { if (x > b) { x = L - x; b = L - b; } return Q * (L - b) * x * (L * L - (L - b) ** 2 - x * x) / (6 * L * EI); };
+  const vU = (EI, q, x) => q * x * (L ** 3 - 2 * L * x * x + x ** 3) / (24 * EI);
+  ['rope', 'prop'].forEach(kind => {
+    test(`pinned-roller beam held by a ${kind}: every segment under 1e-4 m/s within 3 s, support reaction within 2%, mid-span sag within 5%`, () => {
+      const c = build(kind, false), EI = c.bm.EI;
+      c.w.run(2.5);
+      let vmax = 0;
+      for (let k = 0; k < 30; k++) { c.w.step(1 / 60); c.bm.bodies.forEach(b => { vmax = Math.max(vmax, Math.hypot(b.v.x, b.v.y)); }); }
+      ok(vmax < 1e-4, 'still moving at ' + vmax.toExponential(2) + ' m/s');
+      const R = (vPt(EI, Pl, L / 2, a) + vU(EI, c.q, a)) / vPt(EI, 1, a, a);
+      near(c.reaction(), R, 0.02);
+      // mid-span is the difference of two large terms, so the model's +1.3% on the
+      // plain beam shows up as about +4% here
+      near(-c.bm.deflection(L / 2), vPt(EI, Pl, L / 2, L / 2) + vU(EI, c.q, L / 2) - R * vPt(EI, 1, a, L / 2), 0.05);
+    });
+    test(`pinned-roller beam held by a ${kind} falls asleep within 3 s and stays asleep, with the same readouts`, () => {
+      const c = build(kind, true), awake = build(kind, false);
+      c.w.run(3);
+      ok(c.bm.bodies.every(b => b.awake === false), 'awake: ' + c.bm.bodies.filter(b => b.awake !== false).length);
+      c.w.run(1);
+      ok(c.bm.bodies.every(b => b.awake === false), 'woke up again');
+      awake.w.run(4);
+      near(c.reaction(), awake.reaction(), 0.01);
+      near(c.bm.deflection(L / 2), awake.bm.deflection(L / 2), 0.01);
+    });
   });
 });

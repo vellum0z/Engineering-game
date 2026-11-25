@@ -1,12 +1,13 @@
 'use strict';
-// Physics benchmark: milliseconds per world.step(1/60) for three kinds of
-// scene at 50, 200 and 500 bodies (plus a 300-body pile).
+// Physics benchmark: milliseconds per world.step(1/60) for four kinds of
+// scene at 50, 200 and 500 bodies (plus a 300-body pile and a 200-body structures row).
 //
 //   node tests/bench-physics.js            table + gate
 //   node tests/bench-physics.js --quick    fewer steps, for a smoke run
 //
 //   stack  columns of 10 crates side by side (resting contact, warm starting)
 //   pile   boxes and discs dropped into a walled bin (lots of new contacts)
+//   beams  four steel beams and a truss (structures.js), kept awake
 //   chain  pinned chains hanging from a beam and swinging (joints only)
 //
 // Timing skips the first steps (JIT warm-up, the pile still falling in) and
@@ -52,6 +53,21 @@ const scenes = {
     }
     return w;
   },
+  // 4 pinned-roller steel beams of 40 segments and a 13-member truss, kept
+  // awake so the structure solver is timed every step (only at 200 bodies)
+  beams() {
+    const w = new P.World(); w.cfg.enableSleep = false;
+    for (let k = 0; k < 4; k++) {
+      P.structures.beam(w, { start: { x: 0, y: k * 3 }, end: { x: 8, y: k * 3 }, section: { b: 0.1, h: 0.2 },
+        material: 'steel', segments: 40, supports: [{ at: 'start', type: 'pin' }, { at: 'end', type: 'roller' }] });
+    }
+    const nodes = []; for (let i = 0; i <= 6; i++) nodes.push({ x: 2 * i, y: 20 }, { x: 2 * i, y: 22 });
+    const members = [];
+    for (let i = 0; i < 6; i++) members.push([2 * i, 2 * i + 2], [2 * i + 1, 2 * i + 3], [2 * i, 2 * i + 1], [2 * i, 2 * i + 3]);
+    members.push([12, 13]);
+    P.structures.truss(w, { nodes, members, material: 'steel', area: 2e-3, I: 1e-6, supports: [{ node: 0 }, { node: 12, type: 'roller' }] });
+    return w;
+  },
   chain(n) {
     const w = new P.World();
     const per = 10, chains = Math.ceil(n / per);
@@ -86,7 +102,7 @@ function time(build, n) {
   return { mean: total / STEPS, median: all[all.length >> 1], worst, contacts: w.contacts.size, awake, bad };
 }
 
-const sizes = { stack: [50, 200, 500], pile: [50, 200, 300, 500], chain: [50, 200, 500] };
+const sizes = { stack: [50, 200, 500], pile: [50, 200, 300, 500], beams: [200], chain: [50, 200, 500] };
 const pad = (s, n) => String(s).padStart(n);
 console.log(`physics step benchmark (dt 1/60, ${new P.World().substeps} substeps, ${STEPS} timed steps after ${WARM} warm-up), node ${process.version}`);
 console.log('scene   bodies   mean ms   median ms   worst ms   contacts   awake');
