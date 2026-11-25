@@ -59,7 +59,7 @@ const BUILDS = {
     const light = r.logRange(0.5, 5), heavy = light * r.logRange(100, 1e4);
     const small = crate(w, 0, 0.25, 0.25, 0.25, light);
     crate(w, r.range(-0.1, 0.1), 0.5 + 0.4 + 0.02, 0.5, 0.4, heavy);
-    return { w, rest: true, note: 'ratio ' + (heavy / light).toFixed(0) };
+    return { w, rest: true, crush: small, note: 'ratio ' + (heavy / light).toFixed(0) };
   },
   chain(r) {   // a long hanging chain of ropes, rods and springs with a load
     const w = baseWorld(), top = gantry(w, 0, 20);
@@ -206,6 +206,11 @@ function runCase(kind, seed) {
     let worst = 0;
     w.contacts.forEach(ct => ct.points.forEach(p => { worst = Math.min(worst, p.separation); }));
     if (worst < -0.05) issues.push('still overlapping by ' + (-worst * 100).toFixed(1) + ' cm');
+  }
+  if (spec.crush) {
+    // the light crate must still be under the heavy one, at its own height
+    const b = spec.crush;
+    if (b.c.y < 0.25 - 0.02 || Math.abs(b.c.x) > 0.3) issues.push('light crate crushed or squeezed out (y ' + b.c.y.toFixed(3) + ', x ' + b.c.x.toFixed(2) + ')');
   }
   if (spec.tunnel) {
     const { bullet, wall } = spec.tunnel;
