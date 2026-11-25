@@ -92,7 +92,13 @@
   };
 
   DistanceJoint.prototype.prepare = function (h, cfg) {
-    this.invH = 1 / h;
+    this.invH = 1 / h; this.h = h;
+    if (P.lineBlocks && P.lineBlocks.prepare(this, h, cfg)) {
+      // solved with its neighbours as one block (pulley.js); its pull is upperImpulse
+      this.impulse = 0; this.springImpulse = 0; this.lowerImpulse = 0; this.motorImpulse = 0;
+      this.stiff = false; this.explicit = false;
+      return;
+    }
     this.jointSoft = P.softness(cfg.jointHertz, cfg.jointDampingRatio, h);
     var hz = this.hertz, zeta = this.dampingRatio, m = this.effMass(this.geometry());
     if (this.stiffness > 0) {
@@ -126,16 +132,27 @@
   };
 
   DistanceJoint.prototype.warmStart = function () {
-    var world = this.bodyA.world || this.bodyB.world;
-    if (world && this.lineBlockStep === world.stepCount) return;   // the winch warm-starts it
+    var blk = P.lineBlocks && P.lineBlocks.active(this);
+    if (blk) { if (blk.leader === this) P.lineBlocks.warmStart(blk); return; }
     var g = this.geometry(), imp = this.axial() - (this.explicit ? this.springImpulse : 0);
     P.applyPair(this.bodyA, this.bodyB, g.rA, g.rB, M.scale(g.axis, imp));
+    if (this.explicit && this.minLength < this.maxLength) {
+      // The spring force k·x kicks here, once per substep and before any
+      // constraint solves, so rods, ropes and line blocks sharing its bodies
+      // see it and hold against it (symplectic Euler: it only depends on
+      // positions, so the order joints warm-start in doesn't matter). The
+      // damper acts later, in solve, on the current relative velocity.
+      var sp = -this.h * this.kEff * (g.L - this.length);
+      if (this.rope) sp = Math.min(sp, 0);   // a line only pulls
+      this.springImpulse = sp;
+      P.applyPair(this.bodyA, this.bodyB, g.rA, g.rB, M.scale(g.axis, sp));
+    }
   };
 
   DistanceJoint.prototype.solve = function (h, useBias) {
-    // a winch is solving this rope together with its line this step (winch.js)
-    var world = this.bodyA.world || this.bodyB.world;
-    if (world && this.lineBlockStep === world.stepCount) return;
+    // solved together with the lines it shares bodies with (pulley.js)
+    var blk = P.lineBlocks && P.lineBlocks.active(this);
+    if (blk) { if (blk.leader === this) P.lineBlocks.solve(blk, h, useBias); return; }
     var A = this.bodyA, B = this.bodyB, g = this.geometry();
     var mass = this.effMass(g);
     if (mass === 0) return;
@@ -176,12 +193,12 @@
     }
 
     if (this.explicit && this.minLength < this.maxLength) {
-      if (useBias) {
-        // spring explicit, damper implicit (on the velocity after this
-        // impulse), so a damped spring still rests at exactly k·x = load
-        imp = -h * (this.kEff * (g.L - this.length) + this.cEff * vr()) / (1 + h * this.cEff / mass);
-        if (this.rope) imp = Math.min(imp, 0);   // a line only pulls
-        this.springImpulse = imp; push(imp);
+      // the damper, implicit on the velocity after its own impulse, so a
+      // damped spring still rests at exactly k·x = load
+      if (useBias && this.cEff > 0 && !(this.rope && g.L < this.length)) {
+        imp = -h * this.cEff * vr() / (1 + h * this.cEff / mass);
+        if (this.rope) imp = Math.min(imp, -this.springImpulse);   // a line only pulls
+        this.springImpulse += imp; push(imp);
       }
     } else if (this.spring && this.minLength < this.maxLength) {
       var sp = this.springSoft, C = g.L - this.length;
@@ -200,9 +217,8 @@
   DistanceJoint.prototype.tension = function () { return -this.axial() * this.invH; };
   DistanceJoint.prototype.force = function () {
     var F = Math.abs(this.axial()) * this.invH;
-    // a rope a winch solved this step reports the step's largest pull (winch.js)
-    var world = this.bodyA.world || this.bodyB.world;
-    if (world && this.lineBlockStep === world.stepCount && this.linePeak) F = Math.max(F, this.linePeak * this.invH);
+    // in a line block: the step's largest pull (pulley.js)
+    if (this.linePeak && P.lineBlocks && P.lineBlocks.active(this)) F = Math.max(F, this.linePeak * this.invH);
     return F;
   };
   DistanceJoint.prototype.currentLength = function () { return this.geometry().L; };
