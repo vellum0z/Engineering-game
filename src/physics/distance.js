@@ -131,7 +131,14 @@
     return this.impulse + this.springImpulse + this.lowerImpulse - this.upperImpulse + this.motorImpulse;
   };
 
+  // a beam or truss solver (structures.js) took this joint over this step
+  function claimed(j) {
+    var world = j.bodyA.world || j.bodyB.world;
+    return !!world && j.structureStep === world.stepCount;
+  }
+
   DistanceJoint.prototype.warmStart = function () {
+    if (claimed(this)) return;
     var blk = P.lineBlocks && P.lineBlocks.active(this);
     if (blk) { if (blk.leader === this) P.lineBlocks.warmStart(blk); return; }
     var g = this.geometry(), imp = this.axial() - (this.explicit ? this.springImpulse : 0);
@@ -150,6 +157,7 @@
   };
 
   DistanceJoint.prototype.solve = function (h, useBias) {
+    if (claimed(this)) return;
     // solved together with the lines it shares bodies with (pulley.js)
     var blk = P.lineBlocks && P.lineBlocks.active(this);
     if (blk) { if (blk.leader === this) P.lineBlocks.solve(blk, h, useBias); return; }
