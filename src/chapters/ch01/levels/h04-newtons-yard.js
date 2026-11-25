@@ -16,41 +16,6 @@
 
   /* ------------------------------------------------------- level parts */
 
-  // A minimal winch for running this level before the rigging parts land.
-  // It follows the parts contract (dials pull, speed, rating, brake, stop;
-  // readouts tension, lineOut, speed) and is skipped once the real one exists.
-  if (!Y.partDef('winch')) {
-    Y.definePart({
-      type: 'winch', name: 'Winch', category: 'Rigging',
-      blurb: 'A motor drum that reels its line in at the set speed, pulling no harder than its maximum pull.',
-      size: { w: 0.8, h: 0.6 },
-      connector: true,
-      dials: [
-        { key: 'pull', label: 'Max pull', q: 'force', def: '5 kN', min: 0 },
-        { key: 'speed', label: 'Line speed', q: 'speed', def: '0.3 m/s' },
-        { key: 'rating', label: 'Line breaks at', q: 'force', def: '20 kN', min: 1 },
-        { key: 'brake', label: 'Brake', choice: ['on', 'off'], def: 'on' },
-        { key: 'stop', label: 'Stop at line out', q: 'length', def: '', optional: true }
-      ],
-      build: function (b) {
-        var A = b.end('a'), B = b.end('b');
-        var j = b.joint(new b.P.WinchJoint({ bodyA: A.body, localAnchorA: A.local, bodyB: B.body, localAnchorB: B.local,
-          reelSpeed: b.si('speed'), maxPull: b.si('pull'), brake: b.text('brake') === 'on',
-          minLength: b.si('stop') || 0, breakForce: b.si('rating'), label: b.inst.label || 'winch' }));
-        return { joint: j };
-      },
-      plate: function (inst) { return ['Max pull ' + inst.dials.pull, 'Line breaks at ' + inst.dials.rating]; },
-      readouts: function (built) {
-        var j = built.joint;
-        return [
-          { key: 'tension', label: 'line tension', q: 'force', read: function () { return j.broken ? 0 : Math.max(0, j.lineTension()); } },
-          { key: 'lineOut', label: 'line out', q: 'length', read: function () { return j.lineOut(); } },
-          { key: 'speed', label: 'line speed', q: 'speed', read: function () { return j.speed; } }
-        ];
-      }
-    });
-  }
-
   // The pack: a crowd shambling up the rail at a steady speed. A sensor, so
   // it touches nothing; the job's goal checks whether it reaches the cart.
   Y.definePart({
@@ -155,7 +120,7 @@
       locked: true, open: ['pull'], label: 'winch' }, winch));
     return { parts: parts };
   }
-  var RAIL_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 28, y: 4 } } };
+  var RAIL_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 28, y: 3 } } };
 
   // ---- H4.winch: get the supply cart into the shed ahead of the pack.
   // The cart (125 kg, 1.6 m long) starts with its tail 6.10 m ahead of the
@@ -175,8 +140,9 @@
   var SUPPLY = { parts: [
     { id: 'sled', type: 'cart', x: W.x0, y: 0.25, dials: { mass: '125 kg' }, locked: true, label: 'supply cart' },
     { id: 'pack', type: 'h04-pack', x: W.packFront0 - 0.6, y: 0.85, dials: { speed: W.vz + ' m/s' }, locked: true, label: 'the pack' },
-    { id: 'buffer', type: 'block', x: W.bufferFace + 0.3, y: 0.6, locked: true, label: 'shed buffer' },
-    { id: 'drum', type: 'hook', x: W.bufferFace + 1.2, y: 0.25, locked: true, label: 'shed drum' },
+    { id: 'shed', type: 'zone', x: W.bufferFace - 1.5, y: 1.3, dials: { width: '3 m', height: '2.6 m' }, locked: true, label: 'shed' },
+    { id: 'buffer', type: 'block', x: W.bufferFace + 0.3, y: 0.6, locked: true, label: 'buffer' },
+    { id: 'drum', type: 'hook', x: W.bufferFace + 1.2, y: 0.25, locked: true, label: ' ' },
     { id: 'winch', type: 'winch', a: { part: 'drum', anchor: 'eye' }, b: { part: 'sled', anchor: 'right' },
       dials: { pull: '100 N', speed: '12 m/s' }, locked: true, open: ['pull'], label: 'shed winch' }
   ] };
@@ -218,7 +184,7 @@
         dials: { force: '200 N', time: '0.4 s', start: '0 s' }, locked: true, label: 'spring pack' }, kick || {})
     ] };
   }
-  var PAIR_CAM = { fit: { lo: { x: 0, y: -1 }, hi: { x: 20, y: 4 } } };
+  var PAIR_CAM = { fit: { lo: { x: 3, y: -1 }, hi: { x: 17, y: 2.5 } } };
 
   // ---- H4.reaction: B has to meet the coupler at 0.400 m/s.
   // The spring pack is calibrated on a 60.0 kg cart: it gives it 3.20 m/s^2
@@ -232,6 +198,7 @@
   function couplerDesign() {
     var d = pair(R.mA.toFixed(1) + ' kg', '120 kg', 'cart A', 'ore cart B', { dials: { force: R.F + ' N', time: R.t + ' s', start: '0 s' }, hide: ['force'] });
     d.parts[0].open = [];
+    d.parts.push({ id: 'latch', type: 'zone', x: R.couplerFace - 0.8, y: 0.9, dials: { width: '1.6 m', height: '1.8 m' }, locked: true, label: 'latch 0.39–0.41 m/s' });
     d.parts.push({ id: 'coupler', type: 'block', x: R.couplerFace + 0.3, y: 0.6, dials: { height: '0.8 m' }, locked: true, label: 'coupler' });
     return d;
   }
@@ -265,6 +232,8 @@
     subtitle: 'The three laws of motion',
     sections: ['1.2'],
     minutes: 25,
+    objective: 'Find Newton\'s three laws by pulling and kicking carts',
+    pitch: 'Winch carts down a greased rail and kick two apart with a spring pack. Every law comes out of your own runs.',
     intro: [
       'The east yard froze solid overnight, so Hask has moved everything onto the greased rail: two ore carts, a test cart and a winch bolted to a bollard.',
       '"Everything in this game runs on three rules Newton wrote down in 1687. They came from experiment, not from anyone\'s say-so, so that\'s how you\'ll learn them: by pulling carts. The rollers take friction out of the picture, so the only forces left along the rail are the ones we put there."'
@@ -282,6 +251,10 @@
       'H4.winch': [
         { set: { winch: { pull: '200 N' } } },
         { set: { winch: { pull: '0.200 kN' } } },
+        // another way: winch at 120 N plus a steady 80 N push (the same 200 N in total)
+        { set: { winch: { pull: '120 N' } }, add: [{ type: 'push', a: { part: 'sled' }, dials: { force: '80 N', time: '20 s' } }] },
+        // or winch off and two pushes doing all the work
+        { set: { winch: { pull: '0 N' } }, add: [{ type: 'push', a: { part: 'sled' }, dials: { force: '150 N', time: '20 s' } }, { type: 'push', a: { part: 'sled' }, dials: { force: '50 N', time: '20 s' } }] },
         { pass: false, set: { winch: { pull: '199 N' } } },       // a = 1.592: the pack gets a hand on it
         { pass: false, set: { winch: { pull: '201 N' } } },       // a = 1.608: too fast into the buffer
         { pass: false, set: { winch: { pull: '1.23 kN' } } },     // m g instead of m a
@@ -289,6 +262,8 @@
       ],
       'H4.reaction': [
         { set: { B: { mass: '240 kg' } } },
+        // another way: leave B at 120 kg (0.800 m/s) and brake it with a 48 N push back for 1 s
+        { add: [{ type: 'push', a: { part: 'B' }, dials: { force: '48 N', angle: '180 deg', time: '1 s', start: '1 s' } }] },
         { pass: false, set: { B: { mass: '60 kg' } } },          // same acceleration as A: far too fast
         { pass: false, set: { B: { mass: '15 kg' } } },          // mass ratio upside down
         { pass: false, set: { B: { mass: '270 kg' } } }
@@ -297,6 +272,7 @@
     steps: [
       {
         type: 'say', who: 'hask',
+        brief: 'Newton\'s laws hold when you measure from a frame that isn\'t itself accelerating. This rail is ours.',
         text: 'One rule before any of the laws. Newton\'s laws describe a **particle** as seen from a **non-accelerating reference frame**: the ground under your boots, the rail, anything that isn\'t itself speeding up, slowing down or turning.\n\nMeasure from inside a braking truck and the laws stop working as written. We\'ll come back to that. For now, the yard is our frame.'
       },
 
@@ -304,6 +280,8 @@
       {
         type: 'build', who: 'hask',
         yard: { design: rail(null), camera: RAIL_CAM, bin: [{ type: 'winch', count: 1, dials: { pull: '100 N', speed: '1 m/s' } }] },
+        objective: 'Hook the winch from the bollard to the cart',
+        brief: 'Pick the **Winch** from the bin, click the **bollard**, then the **cart**. It reels in at 1 m/s, pulling no harder than 100 N.',
         text: 'Take the **Winch** from the bin. Click the **bollard** on the right for the drum end, then the **cart** for the hook.\n\nSelect the winch to see its dials: **100 N** max pull, line speed **1 m/s**. The drum reels in at 1 m/s and never pulls harder than 100 N.',
         goalText: 'Winch from the bollard to the cart',
         until: function (ctx) { return winchOn(ctx, 'cart') ? true : (ctx.find('winch') ? 'One end on the **bollard**, the other on the **cart**.' : false); }
@@ -311,6 +289,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(8), readouts: null },
+        objective: 'Run it and watch the line tension once the cart catches up',
+        brief: 'Press **▶ Run**. Watch the cart\'s **speed** and the **line tension** after the cart catches up with the line.',
         text: 'Press **▶ Run** and watch two gauges: the cart\'s **speed** and the winch\'s **line tension**.\n\nAt first the cart is slower than the line, so the winch pulls as hard as it can. Keep watching after the cart catches up with the line.',
         goalText: 'Run it for 8 s',
         until: function (ctx, type) { return type === 'result' && !!ctx.result && !!winchOn(ctx, 'cart'); },
@@ -321,6 +301,7 @@
       },
       {
         type: 'rule', title: 'Newton\'s first law',
+        brief: 'No unbalanced force, no change in velocity. Once the line went slack, the cart just kept its speed.',
         law: '\\Sigma F = 0 \\quad \\Rightarrow \\quad v = \\t{constant}',
         text: 'A particle at rest stays at rest, and one moving in a straight line at steady speed keeps doing exactly that, until an **unbalanced force** acts on it.\n\nWhile the line was tight, there was an unbalanced force and the speed climbed. Once the cart was moving with the line, the tension dropped to nothing and the speed simply **stayed**. Forces can still act on a body in this state (weight down, rollers up) as long as they cancel.',
         formula: 'ch01.newton1'
@@ -332,6 +313,8 @@
         kicker: 'Experiment',
         yard: { design: rail({ dials: { pull: '100 N', speed: '12 m/s' } }), camera: RAIL_CAM, goal: G.after(3), readouts: ['cart.speed', 'winch.tension'] },
         onEnter: function (ctx) { ctx.values.h4runs = []; },
+        objective: 'Do the three winch runs: change mass and pull',
+        brief: 'Each run is 3 s from rest. Do **50 kg at 100 N**, **50 kg at 200 N** and **100 kg at 200 N** (cart mass, winch max pull).',
         text: 'Hask has swapped in a fast drum (**12 m/s** line speed), so the cart never catches the line and the winch always pulls at its **max pull**. That is the one unbalanced force on the cart.\n\nEach run lasts **3 s** from rest. Do these three, changing the cart\'s **mass** and the winch\'s **max pull**:\n\n1. 50 kg, 100 N\n2. 50 kg, 200 N\n3. 100 kg, 200 N\n\nThe acceleration is the final speed divided by 3 s.',
         goalText: 'All three runs done',
         until: function (ctx, type) {
@@ -347,6 +330,7 @@
       },
       {
         type: 'rule', title: 'Your three runs',
+        brief: function (ctx) { var r1 = findRun(ctx, 50, 100), r2 = findRun(ctx, 50, 200), r3 = findRun(ctx, 100, 200); return 'Double the pull: ' + f3(r1.a) + ' → ' + f3(r2.a) + ' m/s², doubled. Double the mass: ' + f3(r2.a) + ' → ' + f3(r3.a) + ' m/s², halved. So a ∝ F/m.'; },
         kicker: 'What the rail says',
         eq: function (ctx) {
           return WANT.map(function (w, i) {
@@ -363,6 +347,7 @@
       },
       {
         type: 'rule', title: 'Newton\'s second law',
+        brief: 'Pick the force unit that gives 1 kg an acceleration of 1 m/s², the newton, and the law is just F = ma.',
         kicker: 'Newton\'s second law',
         law: 'F = ma \\qquad \\t{(Eq. 1–1)}',
         eq: '1\\u{ N} = 1\\u{ kg} \\times 1\\u{ m/s^2} \\quad \\Rightarrow \\quad k = 1',
@@ -371,8 +356,10 @@
       },
       {
         type: 'job', id: 'H4.winch', who: 'juno',
-        yard: { design: SUPPLY, camera: { fit: { lo: { x: -5, y: -1 }, hi: { x: 32, y: 4 } } }, bin: [], readouts: ['sled.speed', 'winch.tension', 'pack.front'] },
-        text: 'Juno, over the radio: "The pack is coming up the spur. That cart is **125 kg** of fuel and medicine and it has to get into the shed before they reach it."\n\nHask has worked the timing: on the greased rail the cart needs an acceleration of exactly **1.60 m/s²**. Any less and the lead runner gets a hand on it. Any more and it hits the shed buffer faster than the buffer is rated for.\n\nThe shed winch is the only force along the rail. Set its **max pull** and run it.',
+        yard: { design: SUPPLY, camera: { fit: { lo: { x: -5, y: -1 }, hi: { x: 32, y: 3 } } }, bin: [{ type: 'push', count: 2, dials: { time: '20 s' } }], readouts: ['sled.speed', 'winch.tension', 'pack.front'] },
+        objective: 'Beat the pack to the shed without wrecking the buffer',
+        brief: 'This 125 kg cart needs exactly **1.60 m/s²**: slower and the pack catches it, faster and it smashes the buffer. Set the forces on it and run.',
+        text: 'Juno, over the radio: "The pack is coming up the spur. That cart is **125 kg** of fuel and medicine and it has to get into the shed before they reach it."\n\nHask has worked the timing: on the greased rail the cart needs an acceleration of exactly **1.60 m/s²**. Any less and the lead runner gets a hand on it. Any more and it hits the shed buffer faster than the buffer is rated for.\n\nThe shed winch is the only force along the rail unless you add one. Set its **max pull** (or use the pushes in the kit) and run it.',
         goalText: 'Cart into the shed, ahead of the pack, without wrecking the buffer',
         goal: WINCH_GOAL,
         timeout: 20,
@@ -387,7 +374,7 @@
         },
         success: function (ctx) {
           var a = ctx.si('winch', 'pull') / W.m, closest = W.gap0 - W.vz * W.vz / (2 * a);
-          return 'Door shut. At a = ' + f3(a) + ' m/s² the lead runner came within **' + Math.max(0, closest * 100).toFixed(0) + ' cm** of the tail. One force along the rail, so F = ma gave the setting directly, and half a percent either way would have cost you the cart.';
+          return 'Door shut. At a = ' + f3(a) + ' m/s² the lead runner came within **' + Math.max(0, closest * 100).toFixed(0) + ' cm** of the tail. The forces along the rail had to add up to exactly m a = 200 N, and half a percent either way would have cost you the cart.';
         }
       },
 
@@ -395,6 +382,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { design: pair('40 kg', '200 kg', 'survivor cart', 'ore cart'), camera: PAIR_CAM, goal: G.after(2), readouts: ['kick.onA', 'kick.onB', 'A.speed', 'B.speed'] },
+        objective: 'Fire the spring pack and compare both gauges',
+        brief: 'Which cart feels the bigger push, the 40 kg one or the 200 kg one? Decide, then **▶ Run** (try ¼× speed) and watch both gauges.',
         text: 'A survivor on a light **40 kg** cart has wedged a spring pack against a **200 kg** ore cart. The pack fires for **0.4 s** and then falls clear. It has a force gauge on each end.\n\nBefore you run it, decide which cart you think will feel the **bigger push**. Then press **▶ Run** (try **¼×** speed) and watch both gauges.',
         goalText: 'Fire the spring pack',
         until: function (ctx, type) { return type === 'result' && !!ctx.result; },
@@ -406,6 +395,7 @@
       },
       {
         type: 'rule', title: 'Newton\'s third law',
+        brief: 'Equal, opposite, on one line, and on different bodies. Same push on both carts; the lighter one gets the bigger acceleration.',
         law: 'F_{A \\t{ on } B} = -F_{B \\t{ on } A}',
         eq: function (ctx) {
           var p = ctx.values.pair;
@@ -418,6 +408,7 @@
       },
       {
         type: 'rule', title: 'The second law in momentum form',
+        brief: 'Force is how fast momentum changes. Your carts left with equal and opposite momenta.',
         kicker: 'Look again at your run',
         law: 'F = \\frac{d(mv)}{dt} = m\\frac{dv}{dt} = ma \\quad (m \\t{ constant})',
         eq: function (ctx) {
@@ -431,8 +422,10 @@
       },
       {
         type: 'job', id: 'H4.reaction', who: 'hask',
-        yard: { design: couplerDesign(), camera: PAIR_CAM, goal: COUPLE_GOAL, bin: [], readouts: ['kick.onA', 'A.speed', 'B.speed'] },
-        text: 'Ore cart B has to roll into the **coupler** at **0.400 m/s**: the latch only catches between 0.39 and 0.41 m/s.\n\nThe spring pack\'s dial is hidden and its gauge only reads on **cart A\'s side**. Its tag says it gives a **60.0 kg** cart an acceleration of **3.20 m/s²** for **0.500 s**. Cart A is 60.0 kg.\n\nYou can\'t change the pack. You can load ore into **cart B**: set its **mass** so it leaves at exactly 0.400 m/s.',
+        yard: { design: couplerDesign(), camera: { fit: { lo: { x: 5, y: -1 }, hi: { x: 17.5, y: 2.5 } } }, goal: COUPLE_GOAL, bin: [{ type: 'push', count: 1 }], readouts: ['kick.onA', 'A.speed', 'B.speed'] },
+        objective: 'Roll cart B into the coupler at 0.400 m/s',
+        brief: 'The pack gives a 60.0 kg cart **3.20 m/s²** for 0.500 s, and its gauge only reads on A\'s side. Load cart B (or brake it) so it arrives at 0.39 to 0.41 m/s.',
+        text: 'Ore cart B has to roll into the **coupler** at **0.400 m/s**: the latch only catches between 0.39 and 0.41 m/s.\n\nThe spring pack\'s dial is hidden and its gauge only reads on **cart A\'s side**. Its tag says it gives a **60.0 kg** cart an acceleration of **3.20 m/s²** for **0.500 s**. Cart A is 60.0 kg.\n\nYou can\'t change the pack. You can load ore into **cart B** (set its **mass**), or put a push from the kit on it. Any way that gets B to the coupler at the right speed counts.',
         goalText: 'Cart B latches into the coupler',
         goal: COUPLE_GOAL,
         timeout: 25,
@@ -470,6 +463,8 @@
           bin: [{ type: 'winch', count: 2, dials: { pull: '200 N', speed: '12 m/s' } }, { type: 'h04-kicker', count: 2 }, { type: 'push', count: 2 }, { type: 'cart', count: 2 }, { type: 'speedo', count: 3 }],
           goal: null, poke: true
         },
+        objective: 'Free play: try anything on the rail',
+        brief: 'Winches, spring packs, pushes and spare carts. Drag a cart while it runs to shove it by hand.',
         text: 'The rail is yours: winches, spring packs, pushes and spare carts. While it runs you can **drag a cart** with the mouse.',
         prompts: [
           'Pull backwards on a cart that is rolling forwards. Which way does the acceleration point?',
