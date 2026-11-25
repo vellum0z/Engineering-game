@@ -181,7 +181,7 @@
     this.el = false; this.vp = false;
     this.gam = 0; this.beta = 0; this.tgt = 0;
     this.blo = -Infinity; this.bhi = Infinity;
-    this.res = 0; this.kd = 0; this.pos = -1;
+    this.res = 0; this.kd = 0; this.pos = -1; this.laid = false;
     this.lamB = 0; this.psB = 0; this.dl = 0;
     this.live = false;                    // has a body the island moves
   }
@@ -726,7 +726,11 @@
    * before them give them a pivot.
    */
   function layout(isl) {
-    var rows = isl.rows, n = rows.length, nb = isl.bodies.length, i, k;
+    // only the rows that are switched on take part (a plain pin is two rows
+    // of six); begin() lays the island out again when that changes
+    var all = isl.rows, rows = [], n, nb = isl.bodies.length, i, k;
+    for (i = 0; i < all.length; i++) { all[i].laid = all[i].on; all[i].pos = -1; if (all[i].on) rows.push(all[i]); }
+    n = rows.length;
     var byBody = isl.bodies.map(function () { return []; });
     rows.forEach(function (r, ri) {
       r.hubOnly = true; r._hubbed = false;
@@ -767,7 +771,7 @@
       reach(hb.pos, hb.pos + 1); reach(hb.pos, hb.pos + 2);
     });
     for (k = 0; k < nu; k++) size += k - first[k] + 1;
-    isl.n = n; isl.nu = nu; isl.hubs = hubs; isl.first = first; isl.size = size;
+    isl.n = all.length; isl.nu = nu; isl.hubs = hubs; isl.first = first; isl.size = size;
     // one factor for each stage
     isl.fac = [0, 1].map(function () {
       var f = { L: [], U: [], diag: new Float64Array(nu), dinv: new Float64Array(nu) };
@@ -777,8 +781,10 @@
     isl.x = new Float64Array(nu);
     byBody.forEach(function (l) { l.sort(function (a, b) { return a.row.pos - b.row.pos; }); });
     isl.blist = byBody;
-    isl.x0 = new Float64Array(nb); isl.y0 = new Float64Array(nb); isl.a0 = new Float64Array(nb);
-    isl.bvx = new Float64Array(nb); isl.bvy = new Float64Array(nb); isl.bw = new Float64Array(nb);
+    if (!isl.x0) {         // per body, so a new layout of the same island keeps them
+      isl.x0 = new Float64Array(nb); isl.y0 = new Float64Array(nb); isl.a0 = new Float64Array(nb);
+      isl.bvx = new Float64Array(nb); isl.bvy = new Float64Array(nb); isl.bw = new Float64Array(nb);
+    }
   }
 
   /* --------------------------------------------------------- linear algebra */
@@ -827,6 +833,7 @@
     }
     for (k = 0; k < rows.length; k++) {
       var r = rows[k], d = r.pos;
+      if (d < 0) continue;
       if (inSystem(r, stage)) {
         diag[d] += (!stage && r.el) ? r.gam / h : (stage ? EPS * Math.abs(diag[d]) : EPS_POS * r.kd);
         if (!(diag[d] !== 0) && !r._hubbed) diag[d] = 1;          // nothing it could move
@@ -901,6 +908,7 @@
       }
       r.lam *= sc; r.mu *= sc;
     }
+    for (i = 0; i < rows.length; i++) if (rows[i].on !== rows[i].laid) { layout(isl); break; }
     for (i = 0; i < rows.length; i++) {
       r = rows[i];
       if (!r.on) continue;
