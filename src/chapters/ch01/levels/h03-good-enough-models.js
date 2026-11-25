@@ -104,12 +104,15 @@
     ],
     yard: PAD,
     solutions: {
-      // Two ways that work: a stiffer material in the same section, or the
-      // same timber made deep enough. Width barely helps (sag goes as 1/b).
+      // Ways that work: a stiffer material in the same section, the same
+      // timber made deep enough, or a stay cable holding the tip up.
       'H3.rail': [
         { set: { shelf: { material: 'steel', depth: '120 mm', width: '80 mm' } } },
         { set: { shelf: { material: 'aluminium', depth: '120 mm', width: '80 mm' } } },
         { set: { shelf: { material: 'timber', depth: '250 mm', width: '80 mm' } } },
+        // a different structure: keep the timber plank and tie its tip back up to the wall
+        { add: [{ type: 'hook', id: 'hk', x: 0.1, y: 4.4 }, { type: 'cable', id: 'stay', a: { part: 'hk', anchor: 'eye' }, b: { part: 'shelf', anchor: 'tip' }, dials: { rating: '20 kN' } }] },
+        { pass: false, add: [{ type: 'hook', id: 'hk', x: 0.1, y: 4.4 }, { type: 'cable', id: 'stay', a: { part: 'hk', anchor: 'eye' }, b: { part: 'shelf', anchor: 'tip' }, dials: { rating: '2 kN' } }] },
         { pass: false, set: { shelf: { material: 'timber', depth: '120 mm', width: '80 mm' } } },
         { pass: false, set: { shelf: { material: 'rubber' } } },
         { pass: false, set: { shelf: { material: 'steel', depth: '12 mm', width: '80 mm' } } }
@@ -306,15 +309,20 @@
       /* ----------------------------------------------------------- job */
       {
         type: 'job', id: 'H3.rail', who: 'juno',
-        yard: { design: RAIL, bin: [], readouts: ['shelf.sag', 'shelf.moment', 'crate.gap'], camera: BAY.camera },
+        yard: { design: RAIL, bin: [{ type: 'hook', count: 1, label: 'wall hook' }, { type: 'cable', count: 1, dials: { rating: '20 kN' }, label: 'stay' }], readouts: ['shelf.sag', 'shelf.moment', 'crate.gap'], camera: BAY.camera },
         objective: 'Hang the 326 kg trolley load clear of the truck bed',
-        brief: 'The truck bed is **24 mm** under the load and the timber plank sags too far. Change the rail so the load hangs clear and nothing breaks.',
-        text: 'Juno wants a hoist trolley running out over the loading bay on a salvaged bar bolted to the wall: **2.4 m** long, carrying **3.2 kN** (the loaded trolley, 326 kg) at its tip.\n\nThe truck backs in underneath with its bed **24 mm** below the hanging load, so the rail may sag at most 1 % of its length. The crew has put up an 80 × 120 mm **timber** plank as a trial. Run it, then pick the rail\'s **material**, **depth** and **width** so the load hangs clear of the truck and nothing breaks. There is a steel bar of the same size in the scrap pile.',
+        brief: 'The truck bed is **24 mm** under the load and the timber plank sags too far. Stiffen the rail, or hold its tip up, so the load hangs clear and nothing breaks.',
+        text: 'Juno wants a hoist trolley running out over the loading bay on a salvaged bar bolted to the wall: **2.4 m** long, carrying **3.2 kN** (the loaded trolley, 326 kg) at its tip.\n\nThe truck backs in underneath with its bed **24 mm** below the hanging load, so the rail may sag at most 1 % of its length. The crew has put up an 80 × 120 mm **timber** plank as a trial. Run it, then pick the rail\'s **material**, **depth** and **width** so the load hangs clear of the truck and nothing breaks. There is a steel bar of the same size in the scrap pile, and a hook and cable if you would rather hold the tip up.',
         goalText: 'Load hanging still, clear of the truck bed, nothing broken',
         goal: G.all(
           G.never(function (s) { return s.breaks.length ? 'The rail broke at the wall: the bending was more than the section could take.' : null; }),
           G.never(function (s) { var c = s.part('crate'); return c && c.landed ? 'The load came down on the truck bed.' : null; }),
-          G.after(3, function (s) { var b = s.part('shelf').beam.bodies; return s.held('still', Math.abs(b[b.length - 1].v.y) < 0.002, 1) ? 'pass' : null; })
+          G.after(3, function (s) {
+            // the load has settled: the tip moved less than 0.1 mm over the last half second
+            var h = s.memo.tip = s.memo.tip || [], sag = s.part('shelf').sag();
+            h.push(sag); if (h.length > 30) h.shift();
+            return h.length === 30 && Math.abs(h[29] - h[0]) < 1e-4 ? 'pass' : null;
+          })
         ),
         timeout: 12,
         onFail: function (ctx) {
@@ -324,7 +332,7 @@
         hints: [
           'Run the timber plank as it is and read the **tip sag** gauge. Then try the other materials. Stiffer materials and deeper sections sag less.',
           'Depth helps far more than width: the sag goes as **1/depth³** but only as **1/width**. Doubling the depth cuts the sag to one eighth.',
-          'The steel bar from the scrap pile works as it is: **steel, 120 mm deep, 80 mm wide** sags about 7.7 mm. Timber needs about 250 mm of depth for the same job.'
+          'The steel bar from the scrap pile works as it is: **steel, 120 mm deep, 80 mm wide** sags about 7.7 mm. Timber needs about 250 mm of depth for the same job. Or keep the plank and tie its tip up to a **wall hook** with the **stay** cable.'
         ],
         success: function (ctx) {
           var sh = ctx.result && shelfOf(ctx.result);
