@@ -87,7 +87,7 @@ suite('P5: jobs judge the physics', () => {
   });
   test('lunar balance: the jets are off for this one', () => {
     const r = run('P5.balance', [{ type: 'push', a: { part: 'survivor' }, dials: { force: '31.3 lb', angle: '90 deg', time: '5 s' } }]);
-    ok(!r.pass && /refuelled/.test(r.reason), r.reason);
+    ok(!r.pass && /jets are off/.test(r.reason), r.reason);
   });
   test('hover: the Moon weight in newtons works as well as pounds', () => {
     ok(run('P5.hover', [{ type: 'push', a: { part: 'survivor' }, dials: { force: '139 N', angle: '90 deg', time: '5 s' } }]).pass);
