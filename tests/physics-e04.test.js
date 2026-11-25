@@ -215,7 +215,7 @@ suite('physics E04: sliders and rams', () => {
 
   test('force-controlled ram on ice: a = F/(m_crate + m_piston) (within 1%)', () => {
     // 500 N on 101 kg: a = 4.950 m/s², v(2 s) = 9.90 m/s.
-    const { w, crate, ram } = ramRig({ mu: 0, ram: { motorForce: 500, maxRamSpeed: 20 } });
+    const { w, crate, ram } = ramRig({ mu: 0, ram: { motorForce: 500 } });
     w.run(0.5); const v0 = crate.v.x, t0 = w.time;
     w.run(1.5);
     near((crate.v.x - v0) / (w.time - t0), 500 / 101, 0.01);
@@ -396,11 +396,38 @@ suite('physics E04: builds nobody planned stay stable', () => {
     ok(Emax <= E0 + 0.01 * Math.abs(E0) + 1, 'energy rose from ' + E0.toFixed(0) + ' to ' + Emax.toFixed(0) + ' J');
   });
 
-  test('a 20 kN ram on a 1 kg part stops accelerating at its stroke speed (maxRamSpeed)', () => {
+  function ramPair(def) {
     const w = world({ gravity: { x: 0, y: 0 } });
-    const a = w.add(new P.Body({ position: { x: 0, y: 0 }, shapes: [{ shape: P.box(0.2, 0.2), sensor: true }], mass: 1 }));
-    const b = w.add(new P.Body({ position: { x: 1, y: 0 }, shapes: [{ shape: P.box(0.2, 0.2), sensor: true }], mass: 1 }));
-    const ram = w.addJoint(new P.PrismaticJoint({ bodyA: a, bodyB: b, worldAnchor: { x: 0.5, y: 0 }, worldAxis: { x: 1, y: 0 }, motorForce: 20000, maxRamSpeed: 1.5 }));
+    const a = w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 } }));
+    const b = w.add(new P.Body({ position: { x: 1, y: 0 }, shapes: [{ shape: P.box(0.2, 0.2), sensor: true }], mass: def.mass }));
+    const ram = w.addJoint(new P.PrismaticJoint(Object.assign({ bodyA: a, bodyB: b, worldAnchor: { x: 1, y: 0 }, worldAxis: { x: 1, y: 0 } }, def.ram)));
+    return { w, b, ram };
+  }
+
+  test('a force ram follows F = ma over its whole stroke (no speed cap by default)', () => {
+    const F = 200, m = 2, a = F / m;
+    const { w, b, ram } = ramPair({ mass: m, ram: { motorForce: F, upperTranslation: 3 } });
+    ok(ram.maxRamSpeed === Infinity, 'default maxRamSpeed ' + ram.maxRamSpeed);
+    let worst = 0, steps = 0;
+    while (ram.translation() < 1.9 && steps++ < 600) {
+      const v0 = b.v.x;
+      w.step(1 / 60);
+      worst = Math.max(worst, Math.abs((b.v.x - v0) * 60 / a - 1));
+    }
+    ok(steps > 10 && worst < 0.01, 'acceleration off F/m by ' + (worst * 100).toFixed(2) + '% over ' + steps + ' steps');
+  });
+
+  test('a 20 kN ram on a 1 kg part is stopped by its stroke limit without gaining energy', () => {
+    const F = 20000, stroke = 0.5;
+    const { w, b, ram } = ramPair({ mass: 1, ram: { motorForce: F, upperTranslation: stroke } });
+    let Emax = 0;
+    w.run(2, 1 / 60, () => { Emax = Math.max(Emax, b.kineticEnergy()); });
+    ok(Emax <= F * stroke * 1.01, 'kinetic energy ' + Emax.toFixed(0) + ' J > ram work ' + F * stroke + ' J');
+    ok(Math.abs(ram.translation() - stroke) < 0.01 && M.len(b.v) < 0.1, 'held at ' + ram.translation().toFixed(3) + ' m, moving ' + M.len(b.v).toFixed(3) + ' m/s');
+  });
+
+  test('an explicit stroke speed limit (maxRamSpeed) stops a 20 kN ram on 1 kg from accelerating', () => {
+    const { w, ram } = ramPair({ mass: 1, ram: { motorForce: 20000, maxRamSpeed: 1.5 } });
     let peak = 0;
     w.run(2, 1 / 60, () => { peak = Math.max(peak, ram.speed()); });
     ok(peak < 1.5 * 1.02, 'ram speed ' + peak);
