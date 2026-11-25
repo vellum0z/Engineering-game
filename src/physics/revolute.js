@@ -85,13 +85,25 @@
    * the build explodes. Capping the push (as contacts cap theirs with
    * maxPushVelocity) keeps every correction small enough to stay linear;
    * a big error then closes over a few frames instead of in one substep.
+   *
+   * A soft row holds a steady load only through its push: at rest
+   * ms·m·biasRate·C = is·λ. A one-sided limit therefore scales its
+   * impulseScale by the same factor as its capped push, so it still holds
+   * any load instead of creeping through at the cap (its impulse is bounded
+   * by the load it holds). Equality rows keep the full impulseScale: in a
+   * build that cannot be satisfied it is what keeps their impulses bounded,
+   * so under a very large load on a very light part (about 6 kN per kg at
+   * 60 Hz) they give way slowly at the cap instead.
    */
   P.MAX_JOINT_PUSH = 3;   // m/s
   P.MAX_JOINT_TURN = 3;   // rad/s
   function capBias(v, max) { return v > max ? max : (v < -max ? -max : v); }
   // Scale the vector (bx, by) down to length max; returns the factor.
   function capBias2(bx, by, max) { var l = Math.sqrt(bx * bx + by * by); return l > max ? max / l : 1; }
+  // Factor (<= 1) that brings the push v down to max.
+  function capScale(v, max) { var a = v < 0 ? -v : v; return a > max ? max / a : 1; }
   P.capBias = capBias;
+  P.capScale = capScale;
   P.capBias2 = capBias2;
 
   /*
@@ -269,19 +281,25 @@
     byBody.forEach(function (l, b) { bodies.push(b); });
     blk.bodies = bodies; blk.ang0 = new Float64Array(bodies.length);
     blk.invM0 = new Float64Array(bodies.length); blk.invI0 = new Float64Array(bodies.length);
+    blk.cx0 = new Float64Array(bodies.length); blk.cy0 = new Float64Array(bodies.length);
+    blk.slides = blk.joints.some(function (j) { return j.blockSlides; });
     blk.factored = false;
   }
 
   // A = J M⁻¹ Jᵀ only changes when a body turns (lever arms rotate) or its
   // mass changes, so a frame or a resting beam keeps its factor. Anything
   // turning faster than BLOCK_REFACTOR_ANGLE per substep refactors every
-  // substep; a stale factor would make the solve diverge.
+  // substep; a stale factor would make the solve diverge. A slider's rows
+  // also depend on how far it has slid (its lever arm grows with the
+  // stroke), so a group with one (joint.blockSlides) also refactors once a
+  // body has moved 10 m × the turn tolerance (1 cm at most).
   function needsRefactor(blk) {
     if (!blk.factored) return true;
-    var bs = blk.bodies;
+    var bs = blk.bodies, slideTol = 10 * blk.turnTol;
     for (var i = 0; i < bs.length; i++) {
       var b = bs[i];
       if (Math.abs(b.angle - blk.ang0[i]) > blk.turnTol || b.invM !== blk.invM0[i] || b.invI !== blk.invI0[i]) return true;
+      if (blk.slides && Math.abs(b.c.x - blk.cx0[i]) + Math.abs(b.c.y - blk.cy0[i]) > slideTol) return true;
     }
     return false;
   }
@@ -291,7 +309,7 @@
   // that a factor from the step start no longer converges.
   function refactor(blk) {
     blk.factored = true; blk.factoredAt = blk.passes;
-    blk.bodies.forEach(function (b, i) { blk.ang0[i] = b.angle; blk.invM0[i] = b.invM; blk.invI0[i] = b.invI; });
+    blk.bodies.forEach(function (b, i) { blk.ang0[i] = b.angle; blk.invM0[i] = b.invM; blk.invI0[i] = b.invI; blk.cx0[i] = b.c.x; blk.cy0[i] = b.c.y; });
     var rows = blk.rows, order = blk.order, first = blk.first, env = blk.env;
     var dinv = blk.dinv, diag0 = blk.diag0, n = rows.length, k, c, kk, worst = 1;
     for (k = 0; k < n; k++) { var r = rows[order[k]]; r.joint.blockRow(r.slot, r); }
@@ -415,11 +433,11 @@
     if (!blk.bodies) return;
     var world = blk.joints[0].bodyA.world || blk.joints[0].bodyB.world;
     if (!world) return;
-    var g = world.gravity, step = world.stepCount, prev = 0, E = 0, K = 0, work = 0, known = true;
+    var g = world.gravity, step = world.stepCount, prev = 0, prevK = 0, E = 0, K = 0, work = 0, known = true;
     blk.bodies.forEach(function (b) {
       var k = b.kineticEnergy(), e = k - b.m * (g.x * b.c.x + g.y * b.c.y);
       K += k; E += e;
-      if (b._guardStep === step - 1) prev += b._guardE; else known = false;
+      if (b._guardStep === step - 1) { prev += b._guardE; prevK += b._guardK; } else known = false;
       (b.lastApplied || []).forEach(function (f) { work += Math.abs((f.vector.x * b.v.x + f.vector.y * b.v.y) * dt) + Math.abs(f.torque * b.w * dt); });
     });
     blk.joints.forEach(function (j) {
@@ -427,15 +445,34 @@
       if (j.storedEnergy) { var s = j.storedEnergy(); E += s; if (j._guardStep === step - 1) prev += j._guardE; else known = false; }
     });
     if (known) {
-      var excess = E - prev - work - GUARD_ALLOW * K - 1e-3;
+      // the slack is a fraction of the kinetic energy before the step, so a
+      // group that blew up within one step cannot keep a share of it
+      var excess = E - prev - work - GUARD_ALLOW * Math.min(K, prevK) - 1e-3;
       if (excess > 0 && K > 0) {
         var f = Math.sqrt(Math.max(0, K - excess) / K);
         blk.bodies.forEach(function (b) { b.v = M.scale(b.v, f); b.w *= f; });
+        // In a real blow-up (most of the motion spurious) also scale the
+        // impulses the joints warm-start with next step, or they put the
+        // same energy straight back. A small trim leaves them alone, so a
+        // loaded structure keeps reading its load.
+        if (f < 0.5 && excess > 1) blk.joints.forEach(function (j) { scaleImpulses(j, f); });
         blk.guarded = (blk.guarded || 0) + 1;
       }
     }
-    blk.bodies.forEach(function (b) { b._guardE = b.kineticEnergy() - b.m * (g.x * b.c.x + g.y * b.c.y); b._guardStep = step; });
+    blk.bodies.forEach(function (b) { b._guardK = b.kineticEnergy(); b._guardE = b._guardK - b.m * (g.x * b.c.x + g.y * b.c.y); b._guardStep = step; });
     blk.joints.forEach(function (j) { if (j.storedEnergy) { j._guardE = j.storedEnergy(); j._guardStep = step; } });
+  }
+
+  // Scale every accumulated impulse of a joint (fields named impulse or
+  // ...Impulse, numbers or vectors), unless it has its own scaleImpulses(f).
+  function scaleImpulses(j, f) {
+    if (j.scaleImpulses) { j.scaleImpulses(f); return; }
+    Object.keys(j).forEach(function (k) {
+      if (k !== 'impulse' && !/Impulse$/.test(k)) return;
+      var v = j[k];
+      if (typeof v === 'number') j[k] = v * f;
+      else if (v && typeof v.x === 'number') j[k] = M.v(v.x * f, v.y * f);
+    });
   }
 
   P.jointBlock = { prepare: blockPrepare, solve: blockSolve, guard: blockGuard };
@@ -555,11 +592,11 @@
 
     // 3. limits
     if (this.enableLimit && !fixedRotation) {
-      var ang = this.angle(), bias, ms, is, imp, next, C;
+      var ang = this.angle(), bias, ms, is, imp, next, C, f;
       if (this.lowerAngle > -Infinity) {
         C = ang - this.lowerAngle; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;                     // speculative
-        else if (useBias) { bias = capBias(this.jointSoft.biasRate * C, P.MAX_JOINT_TURN); ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = this.jointSoft.biasRate * C; f = capScale(bias, P.MAX_JOINT_TURN); bias *= f; ms = this.jointSoft.massScale; is = f * this.jointSoft.impulseScale; }
         imp = -this.axialMass * ms * (B.w - A.w + bias) - is * this.lowerImpulse;
         next = Math.max(this.lowerImpulse + imp, 0);
         imp = next - this.lowerImpulse; this.lowerImpulse = next;
@@ -568,7 +605,7 @@
       if (this.upperAngle < Infinity) {
         C = this.upperAngle - ang; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;
-        else if (useBias) { bias = capBias(this.jointSoft.biasRate * C, P.MAX_JOINT_TURN); ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = this.jointSoft.biasRate * C; f = capScale(bias, P.MAX_JOINT_TURN); bias *= f; ms = this.jointSoft.massScale; is = f * this.jointSoft.impulseScale; }
         // sign flipped: the upper limit pushes B clockwise
         imp = -this.axialMass * ms * (A.w - B.w + bias) - is * this.upperImpulse;
         next = Math.max(this.upperImpulse + imp, 0);
