@@ -154,7 +154,7 @@
    *                      turning drift above) from the current state
    *   blockImpulse(slot) / blockAdd(slot, d)   its accumulated row impulse
    * and, in solve(), skipping its rigid rows when this.block is set and
-   * calling P.jointBlock.solve(this.block, h, useBias) when this.blockLeader.
+   * calling P.jointBlock.member(this, h, useBias) after its other rows.
    * Set world.jointBlockSolve = false to fall back to plain Gauss-Seidel.
    *
    * Any joint type can contribute rows (DistanceJoint rods, for example):
@@ -163,7 +163,9 @@
    *     and blockSolveOwn(h, useBias), which solves those same rows alone
    *     (used when the group cannot be factored)
    *   - in solve(), skip the rows when this.block is set, and call
-   *     P.jointBlock.solve(this.block, h, useBias) if this.blockLeader
+   *     P.jointBlock.member(this, h, useBias) after its other rows (the
+   *     leader solves the group there; optional blockActive() says the
+   *     joint has rows of its own, which makes the last member re-project)
    *   - in postStep(dt), call P.jointBlock.guard(this.block, dt) if
    *     this.blockLeader; optional storedEnergy() (J) for springs and
    *     driveWork(dt) (J) for motors keep the guard from fighting them
@@ -187,7 +189,7 @@
     if (!world || world.jointBlockSolve === false) return;
     if (world._blockStep !== world.stepCount || world._blockTime !== world.time) buildBlocks(world);
     var blk = world._blockOf && world._blockOf.get(joint);
-    if (blk) { joint.block = blk; joint.blockLeader = blk.joints[0] === joint; }
+    if (blk) { joint.block = blk; joint.blockLeader = blk.joints[0] === joint; joint.blockCloser = blk.joints.length > 1 && blk.joints[blk.joints.length - 1] === joint; }
   }
 
   // Groups (and their row ordering and factor) are kept from step to step
@@ -495,7 +497,20 @@
     });
   }
 
-  P.jointBlock = { prepare: blockPrepare, solve: blockSolve, guard: blockGuard };
+  // A member's solve: its own rows have run; the leader (first member)
+  // solves the group. Members after it may push the group's bodies with
+  // rows of their own (a ram, a motor, a limit); those impulses land after
+  // the group solve and, on a light part, spin it up within the substep.
+  // So when one does, the last member projects the group's velocities onto
+  // its rows once more (rigid, no push), which can only remove energy.
+  function blockMember(j, h, useBias) {
+    var blk = j.block;
+    if (j.blockLeader) { blk.late = false; blockSolve(blk, h, useBias); return; }
+    if (j.blockActive && j.blockActive()) blk.late = true;
+    if (j.blockCloser && blk.late) { blk.late = false; blockSolve(blk, h, false); }
+  }
+
+  P.jointBlock = { prepare: blockPrepare, solve: blockSolve, member: blockMember, guard: blockGuard };
 
   // Jacobian of one component of a point-to-point constraint (anchor B −
   // anchor A): x row is vB.x − wB rB.y − vA.x + wA rA.y, y row likewise.
@@ -635,7 +650,7 @@
     }
 
     // 4. point constraint, with the joint's group or on its own
-    if (this.block) { if (this.blockLeader) P.jointBlock.solve(this.block, h, useBias); }
+    if (this.block) P.jointBlock.member(this, h, useBias);
     else this.blockSolveOwn(h, useBias);
   };
 
@@ -656,6 +671,8 @@
     P.applyPair(A, B, rA, rB, pv);
   };
 
+  // Rows of its own (springs, motors, rams, limits) solved outside the group.
+  RevoluteJoint.prototype.blockActive = function () { return !!(this.stiffness > 0 || this.damping > 0 || this.enableMotor || this.enableLimit); };
   // Rigid rows for P.jointBlock: slot 0 = x, 1 = y of the anchor separation.
   RevoluteJoint.prototype.blockSlots = function () { return [0, 1]; };
   RevoluteJoint.prototype.blockRow = function (slot, r) { pointRow(this, slot, r); };

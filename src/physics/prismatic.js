@@ -202,7 +202,7 @@
     }
 
     // perpendicular and angular rows
-    if (this.block) { if (this.blockLeader) P.jointBlock.solve(this.block, h, useBias); }
+    if (this.block) P.jointBlock.member(this, h, useBias);
     else this.blockSolveOwn(h, useBias, g);
   };
 
@@ -228,6 +228,8 @@
     B.v = M.mulAdd(B.v, mB * i1, g.perp); B.w += iB * LB;
   };
 
+  // Rows of its own (springs, motors, rams, limits) solved outside the group.
+  PrismaticJoint.prototype.blockActive = function () { return !!(this.stiffness > 0 || this.damping > 0 || this.motorForce !== 0 || this.enableMotor || this.enableLimit); };
   // Rigid rows for P.jointBlock: 0 = perpendicular offset, 1 = angle. Their
   // lever arms grow with the stroke, so the group refactors as it slides.
   PrismaticJoint.prototype.blockSlides = true;

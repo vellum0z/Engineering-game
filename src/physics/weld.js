@@ -76,7 +76,7 @@
   WeldJoint.prototype.solve = function (h, useBias) {
     if (this.angularSpring) this.solveAngular(h, useBias);
     if (this.linearSpring) this.solvePoint(h, useBias);
-    if (this.block) { if (this.blockLeader) P.jointBlock.solve(this.block, h, useBias); }
+    if (this.block) P.jointBlock.member(this, h, useBias);
     else this.blockSolveOwn(h, useBias);
   };
   WeldJoint.prototype.blockSolveOwn = function (h, useBias) {
@@ -163,6 +163,8 @@
     P.applyPair(A, B, rA, rB, li);
   };
 
+  // Rows of its own (springs, motors, rams, limits) solved outside the group.
+  WeldJoint.prototype.blockActive = function () { return !!(this.angularSpring || this.linearSpring); };
   // Rigid rows for P.jointBlock: 0, 1 = anchor x, y; 2 = relative angle.
   WeldJoint.prototype.blockSlots = function () {
     var s = [];
