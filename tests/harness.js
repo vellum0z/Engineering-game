@@ -21,6 +21,8 @@ function loadGame() {
   // way a browser just logs a missing script.
   srcs.filter(s => s.startsWith('src/') && !skip.test(s) && fs.existsSync(path.join(ROOT, s)))
     .forEach(s => require(path.join(ROOT, s)));
+  // SE_ISLAND=1 runs every world with the island solver on
+  if (process.env.SE_ISLAND && globalThis.SE.phys.island) globalThis.SE.phys.island.defaultOn = true;
   return globalThis.SE;
 }
 
