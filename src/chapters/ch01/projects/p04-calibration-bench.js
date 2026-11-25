@@ -20,6 +20,11 @@
  *             caliper justifies -> the inspector re-measures and accepts or
  *             rejects the stamp
  *
+ * Goals judge outcomes only, and each job has a second way through with
+ * library parts or another set-out (a post as a table stop, a pressure tank
+ * on the press inlet, a filler board at the end post, marking from the boom
+ * tip, the stamp in m^2). Only the stamp is graded on what was typed.
+ *
  * The bench machines are job scenery (library: false) defined at the bottom
  * of this file, prefixed p04-. Every number is computed from the givens; the
  * hand check sits next to each one.
@@ -29,9 +34,6 @@
   var Y = SE.yard, G = Y.goals, D = Y.dial, B = SE.physics.bench;
   var rs = function (x, n, rule) { return SE.sigfig.roundSig(x, n, rule); };
   var MM = 1e-3;
-
-  // Area dials (the stamp takes mm^2). Until dial.js has an area quantity.
-  if (!D.QUANTITIES.area) D.QUANTITIES.area = { dims: SE.units.dim(2, 0, 0), si: 'm^2', name: 'area', examples: 'mm^2, m^2, in^2' };
 
   // ---------------------------------------------------------------- givens
 
@@ -208,7 +210,7 @@
     { id: 'walk', type: 'p04-walk', x: 0, y: 0.5, dials: { board3: '2.065 m', board11: '2.375 m' }, locked: true, open: ['board3', 'board11'], label: 'scaffold walk' }
   ] };
   var BOOM = { parts: [
-    { id: 'boom', type: 'p04-boom', x: 0, y: 0.9, dials: { mark: '6.42 m' }, locked: true, open: ['mark'], label: 'crane boom' }
+    { id: 'boom', type: 'p04-boom', x: 0, y: 0.9, dials: { mark: '6.42 m', from: 'heel pin' }, locked: true, open: ['mark', 'from'], label: 'crane boom' }
   ] };
   var GAUGE = { parts: [
     { id: 'gauge', type: 'p04-gauge', x: 0, y: 0.9, dials: { stamp: '7105.2228 mm^2' }, locked: true, open: ['stamp'], label: 'inspection bench' }
@@ -220,18 +222,20 @@
     id: 'P4', order: 4,
     title: 'Calibration Bench',
     subtitle: 'Every digit before the steel',
+    objective: 'Calibrate five bench machines so the splice plate fits',
+    pitch: 'The bridge splice plate gets one shot. Every bench machine does exactly what your figure tells it, so set each one and watch what it does.',
 
     brief: [
       'The north bridge needs a **splice plate**: a slab of salvaged steel bolted across the cracked girder, through holes that already exist in the old flange. If the new holes are off, the bolts won\'t go through, and we don\'t get a second plate.',
       'So before anyone touches the steel, the workshop recalibrates the bench: the punch table, the hydraulic press, the scaffold the crew stands on, the crane that lifts the plate, and the caliper. Every machine takes your figure **exactly as written** and does what it says. Get a prefix wrong and it punches a hole in the wrong county.',
-      'Each job is a machine with one setting open. Type the figure, press Run and watch what the machine does with it. The whole parts library is there too: clip a speed gauge to the punch table if you want to check the jog test yourself. Report figures to three significant figures with one SI prefix in the numerator unless the job says otherwise. — *Juno*'
+      'Each job is a machine with a setting open, and the whole parts library is there too. Type a figure, or build your own way round it (a stop on the punch bed, a tank on the press inlet, a filler board at the end post), press Run and watch what happens. — *Juno*'
     ].join('\n\n'),
 
     conditions: [
-      'Punch-table jog test: the lead screw moved the table **835 μm** in **46.0 ms**. Holes are 24 mm for 22 mm bolts; the last hole in the row is **465 mm** from the datum edge.',
-      'Press: salvaged cylinder with a **127 mm** bore. A 24 mm hole through this 16 mm plate takes **483 kN**; set the relief valve so the ram pushes **15 % over** that. Frame rated **750 kN**.',
+      'Punch-table jog test: the lead screw moved the table **835 μm** in **46.0 ms**. Holes are 24 mm for 22 mm bolts; the last hole in the row is **465 mm** from the datum edge. The table runs for 465 mm ÷ feed and punches wherever it stopped, so a solid stop on the bed (a fence post, say) also sets where it stops.',
+      'Press: salvaged cylinder with a **127 mm** bore. A 24 mm hole through this 16 mm plate takes **483 kN**; set the relief valve so the ram pushes **15 % over** that. Frame rated **750 kN**: at the end of the stroke the ram pushes the full setting into it. A pressure tank parked on the inlet (left of the column) drives the ram instead of the valve.',
       'Scaffold boards are read to the millimetre and cut to **3 s.f.**: board 3 reads **2.065 m**, board 11 reads **2.375 m**. The crew cuts the rest of the pile the way your two cuts show.',
-      'Crane stay: boom tip **3.92 m** up and **7.26 m** out from the heel pin, 9 equal bays, stay pinned at node 7. Pin 25.5 mm through 26 mm holes in the lug and the boom; the fitter drills to the **nearest millimetre**.',
+      'Crane stay: boom tip **3.92 m** up and **7.26 m** out from the heel pin, 9 equal bays, stay pinned at node 7. Pin 25.5 mm through 26 mm holes in the lug and the boom; the fitter drills to the **nearest millimetre**, measuring from whichever end the mark says.',
       'Caliper least count **0.02 mm**, so every reading is ±0.02 mm. The splice plate reads **112.46 mm × 63.18 mm**.'
     ],
 
@@ -242,7 +246,8 @@
     jobs: [
       {
         id: 'P4.feed',
-        label: '**Punch-table feed.** Set the controller\'s feed rate from the jog test, $\\frac{835\\u{ μm}}{46.0\\u{ ms}}$. It runs the table for 465 mm ÷ feed, and the table moves at its real speed.',
+        objective: 'Punch the hole so the bolt drops through the flange',
+        label: '**Punch table.** The controller runs the table for 465 mm ÷ its feed setting, at the screw\'s real speed (jog test: 835 μm in 46.0 ms). A stop on the bed works too.',
         design: TABLE,
         yard: { camera: { fit: { lo: { x: -0.7, y: 0.45 }, hi: { x: 1.7, y: 1.15 } } } },
         timeout: 45,
@@ -250,7 +255,6 @@
           G.never(function (s) { var t = s.part('table'); return t && t.crashed ? 'The table ran into its end stop at 500 mm and the punch came down on the bench rail.' : null; }),
           function (s) { return pinVerdict(s, 'table', 'feed-bolt', function (bp) { return 'The new hole is ' + signedMm(bp.hole - FAR_HOLE) + ' from the flange hole. The two holes leave only ' + mm(Math.max(0, bp.pin.opening)) + ' for a 22 mm bolt, and it won\'t go.'; }); }
         ),
-        grade: { part: 'table', key: 'feed', spec: { value: FEED, unit: 'm/s', sf: 3, form: 'si' } },
         hints: [
           'Turn each prefix into a power of ten before you divide. Micro is 10⁻⁶, milli is 10⁻³.',
           'Work in base units: 835(10⁻⁶) m over 46.0(10⁻³) s. Divide the numbers and subtract the exponents, then pick one prefix for the result. It has to sit in the numerator: mm/s, not μm/ms.',
@@ -269,16 +273,16 @@
       },
       {
         id: 'P4.press',
-        label: '**Press relief valve.** Set the pressure so the 127 mm ram pushes 15 % over the 483 kN punch load: $p = \\frac{1.15\\,(483\\u{ kN})}{\\frac{\\pi}{4}(127\\u{ mm})^{2}}$. The pump builds up to it; at the end of the stroke the ram pushes the full setting into the frame.',
+        objective: 'Punch the slug out without cracking the press frame',
+        label: '**Press.** Ram force = pressure × the 127 mm ram\'s area. The plate needs 483 kN; the frame takes 750 kN. Set the relief valve 15 % over the punch load, or park a charged pressure tank on the inlet.',
         design: PRESS,
-        yard: { camera: { fit: { lo: { x: -0.9, y: -0.05 }, hi: { x: 0.9, y: 1.75 } } } },
+        yard: { camera: { fit: { lo: { x: -1.4, y: -0.05 }, hi: { x: 0.9, y: 1.75 } } } },
         timeout: 8,
         goal: G.all(
           G.never(function (s) { var p = s.part('press'); return p && p.frameBroken ? 'At the end of the stroke the ram pushed ' + kN(p.setForce) + ' into a frame rated 750 kN. It cracked at the throat.' : null; }),
           G.never(function (s) { var p = s.part('press'); return p && p.stalled ? 'The ram topped out at ' + kN(p.setForce) + ', short of the 483 kN the plate needs. The punch stalls halfway into the steel and has to be jacked back out.' : null; }),
           function (s) { var p = s.part('press'); return p && p.done ? 'pass' : null; }
         ),
-        grade: { part: 'press', key: 'relief', spec: { value: RELIEF, unit: 'Pa', sf: 3, form: 'si' } },
         hints: [
           'The ram force is pressure times the piston area, so you need the area first. The exponent squares the prefix as well as the number: mm² means (mm)².',
           'Write the bore in metres, 0.127 m, square it and multiply by π/4 to get the area in m². Then p = 1.15 × 483 kN ÷ A, with the kilo turned into 10³ too.',
@@ -292,7 +296,8 @@
       },
       {
         id: 'P4.cut',
-        label: '**Scaffold cut list.** Round boards 3 (**2.065 m**) and 11 (**2.375 m**) to three significant figures. The crew cuts all 30 boards the way you did and lays the walk to the end post.',
+        objective: 'Close the scaffold walk with no heel-sized gap',
+        label: '**Scaffold walk.** Round boards 3 (2.065 m) and 11 (2.375 m) to 3 s.f. The crew cuts all 30 boards the same way and lays them to the end post.',
         design: WALK,
         yard: { camera: { fit: { lo: { x: -6.5, y: -0.1 }, hi: { x: 0.8, y: 1.3 } } } },
         timeout: 8,
@@ -306,7 +311,6 @@
             return s.held('walk-ok', true, 0.3) ? 'pass' : null;
           }
         ),
-        grade: { part: 'walk', key: 'board3', spec: { value: BOARD3, unit: 'm', sf: 3, form: 'any', exactRounding: true } },
         hints: [
           'In both readings the digit you drop is exactly 5, with nothing after it. That is the one case where "5 goes up" is not the course rule.',
           'For an exact 5, look at the digit in front of it. Even: leave it alone. Odd: round it up. Over a long cut list half the exact 5s go up and half go down, so the errors cancel.',
@@ -319,21 +323,18 @@
       },
       {
         id: 'P4.stay',
-        label: '**Crane stay bolt.** Set where the fitter drills, measured from the heel pin along the boom to node 7: $s = \\frac{7}{9}\\sqrt{h^{2} + r^{2}}$, **to the nearest millimetre**.',
+        objective: 'Drill the boom so the stay pin goes home',
+        label: '**Crane boom.** Mark node 7 for the fitter, who drills to the nearest millimetre. Measure from the heel pin or from the tip, whichever you like.',
         design: BOOM,
         yard: { camera: { fit: { lo: { x: -0.6, y: -0.1 }, hi: { x: 8.9, y: 2.2 } } } },
         timeout: 6,
         goal: function (s) {
           var bp = s.part('boom');
-          if (bp && bp.offEnd && s.t > 0.1) return { fail: 'The mark is ' + mm(bp.drill, 0) + ' from the heel pin, but the boom is only ' + f3(BOOM_L, 4) + ' m long.' };
+          if (bp && bp.offEnd && s.t > 0.1) return { fail: 'The mark is ' + mm(bp.mark, 0) + ' from the ' + (bp.fromTip ? 'tip' : 'heel pin') + ', but the boom is only ' + f3(BOOM_L, 4) + ' m long.' };
           return pinVerdict(s, 'boom', 'stay-pin', function (b) {
-            return 'Drilled at ' + mm(b.drill, 0) + '; the stay\'s hole is ' + signedMm(b.drill - STAY, 1) + ' away, and the pin only goes through when they are within 0.5 mm. The pin won\'t go.' + (Math.abs(b.drill - STAY_SHEET) < 0.6 * MM ? ' That is exactly where the round-every-step sheet put it: six small roundings, ' + mm(STAY_SHEET - STAY, 1) + ' of error.' : '');
+            return 'Drilled ' + mm(b.drill, 0) + ' from the heel pin; the stay\'s hole is ' + signedMm(b.drill - STAY, 1) + ' away, and the pin only goes through when they are within 0.5 mm. The pin won\'t go.' + (Math.abs(b.drill - STAY_SHEET) < 0.6 * MM ? ' That is exactly where the round-every-step sheet put it: six small roundings, ' + mm(STAY_SHEET - STAY, 1) + ' of error.' : '');
           });
         },
-        grade: { part: 'boom', key: 'mark', spec: {
-          value: STAY, unit: 'm', sf: 4, form: 'any', tol: 0.5 * MM / STAY,
-          mistakes: [{ test: function (r) { return Math.abs(r * STAY - STAY_SHEET) < 0.6 * MM; }, kind: 'rounding', msg: 'That is the position you get by rounding every intermediate step to 3 s.f. Carry full precision through and round once, at the end.' }]
-        } },
         hints: [
           'A millimetre on a length of a few metres is the fourth significant figure, so the usual three won\'t do. And the only rounding allowed is the last one.',
           'Boom length first: L = √(h² + r²). One bay is L/9, and node 7 is seven bays out. Keep every digit your calculator gives you until the very end.',
@@ -343,7 +344,8 @@
       },
       {
         id: 'P4.area',
-        label: '**Splice plate stamp.** Stamp the plate\'s area from the caliper readings, written to **only the figures the ±0.02 mm caliper justifies**. The inspector measures it again eight times before accepting the stamp.',
+        objective: 'Stamp the plate area with only the figures the caliper backs',
+        label: '**Inspection.** Stamp the plate\'s area from the 112.46 mm × 63.18 mm caliper readings. The inspector re-measures it eight times before accepting the stamp.',
         design: GAUGE,
         yard: { camera: { fit: { lo: { x: -0.35, y: 0.6 }, hi: { x: 0.35, y: 1.2 } } } },
         timeout: 8,
@@ -365,30 +367,42 @@
     solutions: {
       'P4.feed': [
         { set: { table: { feed: '18.2 mm/s' } } },
+        // a different way: a fence post on the bed as a hard stop at 465 mm, and a slow enough feed to reach it
+        { add: [{ type: 'post', x: 0.54, y: 1.4 }], set: { table: { feed: '17 mm/s' } } },
+        { pass: false, add: [{ type: 'post', x: 0.56, y: 1.4 }], set: { table: { feed: '17 mm/s' } } },
         { pass: false, set: { table: { feed: '18 mm/s' } } },
         { pass: false, set: { table: { feed: '18.2 μm/s' } } },
         { pass: false, set: { table: { feed: '18.2 m/s' } } }
       ],
       'P4.press': [
         { set: { press: { relief: '43.8 MPa' } } },
+        // a different way: a pressure tank on the inlet, charged in psi
+        { add: [{ type: 'tank', x: -0.95, y: 0.5, dials: { pressure: '6360 psi' } }] },
+        { pass: false, add: [{ type: 'tank', x: -0.95, y: 0.5, dials: { pressure: '6360 kPa' } }] },
         { pass: false, set: { press: { relief: '43.8 kPa' } } },
         { pass: false, set: { press: { relief: '34.4 MPa' } } },
         { pass: false, set: { press: { relief: '62.0 MPa' } } }
       ],
       'P4.cut': [
         { set: { walk: { board3: '2.06 m', board11: '2.38 m' } } },
+        // a different way: truncate the cut list, then close the 187 mm end gap with a 150 mm filler board
+        { add: [{ type: 'board', x: -0.108, y: 0.525, dials: { length: '150 mm', width: '50 mm', fixed: 'yes' } }], set: { walk: { board3: '2.06 m', board11: '2.37 m' } } },
         { pass: false, set: { walk: { board3: '2.07 m', board11: '2.38 m' } } },
         { pass: false, set: { walk: { board3: '2.06 m', board11: '2.37 m' } } },
         { pass: false, set: { walk: { board3: '2.07 m', board11: '2.37 m' } } }
       ],
       'P4.stay': [
         { set: { boom: { mark: '6.417 m' } } },
+        // a different way: set out from the tip, 2L/9
+        { set: { boom: { mark: '1.833 m', from: 'tip' } } },
+        { pass: false, set: { boom: { mark: '1.83 m', from: 'tip' } } },
         { pass: false, set: { boom: { mark: '6.420 m' } } },
         { pass: false, set: { boom: { mark: '6.417 mm' } } },
         { pass: false, set: { boom: { mark: '6.42 km' } } }
       ],
       'P4.area': [
         { set: { gauge: { stamp: '7105 mm^2' } } },
+        { set: { gauge: { stamp: '7.105(10^-3) m^2' } } },
         { pass: false, set: { gauge: { stamp: '7105.2 mm^2' } } },
         { pass: false, set: { gauge: { stamp: '7.11(10^3) mm^2' } } },
         { pass: false, set: { gauge: { stamp: '7150 mm^2' } } }
@@ -430,7 +444,7 @@
       var P = b.P, o = b.at({ x: 0, y: 0 }), part = b.inst.id, world = b.world;
       var feed = b.si('feed');
       b.body({ type: 'static', position: { x: o.x + 0.05, y: o.y - 0.05 }, label: 'bed', shapes: [{ shape: P.box(0.75, 0.05), material: 'steel', filter: { category: CAT_BENCH, mask: 0xFFFF } }] });
-      b.body({ type: 'static', position: { x: o.x + TABLE_TRAVEL + 0.02, y: o.y + 0.04 }, label: 'end stop', shapes: [{ shape: P.box(0.02, 0.04), material: 'steel', filter: { category: CAT_BENCH, mask: 0xFFFF } }] });
+      var endStop = b.body({ type: 'static', position: { x: o.x + TABLE_TRAVEL + 0.02, y: o.y + 0.04 }, label: 'end stop', shapes: [{ shape: P.box(0.02, 0.04), material: 'steel', filter: { category: CAT_BENCH, mask: 0xFFFF } }] });
       var carriage = b.body({ type: 'kinematic', position: { x: o.x - PLATE_LEN / 2, y: o.y + 0.015 }, label: 'carriage',
         shapes: [{ shape: P.box(PLATE_LEN / 2, 0.015), material: 'steel', filter: { category: CAT_BENCH, mask: 0xFFFF } }] });
       var punch = b.body({ type: 'kinematic', position: { x: o.x, y: o.y + 0.03 + 0.016 + 0.09 }, label: 'punch',
@@ -445,10 +459,21 @@
       b.on('step', function () {
         var t = world.time;
         if (built.hole == null) {
-          var travel = FEED * Math.min(t, built.tRun);
-          if (travel >= TABLE_TRAVEL) { travel = TABLE_TRAVEL; built.crashed = true; }
+          // the screw drives the carriage until the timer ends or something solid is in the way
+          var cur = built.travel || 0, travel = Math.max(cur, FEED * Math.min(t, built.tRun)), moving = travel > cur;
+          if (moving && !built.crashed) {
+            var yRay = o.y + 0.015;
+            var hit = P.query.rayCast(world, { x: o.x + cur - 0.002, y: yRay }, { x: o.x + travel, y: yRay }, function (fx) {
+              return fx.body !== carriage && fx.body !== punch && fx.body !== b.ground;
+            });
+            if (hit) {
+              travel = Math.max(cur, hit.point.x - o.x);
+              if (hit.body === endStop) built.crashed = true; else built.blocked = true;
+              moving = false;
+            }
+          } else if (built.crashed) travel = cur;
           carriage.setTransform({ x: o.x - PLATE_LEN / 2 + travel, y: carriage.position.y }, 0);
-          carriage.v = { x: t < built.tRun && !built.crashed ? FEED : 0, y: 0 };
+          carriage.v = { x: moving ? FEED : 0, y: 0 };
           built.travel = travel;
           if (t >= built.tRun && !built.crashed) { built.hole = travel; t0 = t; }
           return;
@@ -510,7 +535,15 @@
     dials: [{ key: 'relief', label: 'Relief pressure', q: 'pressure', def: '30.0 MPa', min: 0, max: 1e12 }],
     build: function (b) {
       var P = b.P, o = b.at({ x: 0, y: 0 }), world = b.world, part = b.inst.id;
-      var setF = b.si('relief') * RAM_A;
+      // A charged pressure tank parked on the inlet (left of the column) drives the ram instead of the valve.
+      var inlet = { x: o.x - 0.95, y: 0.5 }, tank = null;
+      (b.out.design.parts || []).forEach(function (q) {
+        if (q.type !== 'tank' || tank || Math.abs(q.x - inlet.x) > 0.35 || q.y > 1.2) return;
+        var rd = Y.readDials(q);
+        if (!rd.errors.length) tank = { id: q.id, pressure: rd.values.pressure };
+      });
+      var pressure = tank ? tank.pressure : b.si('relief');
+      var setF = pressure * RAM_A;
       var bench = { category: CAT_BENCH, mask: 0xFFFF };
       // die block with a hole, and the plate on it
       holedSlab(world, part, o.x - 0.3, o.x + 0.3, o.y - 0.2, 0.2, o.x, HOLE + 0.004, 'steel');
@@ -525,7 +558,7 @@
       var shear = b.joint(new P.WeldJoint({ bodyA: anchor, bodyB: slug, worldAnchor: { x: o.x, y: o.y + 0.008 }, breakForce: PUNCH_F, label: 'slug' }));
       var punch = b.body({ type: 'kinematic', position: { x: o.x, y: o.y + 0.016 + 0.03 + 0.1 }, label: 'punch',
         shapes: [{ shape: P.box(HOLE / 2, 0.1), material: 'steel', filter: { category: CAT_BENCH, mask: 0 } }] });
-      var built = { body: crown, crown: crown, slug: slug, punch: punch, frameWeld: frameWeld, shear: shear, origin: o,
+      var built = { body: crown, crown: crown, slug: slug, punch: punch, frameWeld: frameWeld, shear: shear, origin: o, inlet: inlet, tank: tank, pressure: pressure,
         setForce: setF, force: 0, phase: 'approach', frameBroken: false, stalled: false, done: false };
       var punchY0 = punch.c.y, tPhase = 0, reached = null;
       function frameIntact() { return world.joints.indexOf(frameWeld) >= 0; }
@@ -572,7 +605,11 @@
       var a = cam.worldToScreen({ x: o.x - 0.05, y: cr.y - 0.08 }), bb = cam.worldToScreen({ x: o.x + 0.05, y: pu.y + 0.1 });
       ctx.save(); ctx.fillStyle = 'rgba(120,140,160,.8)'; ctx.fillRect(a.x, a.y, bb.x - a.x, bb.y - a.y); ctx.restore();
       label(ctx, cam, { x: o.x + 0.12, y: o.y + 0.32 }, 'ram ' + kN(built.force), 'rgba(230,180,34,.95)');
-      label(ctx, cam, { x: o.x + 0.12, y: o.y + 0.26 }, 'setting ' + kN(built.setForce));
+      label(ctx, cam, { x: o.x + 0.12, y: o.y + 0.26 }, (built.tank ? 'tank ' : 'valve ') + f3(built.pressure / 1e6) + ' MPa → ' + kN(built.setForce));
+      var ip = cam.worldToScreen(built.inlet);
+      ctx.save(); ctx.strokeStyle = built.tank ? 'rgba(143,209,106,.9)' : 'rgba(230,180,34,.7)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+      ctx.strokeRect(ip.x - 0.35 * cam.zoom, ip.y - 0.5 * cam.zoom, 0.7 * cam.zoom, 1.0 * cam.zoom); ctx.restore();
+      label(ctx, cam, { x: built.inlet.x - 0.34, y: built.inlet.y + 0.56 }, built.tank ? 'inlet: tank connected' : 'inlet: park a tank here', built.tank ? '#8fd16a' : undefined);
       label(ctx, cam, { x: o.x + 0.12, y: o.y + 0.20 }, built.frameBroken ? 'FRAME CRACKED' : built.stalled ? 'STALLED' : built.phase === 'deadhead' || built.done ? 'dead-headed: all of it on the frame' : built.phase === 'through' ? 'slug out' : built.phase === 'press' ? 'pressing' : '', built.frameBroken || built.stalled ? '#e0644a' : undefined);
     }
   });
@@ -664,11 +701,15 @@
     type: 'p04-boom', name: 'Crane boom', category: 'Bench', library: false,
     blurb: 'The new boom on trestles. Node 7 gets the stay; the fitter drills where you say, to the millimetre.',
     size: { w: 8.4, h: 0.4 },
-    dials: [{ key: 'mark', label: 'Drill at (from heel pin)', q: 'length', def: '6.42 m', min: 0, max: 1e6 }],
+    dials: [
+      { key: 'mark', label: 'Drill at', q: 'length', def: '6.42 m', min: 0, max: 1e6 },
+      { key: 'from', label: 'Measured from', choice: ['heel pin', 'tip'], def: 'heel pin' }
+    ],
     build: function (b) {
       var P = b.P, o = b.at({ x: 0, y: 0 }), world = b.world, part = b.inst.id;
-      var drill = Math.round(b.si('mark') / MM) * MM;
-      var built = { origin: o, drill: drill, offEnd: drill > BOOM_L - 0.02, pin: null };
+      var mark = Math.round(b.si('mark') / MM) * MM, fromTip = b.si('from') === 'tip';
+      var drill = fromTip ? BOOM_L - mark : mark;
+      var built = { origin: o, drill: drill, mark: mark, fromTip: fromTip, offEnd: mark > BOOM_L - 0.02, pin: null };
       b.body({ type: 'static', position: { x: o.x + 1.2, y: o.y / 2 - 0.03 }, label: 'trestle', shapes: [{ shape: P.box(0.05, o.y / 2 - 0.03), material: 'timber' }] });
       b.body({ type: 'static', position: { x: o.x + 7.2, y: o.y / 2 - 0.03 }, label: 'trestle', shapes: [{ shape: P.box(0.05, o.y / 2 - 0.03), material: 'timber' }] });
       // top chord (with the drilled hole) and the stay lug on it
@@ -695,7 +736,7 @@
       ctx.fillStyle = 'rgba(230,180,34,.9)';
       for (var i = 0; i <= CRANE.bays; i++) { var n = cam.worldToScreen({ x: o.x + i * BOOM_L / CRANE.bays, y: o.y }); ctx.fillRect(n.x - 1, n.y, 2, 6); }
       ctx.restore();
-      label(ctx, cam, { x: o.x, y: o.y + 1.3 }, 'drill at ' + mm(built.drill, 0) + ' (marked to the mm)', 'rgba(230,180,34,.95)');
+      label(ctx, cam, { x: o.x, y: o.y + 1.3 }, 'mark ' + mm(built.mark, 0) + ' from the ' + (built.fromTip ? 'tip' : 'heel pin') + ' (to the mm)', 'rgba(230,180,34,.95)');
       if (!built.pin) return;
       loupe(ctx, cam, {
         at: { x: o.x + (STAY + built.drill) / 2, y: o.y + 0.07 }, zoom: 2400, title: 'node 7 ×' + Math.round(2400 / cam.zoom),
