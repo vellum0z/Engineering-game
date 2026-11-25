@@ -171,6 +171,7 @@
     this.cone = null; this.coneMu = 0;
     this.on = true;
     this.lam = 0; this.mu = 0; this.total = 0;
+    this.jc = false;
     this.ps = 0; this.vs = 0;             // active set: 0 free, 1 at hi, -1 at lo, 2 out
     this.el = false; this.vp = false;
     this.gam = 0; this.beta = 0; this.tgt = 0;
@@ -462,6 +463,10 @@
       store: function (invH, h, st) {
         j.invH = invH; j.h = h; j.impulse = -line.total;
         linePeak(j, line.total, h, st);
+        // work the drum did on the line this frame, J (tension × line taken
+        // in, substep by substep), for the energy ledger
+        if (j._islWorkAt !== st.tok) { j._islWorkAt = st.tok; j.frameWork = 0; }
+        j.frameWork += -line.total * invH * (L0 - j.length);
         if (j.atLimit) j.speed = 0;
       },
       save: function () { return [j.length, j.speed, j.capped, j.atLimit]; },
@@ -995,6 +1000,7 @@
         r.res = g;
         bounds(r, hh, 0);
         if (r.ps === 0) { if (Math.abs(g) > err) err = Math.abs(g); }
+        else if (r.jc) r.jc = false;      // just stopped at its limit: the others move first
         else if (r.ps === 1) { if (g > TOL) { r.ps = 0; refactor = true; if (g > err) err = g; } }
         else if (r.ps === -1) { if (g < -TOL) { r.ps = 0; refactor = true; if (-g > err) err = -g; } }
       }
@@ -1021,12 +1027,24 @@
       x.fill(0);
       for (i = 0; i < n; i++) { r = rows[i]; r.dl = 0; if (r.on && r.ps === 0) x[r.pos] = -r.res / h; }
       backsolve(isl, 0);
+      // A row that would pass its limit stops there, and the step is solved
+      // again without it: the other rows' share of this step assumed it
+      // could carry more, and taking it anyway can throw a part clean
+      // across a rope's circle to the far side.
+      var hit = false;
+      for (i = 0; i < n; i++) {
+        r = rows[i];
+        if (!r.on || r.ps !== 0) continue;
+        var to = r.lam + x[r.pos];
+        if (to > r.bhi || to < r.blo) { hit = true; break; }
+      }
       for (i = 0; i < n; i++) {
         r = rows[i];
         if (!r.on || r.ps !== 0) continue;
         var nl = r.lam + x[r.pos];
-        if (nl > r.bhi) { nl = r.bhi; r.ps = 1; refactor = true; switched = true; }
-        else if (nl < r.blo) { nl = r.blo; r.ps = -1; refactor = true; switched = true; }
+        if (nl > r.bhi) { nl = r.bhi; r.ps = 1; r.jc = true; refactor = true; switched = true; }
+        else if (nl < r.blo) { nl = r.blo; r.ps = -1; r.jc = true; refactor = true; switched = true; }
+        else if (hit) continue;
         var d = nl - r.lam;
         r.lam = nl; r.dl = d;
         if (d !== 0) rowPush(r, r.D, d);

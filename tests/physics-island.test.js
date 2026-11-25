@@ -356,6 +356,23 @@ suite('island solver: winch', () => {
       else { near(wj.lineTension(), brakeForce, 0.01, 'slipping tension'); near(y0 - load.c.y, 0.5 * (g - brakeForce / m) * 25, 0.01, 'fall in 5 s'); }
     });
   });
+  test('a 60 kN winch stalled on a 12 t load through a 20 kg hook and sling: line at the limit, sling at limit − hook weight (within 1%), hook still (< 1 mm)', () => {
+    // The load weighs 118 kN, so it stays on the ground and the winch sits at
+    // its limit. The hook is in balance between the line (60 kN up), its own
+    // weight and the sling: T_sling = 60 000 − 20·g.
+    const w = world(), top = anchor(w, 0, 12), cap = 60000, mh = 20;
+    w.add(new P.Body({ type: 'static', position: { x: 0, y: -0.5 }, shapes: [P.box(20, 0.5)] }));
+    const hook = w.add(new P.Body({ position: { x: 0, y: 6 }, shapes: [P.circle(0.15)], mass: mh }));
+    const load = w.add(new P.Body({ position: { x: 0, y: 0.5 }, shapes: [P.box(0.5, 0.5)], mass: 12000 }));
+    const wj = w.addJoint(new P.WinchJoint({ bodyA: top, bodyB: hook, reelSpeed: 1.5, maxPull: cap }));
+    const sling = w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: load, localAnchorB: { x: 0, y: 0.5 }, rope: true }));
+    let moved = 0;
+    run(w, 3, () => { moved = Math.max(moved, Math.hypot(hook.c.x, hook.c.y - 6)); });
+    ok(moved < 1e-3, 'hook moved ' + (moved * 1000).toFixed(2) + ' mm');
+    near(wj.lineTension(), cap, 0.01, 'line tension');
+    near(sling.tension(), cap - mh * g, 0.01, 'sling tension');
+    ok(Math.abs(load.c.y - 0.5) < 2e-3, 'load left the ground');
+  });
 });
 
 suite('island solver: conservation', () => {
