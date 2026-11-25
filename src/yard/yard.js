@@ -220,44 +220,6 @@
   };
 
   /* ------------------------------------------------------------ the DOM */
-  Yard.prototype.mount = function (stageEl, inspectorEl) {
-    var el = SE.ui.el, btn = SE.ui.button, self = this;
-    this.root = stageEl; this.inspectorEl = inspectorEl || null;
-    SE.ui.clear(stageEl);
-    stageEl.classList.add('yard');
-    this.canvas = el('canvas', { class: 'yard-canvas', 'aria-label': 'Build yard. Place parts, then press Run.', tabindex: '0' });
-    this.toastEl = el('div', { class: 'yard-flash' });
-    this.barEl = el('div', { class: 'yard-bar' });
-    this.binEl = el('div', { class: 'yard-bin', role: 'toolbar', 'aria-label': 'Parts bin' });
-    this.stripEl = el('div', { class: 'yard-strip', 'aria-live': 'off' });
-    stageEl.appendChild(this.barEl);
-    this.objEl = el('div', { class: 'yard-objective', 'aria-live': 'polite' });
-    this.coachEl = el('div', { class: 'yard-coach' });
-    stageEl.appendChild(el('div', { class: 'yard-view' }, [this.canvas, this.objEl, this.toastEl, this.coachEl]));
-    stageEl.appendChild(this.binEl);
-    stageEl.appendChild(this.stripEl);
-    this.ctx = this.canvas.getContext('2d');
-    this.cam = new SE.phys.Camera({ center: { x: 0, y: 3 }, zoom: 40, canvas: this.canvas });
-    this.bindPointer();
-    this.refreshPanels();
-    this.fitView();
-    this.lastFrame = 0;
-    var loop = function (ts) {
-      if (self.dead) return;
-      var dtReal = self.lastFrame ? Math.min(0.1, (ts - self.lastFrame) / 1000) : 0;
-      self.lastFrame = ts;
-      self.tick(dtReal);
-      self.draw();
-      self.raf = requestAnimationFrame(loop);
-    };
-    this.raf = requestAnimationFrame(loop);
-    this.onResize = function () { self.cam.resize(); };
-    window.addEventListener('resize', this.onResize);
-    setTimeout(function () { self.cam.resize(); self.fitView(); }, 0);
-    this.renderObjective();
-    if (!Yard.coachSeen() && !Yard.coachShown) { Yard.coachShown = true; this.showCoach(); }
-  };
-
   /* --------------------------------------------------------- objective */
   // The one thing to do right now, pinned on the yard: { text, kind: 'job' | 'build' | 'watch' | 'free' | 'level' }.
   Yard.prototype.setObjective = function (o) {
@@ -278,24 +240,6 @@
   };
   function firstSentence(t) { t = String(t || '').replace(/\s+/g, ' ').trim(); var m = t.match(/^.{12,160}?[.!?](\s|$)/); return m ? m[0].trim() : t.slice(0, 160); }
 
-  /* ------------------------------------------------------ controls tour */
-  Yard.coachSeen = function () { try { return localStorage.getItem('se.yard.coach') === '1'; } catch (e) { return true; } };
-  Yard.prototype.showCoach = function () {
-    if (!this.coachEl) return;
-    var el = SE.ui.el, self = this, box = SE.ui.clear(this.coachEl);
-    var tips = [
-      ['🧰', 'Pick a part', 'from the bin under the yard, then click in the yard to place it.'],
-      ['🔧', 'Click a part', 'to set its numbers. Type units: 2.5 kN, 300 lb, 40 cm.'],
-      ['▶', 'Press Run.', 'The physics decides. Any build that does the job counts.'],
-      ['🖱', 'Drag', 'to move a part. R rotates, Delete removes. Scroll to zoom, right-drag to pan.']
-    ];
-    box.appendChild(el('div', { class: 'coach-card' }, [
-      el('div', { class: 'coach-title', text: 'How the yard works' }),
-      el('ol', { class: 'coach-list' }, tips.map(function (t) { return el('li', {}, [el('span', { class: 'coach-ico', text: t[0] }), el('span', { html: '<b>' + t[1] + '</b> ' + t[2] })]); })),
-      SE.ui.button('Got it', function () { try { localStorage.setItem('se.yard.coach', '1'); } catch (e) {} box.classList.remove('show'); }, 'primary small')
-    ]));
-    box.classList.add('show');
-  };
   Yard.prototype.unmount = function () {
     this.dead = true;
     if (this.raf) cancelAnimationFrame(this.raf);
@@ -331,70 +275,6 @@
     this._flashT = setTimeout(function () { t.className = 'yard-flash'; }, 3200);
   };
 
-  Yard.prototype.refreshPanels = function () { if (!this.root) return; this.refreshBar(); this.refreshBin(); this.refreshInspector(); this.refreshStrip(); };
-
-  Yard.prototype.refreshBar = function () {
-    if (!this.barEl) return;
-    var el = SE.ui.el, btn = SE.ui.button, self = this, bar = SE.ui.clear(this.barEl);
-    var running = this.mode === 'run' && this.stepper && !this.stepper.paused;
-    bar.appendChild(btn(running ? '❚❚ Pause' : (this.mode === 'run' ? '▶ Resume' : '▶ Run'), function () { running ? self.pause() : self.run(); }, 'primary small yard-run'));
-    bar.appendChild(btn('Step', function () { self.stepOnce(); }, 'secondary small', { title: 'Advance one 1/60 s step' }));
-    bar.appendChild(btn('↺ Reset', function () { self.reset(); }, 'secondary small', { disabled: this.mode === 'edit' ? 'disabled' : null }));
-    var speed = el('select', { class: 'yard-speed', title: 'Simulation speed', onchange: function () { self.timeScale = Number(speed.value); if (self.stepper) self.stepper.timeScale = self.timeScale; } },
-      [['0.25', '¼×'], ['0.5', '½×'], ['1', '1×'], ['2', '2×'], ['4', '4×']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
-    speed.value = String(this.timeScale || 1);
-    bar.appendChild(speed);
-    var ov = function (key, label) {
-      var cb = el('input', { type: 'checkbox', onchange: function () { self.overlays[key] = cb.checked; } });
-      cb.checked = !!self.overlays[key];
-      return el('label', { class: 'yard-toggle' }, [cb, el('span', { text: label })]);
-    };
-    bar.appendChild(ov('forces', 'forces'));
-    bar.appendChild(ov('weights', 'weights'));
-    bar.appendChild(this.clockEl = el('span', { class: 'yard-clock mono' }));
-    bar.appendChild(btn('?', function () { self.showCoach(); }, 'ghost small yard-help', { title: 'How the yard works', 'aria-label': 'How the yard works' }));
-    if (!this.ready() && this.mode === 'edit') bar.appendChild(el('span', { class: 'yard-err', text: '⚠ ' + this.built.errors[0].error }));
-    else {
-      if (this.mode === 'edit') this.diagnose(true);
-      var dg = this.diag || [];
-      if (dg.length) bar.appendChild(el('span', { class: 'yard-diag ' + dg[0].severity, title: dg.map(function (d) { return '• ' + d.message; }).join('\n'),
-        text: (dg[0].severity === 'error' ? '⚠ ' : '△ ') + dg[0].message + (dg.length > 1 ? '  (+' + (dg.length - 1) + ' more)' : '') }));
-    }
-  };
-
-  Yard.prototype.refreshBin = function () {
-    if (!this.binEl) return;
-    var el = SE.ui.el, self = this, bin = SE.ui.clear(this.binEl);
-    var entries = this.binEntries();
-    if (!entries.length) { this.binEl.style.display = 'none'; return; }
-    this.binEl.style.display = '';
-    var groups = {};
-    // a big bin (the manual library) shows one category at a time behind tabs
-    var cats = [];
-    entries.forEach(function (e) { var c = Y.partDef(e.type).category; if (cats.indexOf(c) < 0) cats.push(c); });
-    var tabbed = entries.length > 10 && cats.length > 2;
-    if (tabbed) {
-      if (cats.indexOf(this.binCat) < 0) this.binCat = cats[0];
-      bin.appendChild(el('div', { class: 'bin-tabs', role: 'tablist' }, cats.map(function (c) {
-        return el('button', { class: 'bin-tab' + (c === self.binCat ? ' on' : ''), role: 'tab', text: c, onclick: function () { self.binCat = c; self.refreshBin(); } });
-      })));
-    }
-    entries.forEach(function (e, i) {
-      var d = Y.partDef(e.type);
-      var left = self.remaining(e, self.binSpec === 'library' ? null : i);
-      var cat = d.category;
-      if (tabbed && cat !== self.binCat) return;
-      if (!groups[cat]) { groups[cat] = el('div', { class: 'bin-group' }, [tabbed ? null : el('span', { class: 'bin-cat', text: cat })]); bin.appendChild(groups[cat]); }
-      var active = self.placing && self.placing.entry === e;
-      var b = el('button', {
-        class: 'bin-part' + (active ? ' active' : '') + (left <= 0 ? ' empty' : ''),
-        title: d.blurb || d.name, disabled: left <= 0 || self.mode !== 'edit' ? 'disabled' : null,
-        onclick: function () { self.startPlacing(e, self.binSpec === 'library' ? null : i); }
-      }, [el('span', { class: 'bin-name', text: e.label || d.name }), isFinite(left) ? el('span', { class: 'bin-count', text: '×' + left }) : null]);
-      groups[cat].appendChild(b);
-    });
-  };
-
   Yard.prototype.startPlacing = function (entry, binIndex) {
     if (this.placing && this.placing.entry === entry) { this.placing = null; this.refreshBin(); return; }
     var d = Y.partDef(entry.type);
@@ -405,70 +285,11 @@
     if (this.canvas) this.canvas.focus();
   };
 
-  Yard.prototype.refreshInspector = function () {
-    var box = this.inspectorEl; if (!box) return;
-    var el = SE.ui.el, btn = SE.ui.button, self = this;
-    SE.ui.clear(box);
-    var inst = this.selected && this.inst(this.selected);
-    if (!inst) {
-      box.appendChild(el('div', { class: 'insp-empty muted small', text: this.mode === 'edit' ? 'Click a part to set it up. Pick one from the bin to add it.' : 'Reset to change the build.' }));
-      return;
-    }
-    var d = Y.partDef(inst.type), errs = this.built.errors.filter(function (e) { return e.part === inst.id; });
-    box.appendChild(el('div', { class: 'insp-head' }, [el('b', { text: inst.label || d.name }), el('span', { class: 'insp-cat', text: d.category })]));
-    if (d.blurb) box.appendChild(el('div', { class: 'insp-blurb small', text: d.blurb }));
-    var plate = d.plate ? d.plate(inst, this.built.parts[inst.id]) : null;
-    if (inst.plate) plate = (plate || []).concat(inst.plate);
-    if (plate && plate.length) box.appendChild(el('div', { class: 'insp-plate mono' }, plate.map(function (l) { return el('div', { text: l }); })));
-    d.dials.forEach(function (dl) {
-      var fixed = inst.locked && !(inst.open || []).includes(dl.key) || (inst.fixed || []).indexOf(dl.key) >= 0 || dl.locked;
-      if (inst.hide && inst.hide.indexOf(dl.key) >= 0) return;
-      var err = errs.filter(function (e) { return e.key === dl.key; })[0];
-      var input;
-      if (dl.choice) {
-        input = el('select', { disabled: fixed ? 'disabled' : null, onchange: function () { self.setDial(inst.id, dl.key, input.value); } },
-          dl.choice.map(function (c) { var m = SE.phys.MATERIALS[c]; return el('option', { value: c, text: (m && m.label) || c }); }));
-        input.value = inst.dials[dl.key];
-      } else {
-        input = el('input', { type: 'text', class: 'dial-input mono', value: inst.dials[dl.key] == null ? '' : inst.dials[dl.key],
-          placeholder: dl.optional ? 'as rigged' : D.QUANTITIES[dl.q || 'number'].examples, disabled: fixed ? 'disabled' : null, spellcheck: 'false',
-          'aria-label': dl.label });
-        var commit = function () { if (input.value !== inst.dials[dl.key]) self.setDial(inst.id, dl.key, input.value); };
-        input.addEventListener('change', commit);
-        input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { commit(); e.preventDefault(); } e.stopPropagation(); });
-      }
-      box.appendChild(el('label', { class: 'dial' + (err ? ' bad' : '') + (fixed ? ' fixed' : '') }, [
-        el('span', { class: 'dial-label', text: dl.label }), input,
-        err ? el('span', { class: 'dial-err small', text: err.error }) : null
-      ]));
-    });
-    errs.filter(function (e) { return !e.key; }).forEach(function (e) { box.appendChild(el('div', { class: 'dial-err small', text: e.error })); });
-    if (!inst.locked && this.mode === 'edit') {
-      box.appendChild(el('div', { class: 'btn-row' }, [
-        d.connector ? null : btn('⟲ Rotate', function () { self.movePart(inst.id, inst.x, inst.y, (inst.angle || 0) + Math.PI / 12); }, 'ghost small'),
-        btn('Remove', function () { self.removePart(inst.id); }, 'ghost small danger')
-      ]));
-    }
-  };
-
   Yard.prototype.readoutList = function () {
     var want = this.opts.readouts;
     var all = this.built.readouts;
     if (!want) return all;
     return want.map(function (id) { return all.filter(function (r) { return r.id === id; })[0]; }).filter(Boolean);
-  };
-  Yard.prototype.refreshStrip = function () {
-    if (!this.stripEl) return;
-    var el = SE.ui.el, self = this, strip = SE.ui.clear(this.stripEl);
-    this.gaugeEls = [];
-    this.readoutList().forEach(function (r) {
-      var val = el('span', { class: 'gauge-val mono' });
-      var unit = el('input', { class: 'gauge-unit mono', value: self.units[r.id] || '', placeholder: D.QUANTITIES[r.q] ? D.QUANTITIES[r.q].si : '', title: 'Show this gauge in any ' + r.q + ' unit', spellcheck: 'false',
-        onchange: function () { var u = unit.value.trim(); if (!u || SE.units.unitInfo(u)) { self.units[r.id] = u; unit.classList.remove('bad'); } else unit.classList.add('bad'); } });
-      unit.addEventListener('keydown', function (e) { e.stopPropagation(); });
-      strip.appendChild(el('div', { class: 'gauge' }, [el('span', { class: 'gauge-label', text: r.partLabel + ' ' + r.label }), val, unit]));
-      self.gaugeEls.push({ r: r, val: val });
-    });
   };
   Yard.prototype.readText = function (r) {
     var v;
@@ -622,7 +443,7 @@
       props.a = end;
       this.addPart(d.type, props, pl.binIndex); this.donePlacing(); return;
     }
-    if (pl.stage === 0) { pl.a = end; pl.stage = 1; this.flash('Now click the other end.', 'info'); return; }
+    if (pl.stage === 0) { pl.a = end; pl.stage = 1; this.flash('Now click the other end.', 'info'); if (this.refreshStatus) this.refreshStatus(); return; }
     if (end.part === pl.a.part && end.anchor === pl.a.anchor && !end.at) { this.flash('Pick a different point for the other end.', 'warn'); return; }
     props.a = pl.a; props.b = end;
     this.addPart(d.type, props, pl.binIndex);
@@ -736,6 +557,13 @@
       var tl = cam.worldToScreen({ x: gp.x - d.size.w / 2, y: gp.y + d.size.h / 2 });
       ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#a7a29a'; ctx.fillRect(tl.x, tl.y, d.size.w * cam.zoom, d.size.h * cam.zoom); ctx.restore();
     }
+    // hovered part (edit mode): a soft outline says "you can click this"
+    var hb = this.hoverId && this.hoverId !== this.selected && this.built.parts[this.hoverId] && this.built.parts[this.hoverId].body;
+    if (hb && hb.aabb && hb !== this.built.ground && !this.placing) {
+      var hbb = hb.aabb(), h1 = cam.worldToScreen({ x: hbb.lo.x, y: hbb.hi.y }), h2 = cam.worldToScreen({ x: hbb.hi.x, y: hbb.lo.y });
+      ctx.save(); ctx.strokeStyle = 'rgba(143,184,232,.9)'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      ctx.strokeRect(h1.x - 4, h1.y - 4, h2.x - h1.x + 8, h2.y - h1.y + 8); ctx.restore();
+    }
     // errors on parts
     this.built.errors.forEach(function (e) {
       var inst = self.inst(e.part); if (!inst || inst.x == null) return;
@@ -744,7 +572,7 @@
     });
     // clock and gauges
     if (this.clockEl) this.clockEl.textContent = 't = ' + world.time.toFixed(2) + ' s';
-    (this.gaugeEls || []).forEach(function (g) { g.val.textContent = self.readText(g.r); });
+    (this.gaugeEls || []).concat(this.inspGauges || []).forEach(function (g) { g.val.textContent = self.readText(g.r); });
     this.emit('frame', { ctx: ctx, cam: cam });
   };
 

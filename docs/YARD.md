@@ -12,7 +12,8 @@ The code is in `src/yard/`:
 | `dial.js` | Parses typed settings ("2.5 kN", "300 lb") into SI, refuses the wrong kind of unit |
 | `design.js` | Part registry (`definePart`), part instances, and `build(design, site)` → physics world |
 | `judge.js` | Runs a design until a goal passes or fails. Goal helpers. Job score |
-| `yard.js` | The yard screen: canvas, parts bin, inspector, gauge strip, Run/Step/Reset |
+| `yard.js` | The yard model: placing, selecting, running, judging, drawing the canvas |
+| `panels.js` | The yard's screen furniture: toolbar, parts bin, status bar, live readouts, Properties inspector, hover tips |
 | `steps.js` | Handheld step types for levels with a `yard` block |
 | `manual.js` | Manual projects with a `yard` block |
 | `parts/*.js` | The parts themselves |
@@ -126,8 +127,15 @@ Players should never have to read a wall of text to know what to do.
 
 - **The objective is pinned on the yard** (top left), in large type. It says the one thing to do now, as an outcome: "Get all three crates across the creek". It is under about ten words. A run marks it ✔ Done or ✖ Not yet, with the reason.
 - **Cards are short.** A card shows its `brief` (one or two sentences). The full `text` sits behind **📖 Guide**, along with what the level teaches, the story and the controls. Without a `brief`, the card shows the text's first paragraph cut to two sentences, which is a fallback, not a target.
-- **The controls tour** shows the first time someone opens the yard, and again from the **?** on the yard bar.
-- **Big bins are tabbed** by category (the manual library). A handheld kit shows only the parts the step needs.
+- **The controls tour** shows the first time someone opens the yard, and again from **? Help** on the yard bar.
+- **The layout follows familiar editors**, so players already know where things are:
+  - **Toolbar** (top): ▶ Run / Step / ↺ Reset, Speed, and a labelled **Show** group for the overlays.
+  - **Parts bin** (left of the canvas): a labelled palette grouped by category, with a search box when it holds more than ten parts. A handheld kit shows only the parts the step needs; the bin hides when the kit is empty.
+  - **Hover tips** on the canvas name a part, show its main dial and say what a click does.
+  - **Status bar** (under the canvas): a mode badge (BUILD, PLACE, RUN, DONE) and one line saying what a click does right now.
+  - **Live readouts** (bottom): labelled, read-only meters with a unit picker. Clicking one selects its part.
+  - **Properties** (right panel, under the card): the selected part's dials as labelled fields with unit hints, a 🔒 on fixed ones, and that part's live readings. With nothing selected it lists every part in the yard, editable ones first, so any setting is two clicks away. A build error on the toolbar names its part and selects it when clicked.
+- Level text should use these names: "the bin", "Properties", "the readouts".
 
 | Field | On | What it is |
 | --- | --- | --- |
