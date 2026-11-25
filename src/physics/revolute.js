@@ -170,6 +170,7 @@
    * Rows must be equalities: a one-sided row (a rope) can join only while it
    * is taut, and should leave the group when it goes slack.
    */
+  var PUSH_COUPLING = 25;   // see blockSolve
   var PIVOT_TOL = 1e-6;               // pivot / diagonal below this: the row depends on the others
   var DRIFT_CAP = 1;                  // m/s: most the turning correction may ask for
   var BLOCK_MAX_ENVELOPE = 400000;     // matrix entries; past this, Gauss-Seidel
@@ -359,6 +360,14 @@
     if (B.invM || B.invI) { B.v = M.v(B.v.x + B.invM * r.jb[0] * d, B.v.y + B.invM * r.jb[1] * d); B.w += B.invI * r.jb[2] * d; }
   }
 
+  // out = A⁻¹ rhs with the envelope LDLᵀ factor (dependent rows give 0)
+  function blockSubst(blk, rhs, x) {
+    var n = blk.rows.length, env = blk.env, first = blk.first, dinv = blk.dinv, i, k;
+    for (i = 0; i < n; i++) { var s = rhs[i], e = env[i], f = first[i]; for (k = f; k < i; k++) s -= e[k - f] * x[k]; x[i] = s; }
+    for (i = 0; i < n; i++) x[i] *= dinv[i];
+    for (i = n - 1; i >= 0; i--) { var ee = env[i], ff = first[i], xi = x[i]; for (k = ff; k < i; k++) x[k] -= ee[k - ff] * xi; }
+  }
+
   function blockSolve(blk, h, useBias, retry) {
     if (!blk.built) { blk.built = true; factor(blk); }
     blk.passes = (blk.passes || 0) + (retry ? 0 : 1);
@@ -371,19 +380,30 @@
     }
     var soft = blk.joints[0].jointSoft, ms = 1, is = 0, br = 0;
     if (useBias) { ms = soft.massScale; is = soft.impulseScale; br = soft.biasRate; }
-    var rows = blk.rows, order = blk.order, first = blk.first, env = blk.env, dinv = blk.dinv;
-    var n = rows.length, b = blk.rhs, x = blk.lam, i, k, r, e0 = 0, e1 = 0, d;
+    var rows = blk.rows, order = blk.order, dinv = blk.dinv, diag0 = blk.diag0;
+    var n = rows.length, b = blk.rhs, x = blk.lam, k, r, e0 = 0, e1 = 0, d;
     var push = blk.push || (blk.push = new Float64Array(n)), applied = blk.applied || (blk.applied = new Float64Array(n));
+    var xp = blk.lamP || (blk.lamP = new Float64Array(n)), Ep = 0, Ed = 0, sc;
     for (k = 0; k < n; k++) {
       r = rows[order[k]]; r.joint.blockRow(r.slot, r);
       push[k] = capBias(br * r.C, r.angular ? P.MAX_JOINT_TURN : P.MAX_JOINT_PUSH) + capBias(r.drift / h, DRIFT_CAP);
-      b[k] = rowVel(r) + push[k];
+      b[k] = rowVel(r);
+      if (dinv[k] && diag0[k] > 0) Ed += push[k] * push[k] / diag0[k];
+    }
+    // Pushes that disagree between nearly dependent rows (an over-built
+    // part, a loop that doesn't close) are amplified by A⁻¹: the energy
+    // the push puts in, ½ pᵀA⁻¹p, can be thousands of times what each row
+    // asks for on its own, ½ Σ p²/A_kk, and flings a light part. Scale the
+    // push down so the coupled rows put in at most PUSH_COUPLING times that.
+    blockSubst(blk, push, xp);
+    for (k = 0; k < n; k++) Ep += push[k] * xp[k];
+    sc = Ep > PUSH_COUPLING * Ed && Ep > 0 ? Math.sqrt(PUSH_COUPLING * Ed / Ep) : 1;
+    for (k = 0; k < n; k++) {
+      push[k] *= sc; b[k] += push[k];
       if (dinv[k]) e0 += b[k] * b[k];
     }
     // x = A⁻¹ b
-    for (i = 0; i < n; i++) { var s = b[i], e = env[i], f = first[i]; for (k = f; k < i; k++) s -= e[k - f] * x[k]; x[i] = s; }
-    for (i = 0; i < n; i++) x[i] *= dinv[i];
-    for (i = n - 1; i >= 0; i--) { var ee = env[i], ff = first[i], xi = x[i]; for (k = ff; k < i; k++) x[k] -= ee[k - ff] * xi; }
+    blockSubst(blk, b, x);
     for (k = 0; k < n; k++) {
       d = -ms * x[k];
       if (!isFinite(d)) d = 0;
