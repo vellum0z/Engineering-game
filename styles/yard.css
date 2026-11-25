@@ -77,3 +77,6 @@
 .bin-tab.on { color: var(--hazard); border-bottom-color: var(--hazard); }
 .job-list { margin: 6px 0 10px; padding-left: 22px; font-size: 14px; line-height: 1.5; }
 .prompts-box summary { cursor: pointer; color: var(--rust); font-size: 13px; margin: 4px 0; }
+.yard-diag { flex-basis: 100%; font-size: 12px; }
+.yard-diag.warning { color: var(--hazard); }
+.yard-diag.error { color: var(--bad, #d0533a); font-weight: 600; }

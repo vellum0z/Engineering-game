@@ -72,6 +72,14 @@
   Yard.prototype.gradePart = function (key) { var parts = this.design.parts || []; return this.inst(key) || parts.filter(function (p) { return p.type === key; })[0] || null; };
   Yard.prototype.ready = function () { return !this.built.errors.length; };
 
+  // Engine diagnostics: builds the physics can't simulate faithfully (overlaps, extreme mass ratios, ...).
+  Yard.prototype.diagnose = function (build) {
+    this.diag = [];
+    if (!SE.phys.diagnose || !this.built || !this.built.world) return this.diag;
+    try { this.diag = (SE.phys.diagnose(this.built.world, { dt: 1 / 60, build: !!build }) || []).filter(function (d) { return d.severity !== 'info'; }); } catch (e) { this.diag = []; }
+    return this.diag;
+  };
+
   // bin entries: [{ type, count, dials, label }]; count undefined = unlimited
   Yard.prototype.binEntries = function () {
     var spec = this.binSpec;
@@ -134,6 +142,7 @@
     if (this.mode === 'done') this.reset(true);
     if (this.mode === 'edit') {
       this.rebuild();
+      this.diagFlashed = false;
       this.state = new Y.State(this.built, 1 / 60);
       var self = this;
       this.built.world.on('break', function (e) { self.emit('break', e); SE.audio && SE.audio.play && SE.audio.play('snap'); });
@@ -166,6 +175,11 @@
     var s = this.state; if (!s) return;
     s.tick();
     this.emit('step', { state: s });
+    s._diagN = (s._diagN || 0) + 1;
+    if (s._diagN % 15 === 0 && SE.phys.diagnose) {
+      var bad = this.diagnose(false).filter(function (d) { return d.severity === 'error'; })[0];
+      if (bad && !this.diagFlashed) { this.diagFlashed = true; this.flash('⚠ ' + bad.message); }
+    }
     if (!this.goal || this.mode !== 'run') return;
     var v = Y.verdict(this.goal(s));
     if (!v && s.t >= this.timeout) v = { pass: false, reason: this.opts.timeoutText || 'Time ran out before the job was done.' };
@@ -340,6 +354,12 @@
     bar.appendChild(this.clockEl = el('span', { class: 'yard-clock mono' }));
     bar.appendChild(btn('?', function () { self.showCoach(); }, 'ghost small yard-help', { title: 'How the yard works', 'aria-label': 'How the yard works' }));
     if (!this.ready() && this.mode === 'edit') bar.appendChild(el('span', { class: 'yard-err', text: '⚠ ' + this.built.errors[0].error }));
+    else {
+      if (this.mode === 'edit') this.diagnose(true);
+      var dg = this.diag || [];
+      if (dg.length) bar.appendChild(el('span', { class: 'yard-diag ' + dg[0].severity, title: dg.map(function (d) { return '• ' + d.message; }).join('\n'),
+        text: (dg[0].severity === 'error' ? '⚠ ' : '△ ') + dg[0].message + (dg.length > 1 ? '  (+' + (dg.length - 1) + ' more)' : '') }));
+    }
   };
 
   Yard.prototype.refreshBin = function () {
@@ -665,6 +685,19 @@
       highlight: this.selected && this.built.parts[this.selected] ? this.built.parts[this.selected].body : null,
       forceUnit: this.units.forces || 'N'
     });
+    var dgs = (this.diag || []).filter(function (d) { return d.bodies && d.bodies.length; });
+    if (dgs.length) {
+      ctx.save(); ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      dgs.forEach(function (d) {
+        ctx.strokeStyle = d.severity === 'error' ? 'rgba(220,80,60,.95)' : 'rgba(240,180,40,.9)';
+        d.bodies.forEach(function (b) {
+          if (!b || !b.aabb || b.type === 'static') return;
+          var bb = b.aabb(), a = cam.worldToScreen({ x: bb.lo.x, y: bb.hi.y }), c = cam.worldToScreen({ x: bb.hi.x, y: bb.lo.y });
+          ctx.strokeRect(a.x - 4, a.y - 4, c.x - a.x + 8, c.y - a.y + 8);
+        });
+      });
+      ctx.restore();
+    }
     cam.apply(ctx);
     // part art and hooks
     Object.keys(this.built.parts).forEach(function (id) {
