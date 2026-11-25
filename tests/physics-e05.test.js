@@ -427,3 +427,39 @@ suite('physics e05: winch at its cap while paying out', () => {
     ok(line.slipping, 'slipping');
   });
 });
+
+suite('physics e05: lines holding a beam end', () => {
+  // 4 m steel beam (0.05 × 0.1, 20 segments) pinned at the start, 5 kN at
+  // mid-span, the far end hung from a point 2 m above: R = W/2 + 2.5 kN and
+  // a steel line of d = 10 mm stretches R·L/EA (0.42 mm)
+  function beamEnd(support) {
+    if (!P.structures) return null;
+    const w = new P.World({ gravity: { x: 0, y: -g }, enableSleep: false }), L = 4;
+    const bm = P.structures.beam(w, { start: { x: 0, y: 0 }, end: { x: L, y: 0 }, section: { b: 0.05, h: 0.1 }, material: 'steel', segments: 20, supports: [{ at: 'start', type: 'pin' }] });
+    const end = bm.bodies[bm.bodies.length - 1], top = w.add(new P.Body({ type: 'static', position: { x: L, y: 2 }, shapes: [] }));
+    const la = end.localPoint({ x: L, y: 0 }), EA = P.material('steel').E * Math.PI * 0.005 * 0.005;
+    const force = support(w, top, end, la, EA);
+    bm.load(L / 2, { x: 0, y: -5000 });
+    w.run(10);
+    const R = P.material('steel').density * 0.005 * L * g / 2 + 2500;
+    return { drop: -bm.deflection(L), exact: R * 2 / EA, R, F: force() };
+  }
+  test('a 6-segment steel cable tied to a beam end segment holds it: drop = RL/EA (±0.05 mm), top tension = R (within 2%)', () => {
+    const r = beamEnd((w, top, end, la) => {
+      const c = P.cable.build(w, { from: { body: top }, to: { body: end, localAnchor: la }, length: 2, segments: 6, diameter: 0.01, material: 'steel' });
+      return () => c.tensionAt(0);
+    });
+    if (!r) return;
+    ok(Math.abs(r.drop - r.exact) < 5e-5, 'drop ' + (r.drop * 1000).toFixed(3) + ' mm, expected ' + (r.exact * 1000).toFixed(3));
+    near(r.F, r.R, 0.02, 'tension');
+  });
+  test('a rope with EA tied to a beam end: drop = RL/EA (±0.05 mm), force = R (within 2%)', () => {
+    const r = beamEnd((w, top, end, la, EA) => {
+      const j = w.addJoint(new P.DistanceJoint({ bodyA: top, bodyB: end, localAnchorB: la, length: 2, rope: true, EA }));
+      return () => j.force();
+    });
+    if (!r) return;
+    ok(Math.abs(r.drop - r.exact) < 5e-5, 'drop ' + (r.drop * 1000).toFixed(3) + ' mm, expected ' + (r.exact * 1000).toFixed(3));
+    near(r.F, r.R, 0.02, 'force');
+  });
+});

@@ -70,12 +70,6 @@ const KNOWN = {};
     'convergence pin: error(h) / error(h/2)',
     'convergence chain: error(h) / error(h/2)',
   ]],
-  ['regression from the E05 merge (engine thread)', [
-    'beam end on rope EA: drop',
-    'beam end on rope EA: support force',
-    'beam end on cable: drop',
-    'beam end on cable: support force',
-  ]],
   ['resting contacts (6)', [
     'stack 1:100: light crate sink',
     'stack 1:100: heavy crate sink',
