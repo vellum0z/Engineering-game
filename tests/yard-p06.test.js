@@ -94,4 +94,25 @@ suite('P6 settlement standard: proof hover and lift', () => {
     const r = run('P6.lift', { add: [winch('12.6 kN', { rating: '2.50 kip', speed: '0.5 m/s' })] });
     ok(!r.pass && /broke/.test(r.reason), r.reason);
   });
+  test('a chain is not on the rack, so the crew refuses it', () => {
+    const r = run('P6.lift', { add: [{ type: 'chain', a: { part: 'drum', anchor: 'eye' }, b: { part: 'tank', anchor: 'top' } }] });
+    ok(!r.pass && /rack/.test(r.reason), r.reason);
+  });
+  test('a two-fall tackle halves the line tension, so the lightest rack line holds with no points off', () => {
+    const sol = P6.solutions['P6.lift'][1], r = run('P6.lift', sol);
+    ok(r.pass, r.reason); eq(job('P6.lift').margin(r.state), 0);
+  });
+});
+
+suite('P6 settlement standard: any rig that works', () => {
+  test('with the tow off, the ledger figure still snaps the wheelbarrow axle', () => {
+    const r = run('P6.ship', { set: { trailer: { ticket: '272 lb', haul: '0 m' } } });
+    ok(!r.pass && /axle/.test(r.reason), r.reason);
+  });
+  test('every job has at least two passing reference builds', () => {
+    P6.jobs.forEach(j => ok([].concat(P6.solutions[j.id]).filter(b => b.pass !== false).length >= 2, j.id));
+  });
+  test('every job has an objective of about ten words or fewer', () => {
+    P6.jobs.forEach(j => ok(j.objective && j.objective.split(/\s+/).length <= 12, j.id + ': ' + j.objective));
+  });
 });
