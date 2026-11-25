@@ -42,8 +42,7 @@
   var BOL_W = BOL_M * G0;                                         // 3550 N
 
   // The hatch rig.
-  var HATCH_M = 150, BORE = 0.100, STRAP = '120 lb';
-  var AREA = Math.PI * BORE * BORE / 4;                           // 7.854e-3 m^2
+  var HATCH_M = 150, STRAP = '120 lb';
 
   /* ----------------------------------------------------------- the yards */
 
@@ -61,11 +60,12 @@
   // The bollard on the caravan trailer under the jib. Juno drives the trailer out at 1 s.
   var DOCK = {
     site: { g: G0, floor: 'concrete' },
-    camera: { fit: { lo: { x: -4, y: -0.5 }, hi: { x: 9, y: 5 } } },
+    camera: { fit: { lo: { x: -3, y: -0.3 }, hi: { x: 5, y: 4.6 } } },
     poke: false,
     readouts: ['sling.tension'],
     design: { parts: [
       { id: 'jib', type: 'hook', x: 0, y: 3.4, locked: true, label: 'jib hook' },
+      { id: 'hangzone', type: 'zone', x: 0, y: 0.5 + BOL.L / 2, dials: { width: '2 m', height: '1.6 m' }, locked: true, label: 'hang it here' },
       { id: 'trailer', type: 'cart', x: 0, y: 0.25, dials: { mass: '200 kg' }, locked: true, label: 'caravan trailer' },
       { id: 'bollard', type: 'h07-bollard', x: 0, y: 0.5 + BOL.L / 2, locked: true, label: 'bollard' },
       { id: 'tow', type: 'push', a: { part: 'trailer' }, dials: { force: '800 N', angle: '0 deg', time: '1.5 s', start: '1 s' }, locked: true, label: 'Juno drives off' }
@@ -88,6 +88,7 @@
       parts.push({ id: 'railL', type: 'block', x: -0.605, y: LOAD_Y + 0.4, dials: { width: '0.2 m', height: '1.8 m' }, locked: true, label: 'hatch frame' });
       parts.push({ id: 'railR', type: 'block', x: 0.605, y: LOAD_Y + 0.4, dials: { width: '0.2 m', height: '1.8 m' }, locked: true, label: 'hatch frame' });
     }
+    if (straps) parts.push({ id: 'openzone', type: 'zone', x: 0, y: LOAD_Y + 0.6, dials: { width: '2 m', height: '0.3 m' }, locked: true, label: 'hatch open' });
     parts.push({ id: 'ram', type: 'ram', a: { part: 'tank', anchor: 'port' }, b: { part: 'load', anchor: 'bottom' }, dials: { stroke: '0.6 m' }, locked: true, label: 'ram' });
     if (straps) {
       var len = (LOAD_Y - 0.15 + 0.1).toFixed(2) + ' m';
@@ -96,7 +97,7 @@
     }
     return {
       site: { g: G0, floor: 'concrete' },
-      camera: { fit: { lo: { x: -3.5, y: -0.5 }, hi: { x: 3.5, y: 3.2 } } },
+      camera: { fit: { lo: { x: -2.5, y: -0.3 }, hi: { x: 2.5, y: 3.9 } } },
       poke: false,
       readouts: straps ? ['tank.force', 'ram.extension', 'strapL.tension', 'strapR.tension'] : ['tank.force', 'ram.extension'],
       design: { parts: parts }
@@ -115,10 +116,12 @@
     })[0] || null;
   }
   function broke(r, id) { return !!(r && r.state && r.state.breaks.some(function (b) { return !id || b.part === id; })); }
-  function slingOf(s) {
-    var ids = Object.keys(s.built.parts).filter(function (k) { return s.built.parts[k].def.type === 'h07-sling'; });
-    return ids.length ? s.built.parts[ids[0]] : null;
+  // total breaking load of every sling in the run (one sling, or two sharing the load)
+  function slingTotal(s) {
+    return Object.keys(s.built.parts).filter(function (k) { return s.built.parts[k].def.type === 'h07-sling'; })
+      .reduce(function (t, k) { return t + plateN(s.built.parts[k].inst.dials.plate); }, 0);
   }
+  function areaOf(ctx) { var d = ctx.si('tank', 'bore'); return Math.PI * d * d / 4; }
   function aloft(s) { var p = s.pos('bollard'); return p && p.y > 0.5 + BOL.L / 2 - 0.03; }
   function trailerGone(s) { var p = s.pos('trailer'); return p && p.x > BOL.d / 2 + 0.8 + 0.1; }
   function lift(s) { var p = s.pos('load'); return p ? p.y - LOAD_Y : 0; }
@@ -138,6 +141,8 @@
   SE.content.registerLevel('ch01', {
     id: 'H7', order: 7, title: 'Trade Ledger',
     subtitle: 'Converting between FPS and SI',
+    objective: 'Rig the caravan\'s FPS gear to our SI loads',
+    pitch: 'The caravan\'s slings are stamped in pounds and its tank reads psi. Hang our loads on their gear without snapping anything.',
     sections: ['1.3'],
     minutes: 25,
     intro: [
@@ -157,6 +162,16 @@
       'H7.bollard': [
         { add: [{ type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '1 kip' } }] },
         { add: [{ type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '2.5 kip' } }] },
+        // a different way: two 600 lb slings side by side share the 3550 N (1775 N each)
+        { add: [
+          { type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '600 lb' } },
+          { type: 'h07-sling', id: 'sling2', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '600 lb' } }
+        ] },
+        // two slings, but the 250 lb one still takes half and snaps
+        { pass: false, add: [
+          { type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '250 lb' } },
+          { type: 'h07-sling', id: 'sling2', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '600 lb' } }
+        ] },
         // 362 kg read as 362 lb: the 600 lb sling looks ample and snaps
         { pass: false, add: [{ type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '600 lb' } }] },
         { pass: false, add: [{ type: 'h07-sling', id: 'sling', a: { part: 'jib', anchor: 'eye' }, b: { part: 'bollard', anchor: 'top' }, dials: { plate: '250 lb' } }] }
@@ -166,6 +181,11 @@
         { set: { tank: { pressure: '40 psi' } } },
         { set: { tank: { pressure: '276 kPa' } } },
         { set: { tank: { pressure: '44 psi' } } },
+        // a different way: a smaller piston at a higher pressure
+        { set: { tank: { pressure: '60 psi', bore: '75 mm' } } },
+        { set: { tank: { pressure: '130 psi', bore: '50 mm' } } },
+        // the 100 mm window's pressure on a 50 mm piston: a quarter of the force, nothing moves
+        { pass: false, set: { tank: { pressure: '40 psi', bore: '50 mm' } } },
         { pass: false, set: { tank: { pressure: '50 psi' } } },
         // the kPa figure typed as psi: 12 kN on the ram, the straps snap
         { pass: false, set: { tank: { pressure: '221 psi' } } },
@@ -179,11 +199,14 @@
     steps: [
       {
         type: 'say', who: 'hask',
+        brief: 'Their slings are stamped in pounds; our loads are in kilograms and newtons. Before ours hangs on theirs, we prove it on the test frame.',
         text: 'Three factors carry almost everything between the two systems:\n\n- **1 lb = 4.448 N** (force)\n- **1 slug = 14.59 kg** (mass)\n- **1 ft = 0.3048 m** (length)\n\nThe caravan\'s slings are stamped in pounds. Our loads are written in kilograms and newtons. Before anything of ours hangs on anything of theirs, we prove it on the test frame.'
       },
       {
         type: 'build', who: 'hask',
         yard: { bin: [{ type: 'h07-sling', count: 1 }], ghosts: [{ type: 'h07-sling', x: 0, y: 3.6, text: 'gantry to crate' }] },
+        objective: 'Hang the test crate from the gantry with a sling',
+        brief: 'Take the **caravan sling** from the bin. Click the gantry hook, then the top of the crate. Leave its plate on **250 lb**.',
         text: 'Take the **caravan sling** from the bin and rig it from the **gantry hook** to the **top of the crate**: click one, then the other.\n\nSelect the sling to read its plate. Leave it on **250 lb** for now.',
         goalText: 'A sling from the gantry to the crate',
         until: function (ctx) {
@@ -195,17 +218,21 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.all(G.noBreaks(null), G.after(3)) },
+        objective: 'Run it: does 250 lb hold a 100 kg crate?',
+        brief: 'Press **▶ Run** and watch the **tension** gauge. Type **lb** in its unit box to read it the caravan\'s way.',
         text: 'The crate is **100 kg**, and the plate says **250 lb**. Press **▶ Run**: the brake lets go and the sling takes the crate. Watch the **tension** gauge. Type **lb** into its unit box to read it the caravan\'s way.',
         goalText: 'Run it and let it hang',
         until: function (ctx, type) { return type === 'result' && !!ctx.result && !broke(ctx.result) && !!slingOn(ctx, 'gantry', 'crate'); },
         after: function (ctx) {
           var W = ctx.si('crate', 'mass') * G0;
-          return 'It holds. The sling carries **' + f3(W) + ' N**, which is **' + f3(W / LB) + ' lb**: about three quarters of its plate.';
+          return 'It holds. The sling carries **' + f3(W) + ' N**, which is **' + f3(W / LB) + ' lb**: ' + Math.round(W / (250 * LB) * 100) + ' % of its plate.';
         }
       },
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.all(G.noBreaks(null), G.after(3)) },
+        objective: 'Try a 150 kg crate on the same 250 lb sling',
+        brief: 'Juno: "Rated 250, crate is 150. A hundred to spare." Set the crate to **150 kg** and run it.',
         text: 'Juno wants to know if the same sling takes a **150 kg** crate. "It\'s rated 250, the crate is 150. A hundred to spare."\n\nSet the crate to **150 kg** and run it.',
         goalText: 'Crate at 150 kg, and run',
         until: function (ctx, type) {
@@ -215,10 +242,11 @@
           if (slingOn(ctx, 'gantry', 'crate').dials.plate !== '250 lb') return 'Keep the **250 lb** plate.';
           return type === 'result' && !!ctx.result;
         },
-        after: function (ctx) { return broke(ctx.result) ? '**Snap.** 150 kg weighs **1470 N**, and 250 lb is only **1110 N**. "A hundred to spare" compared a mass in kilograms with a force in pounds: two different units, so the numbers said nothing.' : 'Run it once more with the 300 lb plate.'; }
+        after: function (ctx) { return broke(ctx.result) ? '**Snap.** 150 kg weighs **1470 N**, and 250 lb is only **1110 N**. "A hundred to spare" compared a mass in kilograms with a force in pounds: two different units, so the numbers said nothing.' : 'Run it once more with the 250 lb plate.'; }
       },
       {
         type: 'rule', title: 'Multiply by one',
+        brief: 'You can\'t compare kilograms with pounds. Turn one into the other\'s units first, by multiplying by a fraction equal to one.',
         law: '\\frac{4.448\\u{ N}}{1\\u{ lb}} = 1',
         eq: function () {
           return '250\\u{ \\strike{lb}} \\times \\frac{4.448\\u{ N}}{1\\u{ \\strike{lb}}} = 1112\\u{ N} \\quad < \\quad (150\\u{ kg})(9.81\\u{ m/s^2}) = 1472\\u{ N}';
@@ -227,15 +255,18 @@
       },
       {
         type: 'reveal', kicker: 'Table', title: 'Conversion factors',
+        brief: 'Three factors do almost all the work. Inside FPS: 1 kip = 1000 lb and 1 ton = 2000 lb.',
         eq: '1\\u{ lb} = 4.448\\u{ N} \\qquad 1\\u{ slug} = 14.59\\u{ kg} \\qquad 1\\u{ ft} = 0.3048\\u{ m}',
         text: 'Inside FPS there is a ladder of its own: **12 in = 1 ft**, **5280 ft = 1 mi**, **1 kip = 1000 lb** (kip is short for kilo-pound) and **1 ton = 2000 lb**. The caravan stamps its heavier slings in kips and tons.\n\nThe slug is the FPS unit of mass: the mass that 1 lb accelerates at 1 ft/s². A pound is a **force**, never a mass, in this course.',
         formula: 'ch01.table-conv'
       },
       {
         type: 'job', id: 'H7.bollard', who: 'juno',
-        yard: Object.assign({}, DOCK, { bin: [{ type: 'h07-sling', count: 1 }], ghosts: [{ type: 'h07-sling', x: 0, y: 2.5, text: 'jib to bollard' }] }),
-        text: 'Juno has a concrete **bollard** on the caravan trailer: solid, **400 mm** across, **1.20 m** long, concrete at **2.40 Mg/m³**. It has to hang from the jib when Juno drives the trailer out at **1 s**.\n\nRig **one caravan sling** from the jib hook to the bollard and pick its plate: they run from **120 lb** up to **4 ton**. Too light snaps. Too heavy ties up gear the ration dock needs.',
-        goalText: 'Bollard hanging from the jib for 3 s after the trailer leaves, sling intact',
+        yard: Object.assign({}, DOCK, { bin: [{ type: 'h07-sling', count: 2 }], ghosts: [{ type: 'h07-sling', x: 0, y: 2.5, text: 'jib to bollard' }] }),
+        objective: 'Keep the bollard hanging when the trailer drives off',
+        brief: 'The bollard is solid concrete, Ø 400 mm × 1.20 m, at 2.40 Mg/m³. Rig caravan slings from the jib to it and pick their plates.',
+        text: 'Juno has a concrete **bollard** on the caravan trailer: solid, **400 mm** across, **1.20 m** long, concrete at **2.40 Mg/m³**. It has to hang from the jib when Juno drives the trailer out at **1 s**.\n\nRig caravan slings from the jib hook to the bollard and pick their plates: they run from **120 lb** up to **4 ton**, and you have two. Too light snaps. Too heavy ties up gear the ration dock needs.',
+        goalText: 'Bollard hanging from the jib for 3 s after the trailer leaves, nothing snapped',
         goal: BOLLARD_GOAL,
         timeout: 12,
         timeoutText: 'The bollard never hung clear of the trailer. Is a sling rigged from the jib to it?',
@@ -247,34 +278,33 @@
         hints: [
           'Find the weight in SI first: volume of a cylinder $V = \\pi r^2 L$, then $m = \\rho V$, then $W = mg$.',
           '$V = \\pi(0.200\\u{ m})^2(1.20\\u{ m}) = 0.1508\\u{ m^3}$, $m = 362\\u{ kg}$, $W = 3550\\u{ N}$. Now put each plate into newtons: 1 kip = 1000 lb.',
-          '$3550\\u{ N} \\times \\frac{1\\u{ lb}}{4.448\\u{ N}} = 798\\u{ lb}$. The 600 lb sling is too light. The **1 kip** (1000 lb, 4.45 kN) is the smallest that holds.'
+          '$3550\\u{ N} \\times \\frac{1\\u{ lb}}{4.448\\u{ N}} = 798\\u{ lb}$. The 600 lb sling is too light on its own. The **1 kip** (1000 lb, 4.45 kN) is the smallest single sling that holds, or share the load between two.'
         ],
         margin: function (s) {
-          var sl = slingOf(s); if (!sl) return 0;
-          var ratio = plateN(sl.inst.dials.plate) / BOL_W;
+          var ratio = slingTotal(s) / BOL_W; if (!ratio) return 0;
           return ratio > 2.5 ? (ratio > 6 ? 30 : 15) : 0;
         },
         success: function (ctx) {
-          var sl = ctx.find('h07-sling'), p = sl ? plateN(sl.dials.plate) : NaN;
-          var base = 'It hangs. The bollard weighs **3550 N = 798 lb**, and your **' + (sl ? sl.dials.plate : '') + '** sling breaks at **' + kN(p) + '**.';
-          return p > 2.5 * BOL_W ? base + ' It holds, but Juno had to take it off the ration dock. The **1 kip** sling was enough.' : base + ' The lightest plate that holds, at ' + Math.round(BOL_W / p * 100) + ' % of its rating.';
+          var all = ctx.all('h07-sling'), p = all.reduce(function (t, x) { return t + plateN(x.dials.plate); }, 0);
+          var base = 'It hangs. The bollard weighs **3550 N = 798 lb**, and your ' + (all.length > 1 ? all.length + ' slings break at **' + kN(p) + '** between them.' : '**' + all[0].dials.plate + '** sling breaks at **' + kN(p) + '**.');
+          return p > 2.5 * BOL_W ? base + ' It holds, but Juno had to take that much gear off the ration dock. About 1 kip was enough.' : base + ' The load sits at ' + Math.round(BOL_W / p * 100) + ' % of the rating.';
         }
-      },
-      {
-        type: 'say', who: 'hask',
-        text: 'Now the caravan\'s **hydraulic tank**. Its gauge reads **psi**: pounds per square inch. That is a force over an **area**, and an area has the length unit in it **twice**.'
       },
       {
         type: 'watch', who: 'hask',
         yard: Object.assign({}, BENCH, { bin: [], goal: G.after(3) }),
-        text: 'The tank drives a ram that pushes on a 50 kg test crate. Its gauge is at **32.0 psi**, the pressure the caravan keeps its tires at, and the ram\'s bore is **100 mm**. Run it and read the **piston force** gauge.',
+        objective: 'Run the ram and read its piston force',
+        brief: 'The caravan\'s tank reads **psi**, pounds per square inch. Run it at 32.0 psi on a 100 mm bore and read the **piston force**.',
+        text: 'The tank\'s gauge reads **psi**: pounds per square inch, a force over an **area**, and an area has the length unit in it **twice**.\n\nThe tank drives a ram that pushes on a 50 kg test crate. Its gauge is at **32.0 psi**, the pressure the caravan keeps its tires at, and the ram\'s bore is **100 mm**. Run it and read the **piston force** gauge.',
         goalText: 'Run the ram at 32.0 psi, 100 mm bore',
         until: function (ctx, type) { return type === 'result' && !!ctx.result && Math.abs(ctx.si('tank', 'bore') - 0.1) < 1e-6; },
-        after: function (ctx) { var F = ctx.si('tank', 'pressure') * AREA; return 'The piston pushes **' + f3(F) + ' N**. Force = pressure × area, with the area of the piston face $\\pi d^2/4$.'; }
+        after: function (ctx) { var F = ctx.si('tank', 'pressure') * areaOf(ctx); return 'The piston pushes **' + f3(F) + ' N**. Force = pressure × area, with the area of the piston face $\\pi d^2/4$.'; }
       },
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(3) },
+        objective: 'Halve the bore and see what the force does',
+        brief: 'Set the bore to **50 mm**, keep the pressure, and run it again.',
         text: 'Halve the bore: set it to **50 mm**. Same pressure. Run it again and watch the piston force.',
         goalText: 'Bore at 50 mm, and run',
         until: function (ctx, type) {
@@ -286,6 +316,7 @@
       },
       {
         type: 'rule', title: 'Powers of the length factor',
+        brief: 'psi has inches **squared** in it, so the length factor goes in twice. Forget the square and you are off by about 39 times.',
         law: '1\\u{ in} = 0.0254\\u{ m} \\quad \\Rightarrow \\quad 1\\u{ in^2} = 6.452(10⁻⁴)\\u{ m^2}',
         eq: function (ctx) {
           var p = ctx.si('tank', 'pressure');
@@ -296,21 +327,23 @@
       {
         type: 'job', id: 'H7.hatch', who: 'juno',
         yard: Object.assign({}, HATCH, { bin: [] }),
-        text: 'The caravan\'s ram lifts the **deck hatch** of the water cistern: **150 kg**. Two **check straps**, each stamped **120 lb**, stop it at the top. The bore is fixed at **100 mm**.\n\nSet the **tank pressure** so the ram lifts the hatch against the straps and holds it there. Too little and the hatch stays shut. Too much and the ram tears the straps.',
+        objective: 'Open the hatch to its straps without tearing them',
+        brief: 'A **150 kg** hatch, held by two **120 lb** straps. Set the tank pressure (and bore, if you like) so the ram lifts it and holds.',
+        text: 'The caravan\'s ram lifts the **deck hatch** of the water cistern: **150 kg**. Two **check straps**, each stamped **120 lb**, stop it at the top. The ram starts on a **100 mm** bore.\n\nSet the **tank pressure**, and the **bore** if you like, so the ram lifts the hatch against the straps and holds it there. Too little and the hatch stays shut. Too much and the ram tears the straps.',
         goalText: 'Hatch lifted and held against the straps for 2 s, straps intact',
         goal: HATCH_GOAL,
         timeout: 10,
         timeoutText: 'The hatch never lifted: the ram pushes less than the hatch weighs.',
         onFail: function (ctx) {
-          var F = ctx.si('tank', 'pressure') * AREA;
+          var F = ctx.si('tank', 'pressure') * areaOf(ctx);
           var r = ctx.result, b = r && r.state && r.state.breaks[0];
           if (b) return 'The ram pushed **' + kN(F) + '**. The hatch takes **1.47 kN** of that, and the straps the rest, which is more than their **2 × 120 lb = 1.07 kN**.';
           return 'The ram pushed **' + kN(F) + '**, less than the hatch\'s **1.47 kN**.';
         },
         hints: [
           'The ram has to push more than the hatch weighs, but not by more than the two straps can hold between them. Work in newtons: $W = mg$, and 2 × 120 lb into N.',
-          'The force window is $1472\\u{ N} < F < 1472 + 1068 = 2540\\u{ N}$. The piston area is $\\pi(0.100\\u{ m})^2/4 = 7.854(10^{-3})\\u{ m^2}$, so $p = F/A$.',
-          'That gives **187 kPa to 323 kPa**. In psi, divide by $4.448 / 0.0254^2 = 6895$ Pa per psi: **27.2 psi to 46.9 psi**. You can type the dial in either unit.'
+          'The force window is $1472\\u{ N} < F < 1472 + 1068 = 2540\\u{ N}$. On the 100 mm bore the piston area is $\\pi(0.100\\u{ m})^2/4 = 7.854(10^{-3})\\u{ m^2}$, so $p = F/A$.',
+          'That gives **187 kPa to 323 kPa**. In psi, divide by $4.448 / 0.0254^2 = 6895$ Pa per psi: **27.2 psi to 46.9 psi**. You can type the dial in either unit, or change the bore and work out a new window.'
         ],
         margin: function (s) {
           // a strap working near its rating wears; the middle of the window is best
@@ -318,21 +351,23 @@
           return Math.max(s.read('strapL.tension'), s.read('strapR.tension')) > 0.85 * plateN(STRAP) ? 10 : 0;
         },
         success: function (ctx) {
-          var p = ctx.si('tank', 'pressure'), F = p * AREA;
-          return 'Up and held. **' + f3(p / 1000) + ' kPa** on **7.854(10⁻³) m²** is **' + f3(F) + ' N**: the hatch takes 1472 N and the two straps share the other **' + f3(F - HATCH_M * G0) + ' N**, inside their 1068 N.';
+          var p = ctx.si('tank', 'pressure'), A = areaOf(ctx), F = p * A;
+          return 'Up and held. **' + f3(p / 1000) + ' kPa** on **' + D.fmtNum(A, 4) + ' m²** is **' + f3(F) + ' N**: the hatch takes 1472 N and the two straps share the other **' + f3(F - HATCH_M * G0) + ' N**, inside their 1068 N.';
         }
       },
       {
         type: 'deeper', title: 'When the fourth digit matters',
         teaser: '4.448 is a rounded number, and in 1999 a spacecraft was lost to a pound-second.',
         steps: [
-          { type: 'say', who: 'hask', text: 'The pound-force is defined exactly: the weight of 0.453 592 37 kg under standard gravity 9.806 65 m/s². That makes **1 lb = 4.448 221 615 260 5 N**, exactly. The table\'s 4.448 drops about 0.005 %.\n\nFor a 3-figure answer that never matters. On a 1 000 000 lb rocket thrust it is 1 000 000 × 0.000 222 = **222 N**: small next to 4.45 MN, but big enough to show up in a precision trajectory.' },
-          { type: 'say', who: 'hask', text: 'The **Mars Climate Orbiter** (1999) was lost the other way round: not a rounded digit but a missing factor. One team\'s software reported thruster impulses in **lb·s**, and the navigation software read them as **N·s**. Every small trajectory correction was under-counted by a factor of 4.45. Over months the errors added up, the probe arrived far too low and burned up in the Martian atmosphere.\n\nIt is the same slip that snapped the test sling. Units are part of the number.' }
+          { type: 'say', who: 'hask', brief: '4.448 is rounded: 1 lb is exactly 4.448 221 615 260 5 N. That only matters when a tiny error gets multiplied by something huge.', text: 'The pound-force is defined exactly: the weight of 0.453 592 37 kg under standard gravity 9.806 65 m/s². That makes **1 lb = 4.448 221 615 260 5 N**, exactly. The table\'s 4.448 drops about 0.005 %.\n\nFor a 3-figure answer that never matters. On a 1 000 000 lb rocket thrust it is 1 000 000 × 0.000 222 = **222 N**: small next to 4.45 MN, but big enough to show up in a precision trajectory.' },
+          { type: 'say', who: 'hask', brief: 'In 1999 the Mars Climate Orbiter was lost because one team\'s lb·s were read as N·s. Same slip as the test sling.', text: 'The **Mars Climate Orbiter** (1999) was lost the other way round: not a rounded digit but a missing factor. One team\'s software reported thruster impulses in **lb·s**, and the navigation software read them as **N·s**. Every small trajectory correction was under-counted by a factor of 4.45. Over months the errors added up, the probe arrived far too low and burned up in the Martian atmosphere.\n\nIt is the same slip that snapped the test sling. Units are part of the number.' }
         ]
       },
       {
         type: 'free', who: 'hask',
         yard: { design: FRAME.design, bin: [{ type: 'h07-sling', count: 2 }, { type: 'crate', count: 2 }, { type: 'hook', count: 2 }], goal: null, poke: true },
+        objective: 'Free play: find the heaviest crate each sling holds',
+        brief: 'The test frame is yours. Every dial takes FPS or SI. Drag the crate while it runs to shock-load the sling.',
         text: 'The test frame is yours. Every dial takes FPS or SI, so try both. While it runs you can **drag the crate** to shock-load the sling.',
         prompts: [
           'Set the crate\'s mass in **slug**. What is the heaviest whole number of slugs the 1 kip sling will hold?',
