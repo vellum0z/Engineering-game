@@ -419,3 +419,76 @@ suite('island solver: conservation', () => {
     ok(state() === first, 'replay differs');
   });
 });
+
+// The older suites load some parts all at once and count on the old
+// solver's built-in damping to settle them. Without that damping a sudden
+// load swings to twice its static effect and rings, which is what a real
+// part does. These are the same checks with the load brought on gradually,
+// as the statics formulas assume.
+suite('island solver: loads brought on gradually', () => {
+  // gravity from zero to g over `ramp` seconds, then held
+  function rampGravity(w, ramp, seconds, each) {
+    w.gravity = { x: 0, y: 0 };
+    run(w, seconds, (ww, i) => { ww.gravity = { x: 0, y: -g * Math.min(1, (i + 1) / (60 * ramp)) }; if (each) each(ww, i); });
+  }
+  test('a very stiff torsion weld (2e7 N·m/rad) under a weight brought on over 1 s: mean torque m·g·d within 1%, no break', () => {
+    const w = world(), wall = anchor(w);
+    const arm = w.add(new P.Body({ position: { x: 1, y: 0 }, shapes: [{ shape: P.box(1, 0.05), group: 1 }], mass: 40 }));
+    const weld = w.addJoint(new P.WeldJoint({ bodyA: wall, bodyB: arm, worldAnchor: { x: 0, y: 0 }, angularStiffness: 2e7, breakTorque: 2000 }));
+    let broke = false; w.on('break', () => { broke = true; });
+    // nothing damps the spring, so it keeps a small ripple from the ramp's
+    // sixty steps: the torque is read as its mean over the last half second
+    let sum = 0, n = 0;
+    rampGravity(w, 1, 2, (ww, i) => { if (i >= 90) { sum += Math.abs(weld.torque()); n++; } });
+    ok(!broke, 'broke: peak torque ' + weld.peakTorque);
+    near(sum / n, 40 * g * 1, 0.01);
+  });
+  test('timber cantilever under its own weight brought on over 2 s: tip sag w·L⁴/(8EI) within 3%, root moment w·L²/2 within 1%', () => {
+    const w = world();
+    const bm = P.structures.beam(w, { start: { x: 0, y: 0 }, end: { x: 3, y: 0 }, section: { b: 0.05, h: 0.1 },
+      material: 'timber', segments: 20, supports: [{ at: 'start', type: 'fixed' }] });
+    rampGravity(w, 2, 4);
+    const q = 550 * 0.005 * g;                          // ρ·A·g = 27 N/m
+    near(-bm.deflection(3), q * 81 / (8 * bm.EI), 0.03);
+    near(Math.abs(bm.bendingMoment(0)), q * 9 / 2, 0.01);
+  });
+  test('326 kg crate roped to a steel cantilever tip, weight brought on over 1 s: rope never slack or stretched (< 1 mm), T = m·g within 1%, sag within 5%', () => {
+    const L = 2.4, w = world();
+    const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: L, y: 3 }, section: { b: 0.08, h: 0.12 },
+      material: 'steel', segments: 20, damping: 0.1, supports: [{ at: 'start', type: 'fixed' }] });
+    const tip = bm.bodies[19];
+    const crate = w.add(new P.Body({ position: { x: L, y: 1.5 }, shapes: [P.box(0.3, 0.3)], mass: 326 }));
+    const rope = w.addJoint(new P.DistanceJoint({ bodyA: tip, bodyB: crate, localAnchorA: tip.localPoint({ x: L, y: 3 }), localAnchorB: { x: 0, y: 0.3 }, rope: true }));
+    let stretch = 0, slip = 0;
+    rampGravity(w, 1, 4, () => {
+      stretch = Math.max(stretch, Math.abs(rope.currentLength() - rope.maxLength));
+      slip = Math.max(slip, Math.abs(crate.v.y - tip.velocityAt(rope.anchorA()).y));
+    });
+    ok(stretch < 1e-3, 'rope length off by ' + stretch);
+    ok(slip < 0.02, 'crate and tip moved apart at ' + slip + ' m/s');
+    near(rope.tension(), 326 * g, 0.01);
+    const q = bm.bodies[0].m / bm.dx * g;
+    near(-bm.deflection(L), 326 * g * L ** 3 / (3 * bm.EI) + q * L ** 4 / (8 * bm.EI), 0.05);
+  });
+  test('steel cantilever loaded up to 1.2 M_y over 2 s: holds at 1 s, snaps on moment after; snapshot at 1 s replays bit-identically', () => {
+    // 50 × 100 mm, L = 2 m: M_y = σ_y·S. The tip load follows the clock, so
+    // the replay sees the same load.
+    const w = world({ gravity: { x: 0, y: 0 } });
+    const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: 2, y: 3 }, section: { b: 0.05, h: 0.1 },
+      material: 'steel', segments: 20, supports: [{ at: 'start', type: 'fixed' }] });
+    const ld = bm.load(2, { x: 0, y: 0 }), full = 1.2 * bm.limits.moment / 2;
+    const go = seconds => { const n = Math.round(seconds * 60); for (let i = 0; i < n; i++) { ld.F.y = -full * Math.min(1, w.time / 2); w.step(1 / 60); } };
+    const state = () => JSON.stringify(w.bodies.map(b => [b.c.x, b.c.y, b.angle, b.v.x, b.v.y, b.w]));
+    const breaks = () => w.events.filter(e => e.type === 'break');
+    go(1);
+    ok(breaks().length === 0, 'broke before 0.6 M_y');
+    const snap = P.snapshot(w);
+    go(2);
+    const first = state(), n = breaks().length;
+    ok(n > 0 && breaks()[0].reason === 'moment', 'should snap on moment: ' + breaks().map(e => e.reason));
+    P.restore(w, snap);
+    go(2);
+    ok(state() === first, 'replay differs');
+    ok(breaks().length === n, 'breaks in the replay: ' + breaks().length + ' vs ' + n);
+  });
+});

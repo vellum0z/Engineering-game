@@ -480,6 +480,7 @@ suite('physics e05: rods in the joint block', () => {
   }
   test('a rod bracing a pinned boom is a row of the pins\' block, not a line block', () => {
     const { w, rod, sling } = bracedBoom();
+    if (w.islandSolve) return;          // the island solver has no joint or line blocks: every row is in one solve
     w.step(1 / 60);
     ok(rod.block && rod.block.joints && rod.inJointBlock(), 'rod in the joint block');
     ok(!rod.lineBlock, 'rod not in a line block');
