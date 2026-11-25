@@ -286,3 +286,113 @@ suite('physics e06: stability and cost', () => {
     ok(ms < 4, ms.toFixed(2) + ' ms per step');
   });
 });
+
+// Ropes, props and pins on a structure are solved with it (structures.js), so
+// they are as stiff as the beam. H3's timber cantilever: 2.4 m, 80 × 120 mm,
+// EI = 11e9 × 0.08 × 0.12³ / 12 = 1.267e5 N·m², 3.2 kN at the tip.
+suite('physics e06: ropes, props and pins on a beam', () => {
+  const L = 2.4, Pl = 3200, g = 9.81;
+  function cantilever(opts) {
+    const w = world(g); if (opts && opts.off) w.structureCoupling = false;
+    const list = breaks(w);
+    const wall = w.add(new P.Body({ type: 'static', position: { x: -0.1, y: 3 }, shapes: [P.box(0.1, 2)] }));
+    const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: L, y: 3 }, section: { b: 0.08, h: 0.12 },
+      material: 'timber', segments: 20, damping: 0.1, supports: [{ at: 'start', type: 'fixed' }], ground: wall });
+    const q = bm.bodies[0].m / bm.dx * g;                 // self-weight, N/m
+    return { w, bm, wall, list, q, tip: bm.bodies[19] };
+  }
+  // cantilever deflections (down positive): tip load P at L, and the beam's weight q
+  const vP = (EI, P0, x) => P0 * x * x * (3 * L - x) / (6 * EI);
+  const vW = (EI, q, x) => q * x * x * (6 * L * L - 4 * L * x + x * x) / (24 * EI);
+
+  // Stay from a hook at (0.1, 4.4) to the tip. Compatibility: the rope
+  // stretches T·Lr/(EA_r) by as much as the tip moves away from the hook.
+  // The tip moves down by (P − T e_y) f + v_w (f = L³/3EI + L/κGA, bending
+  // plus shear) and toward the wall by T e_x L/(EA) (the beam is squeezed):
+  //   T = e_y (P f + v_w) / (Lr/EA_r + e_y² f + e_x² L/EA)
+  function stayed(EAr) {
+    const c = cantilever();
+    const hook = c.w.add(new P.Body({ type: 'static', position: { x: 0.1, y: 4.4 } }));
+    const rope = c.w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: c.tip, localAnchorB: c.tip.localPoint({ x: L, y: 3 }), rope: true, EA: EAr }));
+    rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 4);
+    const EI = c.bm.EI, EA = 11e9 * 0.0096, Lr = Math.hypot(2.3, 1.4), ex = -2.3 / Lr, ey = 1.4 / Lr;
+    const f = L ** 3 / (3 * EI) + L / ((5 / 6) * (11e9 / 2.6) * 0.0096), vw = c.q * L ** 4 / (8 * EI);
+    const T = ey * (Pl * f + vw) / ((EAr ? Lr / EAr : 0) + ey * ey * f + ex * ex * L / EA);
+    return { c, rope, T, v: (Pl - T * ey) * f + vw };
+  }
+  test('stayed cantilever, wire-rope stay (EA = 3.56 MN): stay tension and tip deflection match the indeterminate hand calc within 5%', () => {
+    const s = stayed(3.56e6);
+    // hand check: T ≈ 5.79 kN (the stay takes 1.4/2.69 × 5.79 = 3.0 of the 3.2 kN), tip ≈ 8.6 mm instead of 120 mm
+    near(s.rope.tension(), s.T, 0.05);
+    near(-s.c.bm.deflection(L), s.v, 0.05);
+    ok(s.c.list.length === 0, 'something broke');
+  });
+  test('stayed cantilever, inextensible stay: it takes the whole tip load (T = P·Lr/1.4 within 5%) and the tip barely moves (< 1 mm)', () => {
+    const s = stayed(0);
+    near(s.rope.tension(), s.T, 0.05);
+    near(s.rope.tension(), Pl * Math.hypot(2.3, 1.4) / 1.4, 0.05);
+    ok(-s.c.bm.deflection(L) < 1e-3, 'tip sagged ' + s.c.bm.deflection(L));
+  });
+  test('propped cantilever (frictionless prop 0.7 m from the tip): prop reaction and tip deflection match the formula within 5%', () => {
+    const c = cantilever(), a = 1.7, r = 0.02;
+    const prop = c.w.add(new P.Body({ type: 'static', position: { x: a, y: 3 - 0.06 - r }, shapes: [{ shape: P.circle(r), material: 'frictionless' }] }));
+    rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 4);
+    const EI = c.bm.EI;
+    // the prop removes the deflection at a: R a³/(3EI) = v_P(a) + v_w(a)  (≈ 5.26 kN)
+    const R = (vP(EI, Pl, a) + vW(EI, c.q, a)) / (a ** 3 / (3 * EI));
+    const tip = vP(EI, Pl, L) + vW(EI, c.q, L) - R * a * a * (3 * L - a) / (6 * EI);     // ≈ 8.2 mm
+    const ct = [...c.w.contacts.values()].filter(k => k.fa.body === prop || k.fb.body === prop);
+    const Rsim = ct.reduce((s, k) => s + (k.normalForce || 0), 0);
+    near(Rsim, R, 0.05);
+    near(-c.bm.deflection(L), tip, 0.05);
+    ok(ct.every(k => k.points.every(p => p.separation > -1e-3)), 'the prop sank into the beam');
+  });
+  test('a 326 kg crate hung from the tip is picked up at once: the rope never goes slack or stretches (< 1 mm), static T = mg within 1%', () => {
+    // steel here, so the beam is stiff (static tip sag ≈ 7.7 mm)
+    const w = world(g);
+    const bm = P.structures.beam(w, { start: { x: 0, y: 3 }, end: { x: L, y: 3 }, section: { b: 0.08, h: 0.12 },
+      material: 'steel', segments: 20, damping: 0.1, supports: [{ at: 'start', type: 'fixed' }] });
+    const tip = bm.bodies[19];
+    const crate = w.add(new P.Body({ position: { x: L, y: 1.5 }, shapes: [P.box(0.3, 0.3)], mass: 326 }));
+    const rope = w.addJoint(new P.DistanceJoint({ bodyA: tip, bodyB: crate, localAnchorA: tip.localPoint({ x: L, y: 3 }), localAnchorB: { x: 0, y: 0.3 }, rope: true }));
+    let stretch = 0, slip = 0, first = null;
+    w.run(4, 1 / 60, () => {
+      stretch = Math.max(stretch, rope.currentLength() - rope.maxLength);
+      slip = Math.max(slip, Math.abs(crate.v.y - tip.velocityAt(rope.anchorA()).y));
+      if (first == null) first = rope.tension();
+    });
+    ok(stretch < 1e-3, 'rope stretched ' + stretch);
+    ok(slip < 0.02, 'crate and tip moved apart at ' + slip + ' m/s');
+    ok(first > 300, 'rope carried only ' + first + ' N in the first step');
+    near(rope.tension(), 326 * g, 0.01);
+    const q = bm.bodies[0].m / bm.dx * g;
+    near(-bm.deflection(L), 326 * g * L ** 3 / (3 * bm.EI) + q * L ** 4 / (8 * bm.EI), 0.05);
+  });
+  test('a pinned steel strut under the beam props it like a support at the pin (within 5%), and the pins stay closed', () => {
+    const c = cantilever(), M = SE.pmath, a = 1.2;
+    const pA = { x: 0, y: 1.6 }, pB = { x: a, y: 2.94 };            // pinned to the beam's underside
+    const ax = M.norm(M.sub(pB, pA)), len = M.dist(pA, pB);
+    const strut = c.w.add(new P.Body({ position: M.lerp(pA, pB, 0.5), angle: Math.atan2(ax.y, ax.x),
+      shapes: [{ shape: P.box(len / 2, 0.01), group: -77 }], mass: 8 }));
+    const j1 = c.w.addJoint(new P.RevoluteJoint({ bodyA: c.wall, bodyB: strut, worldAnchor: pA }));
+    const j2 = c.w.addJoint(new P.RevoluteJoint({ bodyA: c.bm.pointAt(a).body, bodyB: strut, worldAnchor: pB }));
+    rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 4);
+    const EI = c.bm.EI;
+    // the strut pushes up R and outward R·dx/dy at the underside, 0.06 m below
+    // the centreline, so the beam also takes a couple M0 = 0.06·R·dx/dy at a
+    const m0 = 0.06 * ax.x / ax.y;
+    const R = (vP(EI, Pl, a) + vW(EI, c.q, a)) / (a ** 3 / (3 * EI) + m0 * a * a / (2 * EI));
+    const tip = vP(EI, Pl, L) + vW(EI, c.q, L) - R * a * a * (3 * L - a) / (6 * EI)
+      - m0 * R * (a * a / 2 + a * (L - a)) / EI;
+    near(-c.bm.deflection(L), tip, 0.05);
+    ok(M.dist(j2.anchorA(), j2.anchorB()) < 1e-3 && M.dist(j1.anchorA(), j1.anchorB()) < 1e-3, 'a pin opened');
+    ok(c.list.length === 0, 'something broke');
+  });
+  test('world.structureCoupling = false falls back to solving ropes on their own (the old, soft behaviour)', () => {
+    const c = cantilever({ off: true });
+    const hook = c.w.add(new P.Body({ type: 'static', position: { x: 0.1, y: 4.4 } }));
+    const rope = c.w.addJoint(new P.DistanceJoint({ bodyA: hook, bodyB: c.tip, localAnchorB: c.tip.localPoint({ x: L, y: 3 }), rope: true }));
+    rampLoad(c.w, c.bm.load(L, { x: 0, y: 0 }), { x: 0, y: -Pl }, 1, 2);
+    ok(rope.tension() < 0.8 * Pl * Math.hypot(2.3, 1.4) / 1.4, 'uncoupled rope should be soft here: ' + rope.tension());
+  });
+});
