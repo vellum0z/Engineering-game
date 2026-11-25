@@ -103,7 +103,7 @@
 
   // The trailer yard: the tank already craned onto the trailer, tower base 12 m east.
   var YARD = { parts: [
-    { id: 'trailer', type: 'p06-trailer', x: 2, y: 0.34, dials: { ticket: '', haul: '12 m' }, locked: true, open: ['ticket'], label: 'trailer' },
+    { id: 'trailer', type: 'p06-trailer', x: 2, y: 0.34, dials: { ticket: '', haul: '12 m' }, locked: true, open: ['ticket', 'haul'], label: 'trailer' },
     { id: 'tank', type: 'crate', x: 2, y: 0.94, dials: { mass: MT + ' kg' }, locked: true, hide: ['mass'], label: 'water tank' },
     { id: 'base', type: 'zone', x: 14, y: 1.2, dials: { width: '4 m', height: '2.4 m' }, locked: true, label: 'tower base' }
   ] };
@@ -114,7 +114,7 @@
     { id: 'drum', type: 'hook', x: 0, y: 5.85, locked: true, label: 'gantry hook' },
     { id: 'tank', type: 'crate', x: 0, y: 0.5, dials: { mass: MT + ' kg' }, locked: true, hide: ['mass'], label: 'water tank' },
     { id: 'winch', type: 'winch', a: { part: 'drum', anchor: 'eye' }, b: { part: 'tank', anchor: 'top' }, dials: { pull: '5 kN', speed: '0.3 m/s', rating: '20 kN', brake: 'on', stop: '' },
-      locked: true, open: ['pull', 'speed', 'rating', 'brake', 'stop'], label: 'gantry winch' }
+      label: 'gantry winch' }
   ] };
 
   // The tower: deck 5 m up beside the crane beam; the tank's blank plate is riveted on.
@@ -127,17 +127,18 @@
     { id: 'plate', type: 'p06-plate', a: { part: 'tank' }, dials: { mass: '' }, locked: true, open: ['mass'], label: 'tank plate' }
   ] };
 
-  // The winch the player rigged, whatever id it got.
-  function winchOf(s) {
-    var parts = s.built.parts, ids = Object.keys(parts).filter(function (id) { return parts[id].def.type === 'winch'; });
-    return ids.length ? parts[ids[0]] : null;
+  function oversized(s) {
+    return linesOf(s).filter(function (p) {
+      var line = rackLine(p.values.rating), peak = s.peakOf('line:' + p.inst.id);
+      return line && RACK.some(function (c) { return c.rating < line.rating && c.rating > peak * 1.02; });
+    });
   }
   function tankRise(s, y0) { var p = s.pos('tank'); return p ? p.y - y0 : 0; }
 
   /* --------------------------------------------------------------- goals */
 
-  // Kilo: the beam must settle level, and the certificate must say what the
-  // level beam says the depot kilo is.
+  // Kilo: the beam must settle level (however the player levels it), and the
+  // certificate the objective asks for must state the depot kilo's true mass.
   var LEVEL = 0.02 * Math.PI / 180;       // rad: within 0.02° (about 4 mg of rider)
   var kiloGoal = function (s) {
     var c = s.part('comparator');
@@ -149,8 +150,7 @@
       if (s.t >= 9.9) return { fail: 'The beam settles **' + (Math.abs(tilt) * 180 / Math.PI).toFixed(3) + '°** down on the ' + (tilt > 0 ? 'depot kilo' : 'lab standard') + '\'s side. It is not level.' };
       return null;
     }
-    var v = c.values, implied = LAB_STD - (v.pan === 'kilo pan' ? v.rider : -v.rider);
-    if (Math.abs(v.cert - implied) > 2e-6) return { fail: 'The beam is level, but the certificate says the depot kilo is **' + c.inst.dials.cert + '**. That is not what the two pans say.' };
+    if (Math.abs(c.values.cert - MK) > 2e-6) return { fail: 'The beam is level, but the certificate says the depot kilo is **' + c.inst.dials.cert + '**. That is not what the level beam says.' };
     return 'pass';
   };
 
@@ -163,25 +163,32 @@
   // Hover: lifts clear (more than 1 mm) and creeps less than 3 cm in 6 s.
   var hoverGoal = Gl.all(
     Gl.noBreaks(),
-    Gl.never(function (s) { var r = tankRise(s, 0.5); return r > 0.03 ? 'The tank lifts clear but **keeps creeping up**: it is ' + (r * 100).toFixed(0) + ' cm past the chalk mark at t = ' + s.t.toFixed(1) + ' s. The winch pulls more than the tank weighs.' : null; }),
+    Gl.never(function (s) { var r = tankRise(s, 0.5); return r > 0.03 ? 'The tank lifts clear but **keeps creeping up**: it is ' + (r * 100).toFixed(0) + ' cm past the chalk mark at t = ' + s.t.toFixed(1) + ' s. Whatever is lifting it pulls more than the tank weighs.' : null; }),
     Gl.after(6, function (s) {
       var r = tankRise(s, 0.5);
-      if (r < 0.001) return { fail: 'The tank **never leaves the slab**. The winch stalls: its pull is less than the tank weighs here, so the slab still holds part of it.' };
+      if (r < 0.001) return { fail: 'The tank **never leaves the slab**. Whatever is lifting it pulls less than the tank weighs here, so the slab still holds part of it.' };
       return 'pass';
     })
   );
 
-  // Lift: lift-off at 0.40 m/s² (±0.03) on a rack line, nothing snaps, the
-  // tank's underside clears the tower deck.
+  // Lift: lift-off at 0.40 m/s² (±0.03), every line from the rack (the
+  // objective says so), nothing snaps, the tank's underside clears the deck.
+  // Any rig counts: a direct winch, a tackle over a sheave, a jib, two lines.
+  var LINE_TYPES = ['winch', 'cable'];
+  function linesOf(s) {
+    var parts = s.built.parts;
+    return Object.keys(parts).map(function (id) { return parts[id]; }).filter(function (p) { return LINE_TYPES.indexOf(p.def.type) >= 0 || p.def.type === 'chain'; });
+  }
+  function lineTension(p) { var j = p.joint; return !j || j.broken ? 0 : (j.lineTension ? j.lineTension() : Math.max(0, j.tension ? j.tension() : j.force())); }
   var liftGoal = Gl.all(
     Gl.never(function (s) {
-      var w = winchOf(s);
-      if (!w) return null;
-      if (!rackLine(w.values.rating)) return 'The crew only has the lines on the rack. Set the winch line\'s breaking load to one of the tags: ' + RACK.map(function (c) { return c.tag; }).join(', ') + '.';
-      return null;
+      var bad = linesOf(s).filter(function (p) { return p.def.type === 'chain' || !rackLine(p.values.rating); })[0];
+      if (!bad) return null;
+      return 'The crew only has the lines on the rack, and the ' + (bad.inst.label || bad.def.name.toLowerCase()) + ' is not one of them. Set its breaking load to a tag: ' + RACK.map(function (c) { return c.tag; }).join(', ') + '.';
     }),
     Gl.noBreaks(null),
     function (s) {
+      linesOf(s).forEach(function (p) { s.peak('line:' + p.inst.id, lineTension(p)); });
       var m = s.memo, p = s.pos('tank'), v = s.vel('tank');
       if (!p) return { fail: 'The tank is missing.' };
       if (m.t0 == null && p.y - 0.5 > 0.001) { m.t0 = s.t; m.v0 = v.y; }
@@ -201,6 +208,8 @@
     id: 'P6', order: 6,
     title: 'Settlement Standard',
     subtitle: 'Kettle Hollow Standard No. 1',
+    objective: 'Prove the Hollow\'s first standard: certify, ship, hover, lift',
+    pitch: 'Juno wants the settlement\'s first written standard, proved on the new water tank. Four jobs, any rig that works, and the simulation signs them off.',
 
     brief: [
       'Every crew in the Hollow weighs things its own way, and last month that cost us a winch drum. So we are writing it down: **Kettle Hollow Standard No. 1**, the numbers everyone builds to.',
@@ -215,7 +224,9 @@
       '**Old ledger:** the previous engineer listed the empty tank at **272 lb**.',
       '**Trailer yard sheet (FPS):** wheelbarrow 300 lb, garden cart 1200 lb, utility trailer 3500 lb, flatbed 10 000 lb. The crew hitches the smallest one that covers the load ticket.',
       '**Cable rack, as stamped:** 3/8 in wire rope *2.50 kip* · synthetic sling *11.5 kN* · chain sling *1.40 ton* · 7/16 in wire rope *3000 lb* · polyester sling *15.0 kN*. Reeve the lightest one that holds.',
-      '**The standard\'s rules:** reference mass to **5** s.f.; local *g* and the winch governor to **4** s.f.; everything else to **3** s.f. Lift-off is **0.40 m/s²** upward. The tower stands at 40° N, 600 m above sea level.'
+      '**The standard\'s rules:** reference mass to **5** s.f.; local *g* and the winch governor to **4** s.f.; everything else to **3** s.f. Lift-off is **0.40 m/s²** upward. The tower stands at 40° N, 600 m above sea level.',
+      '**Proof hover:** the tank has to come clear of the slab (more than 1 mm) and stay within 3 cm of the chalk mark for six seconds.',
+      '**The crew:** the trailer gets towed to the tower base unless you set the tow to 0 m and haul it yourself. Any lifting rig is fine on the tower, as long as every line in it comes off the rack.'
     ],
 
     yard: { site: SITE_YARD, design: BENCH, camera: { fit: { lo: { x: -1.2, y: -0.2 }, hi: { x: 1.2, y: 1.6 } } } },
@@ -223,6 +234,9 @@
     solutions: {
       'P6.kilo': [
         { set: { comparator: { rider: '0.300 g', pan: 'kilo pan', cert: '0.99970 kg' } } },
+        // no rider: a steady 2.94 mN push down on the kilo end does the same job
+        { add: [{ type: 'push', a: { part: 'comparator', local: { x: -0.25, y: 0 } }, dials: { force: '2.94 mN', angle: '270 deg', time: '60 s' } }],
+          set: { comparator: { cert: '0.99970 kg' } } },
         // the rider on the wrong pan: the beam tips further
         { pass: false, set: { comparator: { rider: '0.300 g', pan: 'standard pan', cert: '1.00030 kg' } } },
         // level beam, but the certificate still says what the kilo is stamped
@@ -230,6 +244,12 @@
       ],
       'P6.ship': [
         { set: { trailer: { ticket: '2.72 kip' } } },
+        // the same ticket, but the player hauls it with two pushes instead of the tractor
+        { set: { trailer: { ticket: '2.72 kip', haul: '0 m' } }, add: [
+          { type: 'push', a: { part: 'trailer', anchor: 'deck' }, dials: { force: '1.5 kN', angle: '0 deg', time: '3 s', start: '1 s' } },
+          { type: 'push', a: { part: 'trailer', anchor: 'deck' }, dials: { force: '1.5 kN', angle: '180 deg', time: '3 s', start: '4.72 s' } }] },
+        // an oversized ticket: the flatbed carries it (points off for tying it up)
+        { set: { trailer: { ticket: '5 kip' } } },
         // the ledger's figure, off by ten: the wheelbarrow axle snaps
         { pass: false, set: { trailer: { ticket: '272 lb' } } },
         // kip and kN confused: 2.72 kN is only 612 lb, so the garden cart goes
@@ -237,6 +257,12 @@
       ],
       'P6.hover': [
         { set: { winch: { pull: '12.10 kN' } } },
+        // a two-fall tackle over a sheave: half the pull on the line
+        { add: [{ id: 'sh', type: 'sheave', x: -0.2, y: 5.3 },
+          { id: 'w2', type: 'winch', a: { part: 'ground', at: { x: -2.5, y: 0.3 } }, b: { part: 'tank', anchor: 'top' }, dials: { pull: '6.05 kN', route: 'over sheave', parts: '2' } }],
+          set: { winch: { pull: '0 kN' } } },
+        // no winch pull at all: a steady 12.10 kN push straight up
+        { add: [{ type: 'push', a: { part: 'tank' }, dials: { force: '12.10 kN', angle: '90 deg', time: '20 s' } }], set: { winch: { pull: '0 kN' } } },
         // standard gravity: 12.11 kN creeps up off the mark
         { pass: false, set: { winch: { pull: '12.11 kN' } } },
         // uncorrected mass and three figures, rounded down: never leaves the slab
@@ -244,6 +270,10 @@
       ],
       'P6.lift': [
         { add: [{ id: 'winch', type: 'winch', a: { part: 'drum', anchor: 'eye' }, b: { part: 'tank', anchor: 'top' }, dials: { pull: '12.6 kN', rating: '3000 lb', speed: '0.5 m/s' } }],
+          set: { plate: { mass: '1.23 Mg' } } },
+        // a two-fall tackle from a drum on the ground: half the line tension, so the lightest line holds
+        { add: [{ id: 'sh', type: 'sheave', x: -0.2, y: 8.4 },
+          { id: 'w2', type: 'winch', a: { part: 'ground', at: { x: -2.5, y: 0.3 } }, b: { part: 'tank', anchor: 'top' }, dials: { pull: '6.30 kN', rating: '2.50 kip', speed: '1 m/s', route: 'over sheave', parts: '2' } }],
           set: { plate: { mass: '1.23 Mg' } } },
         // sized for the hover: the chain sling parts at lift-off
         { pass: false, add: [{ id: 'winch', type: 'winch', a: { part: 'drum', anchor: 'eye' }, b: { part: 'tank', anchor: 'top' }, dials: { pull: '12.6 kN', rating: '1.40 ton', speed: '0.5 m/s' } }] },
@@ -257,7 +287,8 @@
     jobs: [
       {
         id: 'P6.kilo',
-        label: '**Re-certify the depot kilo.** Level the comparator with a rider, then sign the kilo\'s certificate with its true mass, to 5 s.f. This becomes the Hollow\'s reference.',
+        objective: 'Level the comparator, then sign the kilo\'s certificate (5 s.f.)',
+        label: '**Re-certify the depot kilo.** Get the beam to settle level, then write the depot kilo\'s true mass on its certificate.',
         design: BENCH,
         yard: { camera: { fit: { lo: { x: -1.2, y: -0.2 }, hi: { x: 1.2, y: 1.6 } } } },
         goal: kiloGoal,
@@ -288,7 +319,8 @@
       },
       {
         id: 'P6.ship',
-        label: '**Sanity check, then ship.** The old ledger says the empty tank weighs 272 lb. Judge that, then write the tank\'s weight on the trailer\'s load ticket in **FPS units**, 3 s.f. The crew does the rest.',
+        objective: 'Ticket the tank in FPS units and deliver it to the tower',
+        label: '**Ship the tank.** The crew hitches whatever trailer your ticket says. The old ledger claims 272 lb: check it first.',
         design: YARD,
         yard: { camera: { fit: { lo: { x: -1, y: -0.5 }, hi: { x: 17, y: 4 } } } },
         goal: shipGoal,
@@ -315,18 +347,12 @@
       },
       {
         id: 'P6.hover',
-        label: '**Proof hover.** The gantry winch is rigged to the tank. Set its pull so the tank **lifts clear of the slab and hangs on the chalk mark**: less than 3 cm of creep in a six-second count. Governor to 4 s.f.',
+        objective: 'Hold the tank just off the slab for six seconds',
+        label: '**Proof hover.** Take the tank just off the slab and keep it on the chalk mark for a six-second count. Any rig counts.',
         design: GANTRY,
         yard: { camera: { fit: { lo: { x: -4, y: -0.5 }, hi: { x: 4, y: 7 } } } },
         goal: hoverGoal,
         timeout: 7,
-        grade: { part: 'winch', key: 'pull', spec: {
-          value: W, unit: 'N', sf: 4, form: 'si', tol: 0.0003,
-          mistakes: [
-            { test: function (r) { return r > 1.0006 && r < 1.0025; }, kind: 'concept', msg: 'That is the tank on standard gravity. At four figures the governor knows the difference: use Kettle Hollow\'s *g*.' }
-          ] },
-          answer: '12.10 kN',        // a = 0, so T = W = 12 099.3 N -> 12.10 kN
-          wrong: [{ input: '12.11 kN', kind: 'concept' }, { input: '12.1 kN', kind: 'sigfig' }] },
         hints: [
           'Hanging still means no acceleration. What does that make the line tension, compared with the tank\'s weight? And which *g* is the yard running on?',
           'Hovering is the statics case: $T - W = m(0)$, so $T = W = m g$ with the corrected mass and the pendulum *g*, kept at full precision, then rounded to 4 s.f.',
@@ -336,7 +362,8 @@
       },
       {
         id: 'P6.lift',
-        label: '**Lift it onto the tower.** Stamp the tank\'s plate with its mass (3 s.f.), then rig the crane winch: lift-off at the standard\'s **0.40 m/s²**, on the lightest line from the rack that holds. The tank\'s underside has to clear the deck.',
+        objective: 'Lift the tank past the deck: 0.40 m/s², rack lines, plate stamped',
+        label: '**Lift it onto the tower.** Stamp the plate (3 s.f.), then raise the tank above the deck. Lift-off at 0.40 m/s², lines from the rack only, the lighter the better.',
         design: TOWER,
         yard: { camera: { fit: { lo: { x: -4, y: -0.5 }, hi: { x: 6, y: 10 } } } },
         goal: liftGoal,
@@ -344,26 +371,27 @@
         grade: { part: 'plate', key: 'mass', spec: { value: MT, unit: 'kg', sf: 3, form: 'si' },
           answer: '1.23 Mg',         // 1235.0 (0.999 70) = 1234.63 kg -> 1.23 Mg
           wrong: [{ input: '1.24 Mg', kind: 'rounding' }, { input: '1235 kg', kind: 'sigfig' }] },
-        margin: function (s) {
-          var w = winchOf(s), line = w && rackLine(w.values.rating);
-          return line && line.tag === '15.0 kN' ? 10 : 0;
-        },
+        // points off when a lighter rack line would have held what a line carried
+        margin: function (s) { return oversized(s).length ? 10 : 0; },
         hints: [
           'At lift-off the tank is accelerating, so this is no longer statics. Which way is the unbalanced force, and how big? Then look hard at the rack: the tags are in four different units.',
           'Up is positive: $T - W = m a$, so $T = m(g + a)$. That is the winch pull and also the peak line tension. Bring every tag on the rack to newtons by hand and take the lightest one above it. For the plate: the iron weights were adjusted against the depot kilo.',
           '$T = 1234.63(9.79995 + 0.40) = 12\\,593\\u{ N}$: set the pull to **12.6 kN**. The 1.40 ton chain sling is only 2800 lb = 12.45 kN and parts; the **3000 lb** wire rope (13.34 kN) holds. Plate: $1235.0(0.999\\,70) = 1234.63\\u{ kg}$ = **1.23 Mg**. Uncorrected, 1235 kg would round up to 1.24 Mg.'
         ],
         onFail: function (ctx) {
-          var s = ctx.result && ctx.result.state, w = s && winchOf(s);
-          if (!w) return 'Rig a **winch** from the crane hook to the tank\'s top.';
-          var line = rackLine(w.values.rating);
-          if (line && s.breaks.length) return 'The **' + line.name + '** is tagged ' + line.tag + ', which is ' + fmt(line.rating, 'force', 4) + '. At lift-off it carried ' + fmt(w.values.pull, 'force', 4) + '.';
+          var s = ctx.result && ctx.result.state;
+          if (!s || !linesOf(s).length) return 'Nothing is lifting the tank yet. The crane hook is under the beam.';
+          var b = s.breaks[0], p = b && s.part(b.part), line = p && rackLine(p.values.rating);
+          if (line) return 'The **' + line.name + '** is tagged ' + line.tag + ', which is ' + fmt(line.rating, 'force', 4) + '. At lift-off it carried ' + fmt(b.force, 'force', 4) + '.';
           return '';
         },
         success: function (ctx) {
-          var s = ctx.result.state, w = winchOf(s), line = rackLine(w.values.rating);
-          var note = line.tag === '15.0 kN' ? ' It holds, but the 3000 lb wire rope would have done the job with less to haul up the tower.' : '';
-          return 'Lift-off at **' + s.memo.a.toFixed(2) + ' m/s²**, and the **' + line.name + '** (' + line.tag + ') takes it at ' + Math.round(w.values.pull / line.rating * 100) + ' % of its rating. The tank rises clean past the deck.' + note;
+          var s = ctx.result.state, used = linesOf(s).map(function (p) {
+            var line = rackLine(p.values.rating);
+            return 'the **' + line.name + '** (' + line.tag + ') at ' + Math.round(s.peakOf('line:' + p.inst.id) / line.rating * 100) + ' % of its rating';
+          });
+          var note = oversized(s).length ? ' It holds, but a lighter line from the rack would have done, with less to haul up the tower.' : '';
+          return 'Lift-off at **' + s.memo.a.toFixed(2) + ' m/s²**, with ' + used.join(' and ') + '. The tank rises clean past the deck.' + note;
         }
       }
     ],
@@ -472,6 +500,7 @@
       function tow() {
         // the crane sets the tank down over the first half second; then the axle carries it all
         if (world.time >= 0.5 && axle.breakForce === Infinity) axle.breakForce = cls.cap + DECK_M * g;
+        if (!dist) return;                          // tow 0 m: the player hauls it
         if (world.time < 1) return;                 // let the load settle first
         var rem = x0 + dist - gear.c.x, vt = Math.max(-1.2, Math.min(1.2, 0.6 * rem));
         var F = Math.max(-2500, Math.min(2500, 3000 * (vt - gear.v.x)));
