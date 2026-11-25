@@ -40,6 +40,7 @@
  *   new P.sensors.Stopwatch(world, { start, stop })  s; start/stop = event name or fn(world)
  *   new P.sensors.EnergyMeter(world, { bodies, datum })  J; parts(world) for the split
  *   new P.sensors.MomentumMeter(world, { bodies, component })  N·s
+ *   new P.sensors.EnergyLedger(world, { datum })     J; read() splits stored, input, dissipated
  *   P.sensors.gauge(fn, unit)                        any custom reading
  *   P.sensors.jointForces(world)  every joint's reaction, for the stress overlay
  */
@@ -306,10 +307,204 @@
   };
   MomentumMeter.prototype.read = function (world) { return pick(this.vector(world), this.opts.component); };
 
+
+  /* -------------------------------------------------------- energy ledger */
+  // Energy ledger: where the energy of a build goes, step by step.
+  //
+  //   var led = new P.sensors.EnergyLedger(world, { datum })
+  //   ... world.step(dt) ...
+  //   led.read() -> { kinetic, potential, elastic, stored,        J, now
+  //                   input,                                       J, work put in since start
+  //                   dissipated,                                  J, input - change in stored
+  //                   friction, damping, unexplained,              J, see below
+  //                   maxRise, maxRiseStep, scale }
+  //   led.stop()
+  //
+  // stored = kinetic + gravity potential + elastic. Elastic energy is
+  // ½kx² in springs and elastic ropes (DistanceJoint stiffness/hertz/EA), ½kθ²
+  // in rotational springs (revolute stiffness, weld angularStiffness), ½kx² in
+  // weld linear springs and prismatic springs, and ½kC² in every row of a beam
+  // or truss link (structures.js), plus j.elasticEnergy() for any joint that
+  // defines it.
+  //
+  // input is the work of applied forces (body.lastApplied, exact for a force
+  // held through the step) and of drives: winch tension × drum speed, motor
+  // torque or force × joint speed, mouse-drag force × point velocity, using
+  // the average of the velocities before and after the step (an estimate when
+  // a drive jerks). By conservation
+  //   dissipated = input - (stored - stored at start)
+  // and it can only grow: a step where it falls means the solver invented
+  // energy. maxRise is the largest such step (J), maxRiseStep its index.
+  //
+  // Part of the dissipation has a known cause, estimated the same way:
+  // friction (contact tangent force × slip speed) and damping (c·v² of every
+  // damper: spring damping or dampingRatio, joint damping, body linear and
+  // angular damping). unexplained = dissipated - friction - damping is what
+  // inelastic impacts and the solver itself lost (+) or invented (-). On a
+  // frictionless, undamped, impact-free build it should stay near zero.
+  // Both are sampled once a step from the step's average velocities, so the
+  // damping figure is good while a damper is gentle on its masses (c·h/m
+  // well under 1 per substep) and overstates a heavily overdamped one.
+  //
+  // scale is the build's energy scale for relative limits (opts.scale, or
+  // kinetic + elastic + Σ m g D at the start, D = the larger side of the box
+  // around the moving parts and joint anchors; at least 1 J).
+  function jointElastic(j) {
+    if (j.broken) return 0;
+    if (j.elasticEnergy) return j.elasticEnergy();
+    var x, k;
+    if (j.type === 'distance' && (j.stiffness > 0 || j.hertz > 0)) {
+      k = j.stiffness;
+      if (!(k > 0)) { var w = 2 * Math.PI * j.hertz; k = j.effMass(j.geometry()) * w * w; }
+      x = j.geometry().L - j.length;
+      if (j.rope && x < 0) x = 0;
+      return 0.5 * k * x * x;
+    }
+    if (j.type === 'revolute' && j.stiffness > 0) { x = j.angle() - (j.springAngle || 0); return 0.5 * j.stiffness * x * x; }
+    if (j.type === 'prismatic' && j.stiffness > 0) { x = j.translation() - (j.restTranslation || 0); return 0.5 * j.stiffness * x * x; }
+    if (j.type === 'weld') {
+      var e = 0;
+      if (j.angularStiffness > 0) { x = j.angle(); e += 0.5 * j.angularStiffness * x * x; }
+      if (j.linearStiffness > 0) { var d = M.sub(j.anchorB(), j.anchorA()); e += 0.5 * j.linearStiffness * M.lenSq(d); }
+      return e;
+    }
+    if (j.part && j.k && j.rows && j.updateRows) {
+      j.updateRows();
+      var s = 0;
+      j.rows.forEach(function (r) { var kk = j.k[r.comp]; if (kk > 0 && isFinite(kk)) s += 0.5 * kk * r.C * r.C; });
+      return s;
+    }
+    return 0;
+  }
+  // Viscous damping rate of a spring/damper joint (N·s/m or N·m·s/rad).
+  function damperRate(j) {
+    if (j.type === 'distance') {
+      if (j.stiff) return 0;                       // held as a stiff line: no damper in it
+      if (j.rope && j.geometry().L < j.length) return 0;
+      if (j.spring && j.cEff != null) return j.cEff; // what the step used (prepare)
+      if (j.damping != null) return j.damping;
+      if (!(j.dampingRatio > 0) || !(j.stiffness > 0 || j.hertz > 0)) return 0;
+      if (j.rope && j.geometry().L < j.length) return 0;
+      var m = j.effMass(j.geometry()), k = j.stiffness > 0 ? j.stiffness : m * Math.pow(2 * Math.PI * j.hertz, 2);
+      return 2 * j.dampingRatio * Math.sqrt(k * m);
+    }
+    if (j.type === 'revolute' || j.type === 'prismatic') return j.damping > 0 ? j.damping : 0;
+    if (j.type === 'weld') return j.angularDamping > 0 ? j.angularDamping : 0;
+    return 0;
+  }
+
+  function EnergyLedger(world, opts) {
+    this.world = world; this.opts = opts || {}; this.unit = 'J';
+    this.input = 0; this.friction = 0; this.damping = 0;
+    this.maxRise = 0; this.maxRiseStep = -1; this.steps = 0; this.running = true;
+    var st = this.stored();
+    this.stored0 = st.stored; this.last = st.stored;
+    var lo = M.v(Infinity, Infinity), hi = M.v(-Infinity, -Infinity), mg = 0, g = M.len(world.gravity);
+    var grow = function (p) { lo.x = Math.min(lo.x, p.x); lo.y = Math.min(lo.y, p.y); hi.x = Math.max(hi.x, p.x); hi.y = Math.max(hi.y, p.y); };
+    world.bodies.forEach(function (b) {
+      if (b.type !== 'dynamic') return;
+      mg += b.m * g; grow(b.c);
+      if (b.fixtures.length) { var bb = b.aabb(); grow(bb.lo); grow(bb.hi); }
+    });
+    world.joints.forEach(function (j) { try { grow(j.anchorA()); grow(j.anchorB()); } catch (e) { /* no anchors */ } });
+    var span = isFinite(hi.x - lo.x) ? Math.max(hi.x - lo.x, hi.y - lo.y) : 0;
+    this.scale = this.opts.scale || Math.max(1, st.kinetic + st.elastic + mg * span);
+    this.snap = this.snapshot();
+    var self = this;
+    world.on('step', function (e) { if (self.running) self.onStep(e.dt); });
+  }
+  EnergyLedger.prototype.stored = function () {
+    var world = this.world, g = world.gravity, d = this.opts.datum || M.v(0, 0);
+    var kinetic = 0, potential = 0, elastic = 0;
+    world.bodies.forEach(function (b) {
+      if (b.type !== 'dynamic') return;
+      kinetic += b.kineticEnergy();
+      potential -= b.m * b.gravityScale * M.dot(g, M.sub(b.c, d));
+    });
+    world.joints.forEach(function (j) { elastic += jointElastic(j); });
+    return { kinetic: kinetic, potential: potential, elastic: elastic, stored: kinetic + potential + elastic };
+  };
+  EnergyLedger.prototype.snapshot = function () {
+    var m = new Map();
+    this.world.bodies.forEach(function (b) { m.set(b, { v: M.v(b.v.x, b.v.y), w: b.w }); });
+    return m;
+  };
+  EnergyLedger.prototype.onStep = function (dt) {
+    var world = this.world, prev = this.snap;
+    // average velocity of a body over the step, at a world point
+    var avgAt = function (b, p) {
+      var o = prev.get(b) || { v: b.v, w: b.w };
+      var v = M.v(0.5 * (o.v.x + b.v.x), 0.5 * (o.v.y + b.v.y)), w = 0.5 * (o.w + b.w);
+      return { v: p ? M.add(v, M.crossSV(w, M.sub(p, b.c))) : v, w: w };
+    };
+    var input = 0, friction = 0, damping = 0;
+    world.bodies.forEach(function (b) {
+      if (b.type !== 'dynamic') return;
+      (b.lastApplied || []).forEach(function (e) {
+        var a = avgAt(b, e.point || b.c);
+        if (e.vector) input += M.dot(e.vector, a.v) * dt;
+        if (e.torque) input += e.torque * a.w * dt;
+      });
+      if (b.linearDamping || b.angularDamping) {
+        var a0 = avgAt(b);
+        damping += (b.m * b.linearDamping * M.lenSq(a0.v) + b.I * b.angularDamping * a0.w * a0.w) * dt;
+      }
+    });
+    // joints: the drives put work in; dampers take it out
+    world.joints.forEach(function (j) {
+      if (j.broken || j.internal) return;
+      var A = j.bodyA, B = j.bodyB;
+      if (j.type === 'winch') { input += j.lineTension() * j.speed * dt; return; }
+      if (j.type === 'revolute' && j.enableMotor && j.motorTorque) {
+        input += j.motorTorque() * (avgAt(B).w - avgAt(A).w) * dt;
+      } else if (j.type === 'prismatic' && j.motorForceNow && (j.enableMotor || j.motorForce)) {
+        input += j.motorForceNow() * j.speed() * dt;
+      } else if (j.type === 'mouse') {
+        var r = jointOn(j, B);
+        if (r) input += M.dot(r.force, avgAt(B, r.point).v) * dt;
+      }
+      var c = damperRate(j);
+      if (c > 0) {
+        var vr;
+        if (j.type === 'distance') { var gm = j.geometry(); vr = M.dot(M.sub(avgAt(B, M.add(B.c, gm.rB)).v, avgAt(A, M.add(A.c, gm.rA)).v), gm.axis); }
+        else if (j.type === 'prismatic') vr = j.speed();
+        else vr = avgAt(B).w - avgAt(A).w;
+        damping += c * vr * vr * dt;
+      }
+    });
+    // friction: tangent force times slip speed at each contact point
+    var invH = world.substeps / dt;
+    world.contacts.forEach(function (ct) {
+      if (!ct.tangent || !ct.points) return;
+      var A = ct.fa.body, B = ct.fb.body;
+      ct.points.forEach(function (cp) {
+        if (!cp.tangentImpulse) return;
+        var vt = M.dot(M.sub(avgAt(B, cp.point).v, avgAt(A, cp.point).v), ct.tangent);
+        friction += Math.abs(cp.tangentImpulse * invH * vt) * dt;
+      });
+    });
+    this.input += input; this.friction += friction; this.damping += damping;
+    var now = this.stored().stored;
+    var rise = (now - this.last) - input;              // > 0: energy appeared from nowhere
+    if (rise > this.maxRise) { this.maxRise = rise; this.maxRiseStep = this.steps; }
+    this.last = now; this.steps++;
+    this.snap = this.snapshot();
+  };
+  EnergyLedger.prototype.read = function () {
+    var st = this.stored(), dissipated = this.input - (st.stored - this.stored0);
+    return {
+      kinetic: st.kinetic, potential: st.potential, elastic: st.elastic, stored: st.stored,
+      input: this.input, dissipated: dissipated, friction: this.friction, damping: this.damping,
+      unexplained: dissipated - this.friction - this.damping,
+      maxRise: this.maxRise, maxRiseStep: this.maxRiseStep, scale: this.scale, steps: this.steps
+    };
+  };
+  EnergyLedger.prototype.stop = function () { this.running = false; };
+
   P.sensors = {
     freeBody: freeBody, jointForces: jointForces, gauge: gauge,
     LoadCell: LoadCell, SpringScale: SpringScale, Speedometer: Speedometer, Accelerometer: Accelerometer,
     AngleGauge: AngleGauge, TapeMeasure: TapeMeasure, Stopwatch: Stopwatch,
-    EnergyMeter: EnergyMeter, MomentumMeter: MomentumMeter
+    EnergyMeter: EnergyMeter, MomentumMeter: MomentumMeter, EnergyLedger: EnergyLedger
   };
 })(globalThis.SE);
