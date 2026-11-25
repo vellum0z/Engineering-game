@@ -279,11 +279,18 @@ suite('physics e06: stability and cost', () => {
     members.push([12, 13]);
     P.structures.truss(w, { nodes, members, material: 'steel', area: 2e-3, I: 1e-6, supports: [{ node: 0 }, { node: 12, type: 'roller' }] });
     ok(w.bodies.length >= 200, 'only ' + w.bodies.length + ' bodies');
+    // warm up, then the median of five timed batches (0.5 to 1.5 s, before
+    // the beams settle and sleep), so JIT and GC pauses left over from other
+    // suites don't decide the result
     w.run(0.5);
-    const t0 = process.hrtime.bigint();
-    w.run(1);
-    const ms = Number(process.hrtime.bigint() - t0) / 1e6 / 60;
-    ok(ms < 4, ms.toFixed(2) + ' ms per step');
+    const batches = [];
+    for (let b = 0; b < 5; b++) {
+      const t0 = process.hrtime.bigint();
+      w.run(0.2);
+      batches.push(Number(process.hrtime.bigint() - t0) / 1e6 / 12);
+    }
+    const ms = batches.slice().sort((x, y) => x - y)[2];
+    ok(ms < 4, ms.toFixed(2) + ' ms per step (median of ' + batches.map(x => x.toFixed(2)).join(', ') + ')');
   });
 });
 
