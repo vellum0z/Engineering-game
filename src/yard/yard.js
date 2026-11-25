@@ -398,6 +398,7 @@
   Yard.prototype.startPlacing = function (entry, binIndex) {
     if (this.placing && this.placing.entry === entry) { this.placing = null; this.refreshBin(); return; }
     var d = Y.partDef(entry.type);
+    if (this.coachEl && this.coachEl.classList.contains('show')) { this.coachEl.classList.remove('show'); try { localStorage.setItem('se.yard.coach', '1'); } catch (e) {} }
     this.placing = { entry: entry, binIndex: binIndex, def: d, stage: 0 };
     this.flash(d.connector ? (d.attach ? 'Click the part to clip the ' + d.name.toLowerCase() + ' onto.' : 'Click the first end of the ' + d.name.toLowerCase() + ' (an anchor point).') : 'Click in the yard to place the ' + d.name.toLowerCase() + '.', 'info');
     this.refreshBin();
