@@ -387,13 +387,11 @@
     // beam, say). Contacts between two of them are left to the soft contact
     // solver: such parts are often built overlapping a little, and rigid rows
     // on both sides of an overlap would fight with unbounded force.
-    var tied = new Set(bodies), queue = Array.from(bodies);
+    var tied = new Set(bodies), queue = Array.from(bodies), adj = rigidJointsByBody(world);
     while (queue.length) {
-      var body = queue.pop();
-      for (var ji = 0; ji < world.joints.length; ji++) {
-        var jj = world.joints[ji];
-        if (jj.broken || (jj.bodyA !== body && jj.bodyB !== body)) continue;
-        if (!(jj.blockSlots || (jj.type === 'distance' && jj.isRigid && jj.isRigid()))) continue;
+      var body = queue.pop(), near = adj.get(body) || [];
+      for (var ji = 0; ji < near.length; ji++) {
+        var jj = near[ji];
         var other = jj.bodyA === body ? jj.bodyB : jj.bodyA;
         if (other.type === 'dynamic' && !tied.has(other)) { tied.add(other); queue.push(other); }
       }
@@ -429,6 +427,19 @@
     }
     this.built = -1;
   };
+
+  // Pins, welds, sliders and rigid rods by body, built once per step and
+  // shared by every structure in the world.
+  function rigidJointsByBody(world) {
+    if (world._sAdjStep === world.stepCount && world._sAdjTime === world.time) return world._sAdj;
+    var adj = new Map();
+    world.joints.forEach(function (j) {
+      if (j.broken || !(j.blockSlots || (j.type === 'distance' && j.isRigid && j.isRigid()))) return;
+      [j.bodyA, j.bodyB].forEach(function (b) { var l = adj.get(b); if (!l) adj.set(b, l = []); l.push(j); });
+    });
+    world._sAdj = adj; world._sAdjStep = world.stepCount; world._sAdjTime = world.time;
+    return adj;
+  }
 
   // Rigid joints touching the structure, with their whole joint group.
   StructureSolver.prototype.adoptJoints = function () {
@@ -536,11 +547,13 @@
     });
     this.byBody = byBody;
     // remember how the bodies were turned, see solve()
-    var turned = this.turned = [];
-    S.concat(U).forEach(function (r) {
-      if (isDyn(r.A) && turned.indexOf(r.A) < 0) turned.push(r.A);
-      if (isDyn(r.B) && turned.indexOf(r.B) < 0) turned.push(r.B);
-    });
+    var turnedSet = new Set();
+    for (i = 0; i < n + m; i++) {
+      var tr = i < n ? S[i] : U[i - n];
+      if (isDyn(tr.A)) turnedSet.add(tr.A);
+      if (isDyn(tr.B)) turnedSet.add(tr.B);
+    }
+    var turned = this.turned = Array.from(turnedSet);
     this.turnAngles = turned.map(function (b) { return b.angle; });
     byBody.forEach(function (list) {
       for (var p = 0; p < list.length; p++) {
