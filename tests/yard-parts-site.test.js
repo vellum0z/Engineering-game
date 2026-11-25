@@ -11,10 +11,17 @@ suite('yard parts: site', () => {
     const r = Y.judge({ design: d, site: { floor: null }, goal: G.after(1), timeout: 2 });
     return { g: r.state.read('s.g'), vy: r.state.vel('c').y };
   };
-  test('Earth at sea level: g = G·M/R² with the course constants, 9.81 m/s²', () => {
-    const r = gOf({ body: 'Earth' });
-    near(r.g, GR.G * GR.EARTH_MASS / (GR.EARTH_RADIUS * GR.EARTH_RADIUS), 1e-12);
-    ok(Math.abs(r.g - 9.81) < 0.01, 'g = ' + r.g);
+  test('Earth near the ground: international gravity formula minus the free-air drop', () => {
+    near(gOf({ body: 'Earth' }).g, 9.780327, 1e-12);
+    const ridge = gOf({ body: 'Earth', altitude: '2400 m', latitude: '12 deg' }).g;
+    near(ridge, GR.gSite(12, 2400), 1e-12);
+    eq(Y.dial.fmtNum(ridge, 4), '9.775');
+    near(gOf({ body: 'Earth', altitude: '10 km', latitude: '45 deg' }).g, GR.gLatitude(45) - 3.086e-6 * 1e4, 1e-12);
+  });
+  test('between 10 and 100 km the surface and sphere models blend without a jump', () => {
+    const g = h => gOf({ body: 'Earth', altitude: h + ' km' }).g;
+    ok(Math.abs(g(10.001) - g(10)) < 1e-5 && Math.abs(g(99.999) - g(100)) < 1e-5);
+    ok(g(50) < g(10) && g(50) > g(100));
   });
   test('the world really falls at the site g (v = g·t after 1 s)', () => { const r = gOf({ body: 'Moon' }); near(-r.vy, r.g, 1e-9); });
   test('altitude adds to the radius: 400 km up gives the P5 orbit value 8.69 m/s²', () => {
@@ -28,11 +35,11 @@ suite('yard parts: site', () => {
     eq(Y.dial.fmtNum(gOf({ body: 'Moon' }).g, 3), '1.62');
     eq(Y.dial.fmtNum(gOf({ body: 'Mars' }).g, 3), '3.73');
   });
-  test('latitude scales Earth g by the gravity formula ratio (about +0.5 % at the pole)', () => {
+  test('latitude only matters near Earth: +0.5 % at the pole, none on the Moon or in orbit', () => {
     const g0 = gOf({ body: 'Earth' }).g, g90 = gOf({ body: 'Earth', latitude: '90 deg' }).g;
-    near(g90 / g0, GR.gLatitude(90) / GR.gLatitude(0), 1e-12);
-    ok(g90 / g0 > 1.004 && g90 / g0 < 1.006);
+    near(g90, GR.gLatitude(90), 1e-12); ok(g90 / g0 > 1.004 && g90 / g0 < 1.006);
     near(gOf({ body: 'Moon', latitude: '60 deg' }).g, gOf({ body: 'Moon' }).g, 1e-12);
+    near(gOf({ body: 'Earth', altitude: '400 km', latitude: '60 deg' }).g, gOf({ body: 'Earth', altitude: '400 km' }).g, 1e-12);
   });
   test('the wrong kind of unit on the altitude dial is refused', () => {
     const r = Y.judge({ design: { parts: [part('site', { dials: { altitude: '3 kg' } })] }, goal: G.after(1) });
@@ -111,8 +118,10 @@ suite('yard parts: ram and tank', () => {
     const strut = Y.judge({ design: mk(''), goal: G.after(1), timeout: 2 });
     ok(Math.abs(strut.state.read('r.extension')) < 2e-3); near(strut.state.read('r.force'), 300, 1e-3);
   });
-  test('tank piston force is p·πd²/4 (1000 psi on a 2 in bore)', () => {
-    const b = Y.build({ parts: [part('tank', { id: 't', x: 0, y: 0.5, dials: { pressure: '1000 psi', bore: '2 in' } })] });
+  test('tank piston force is p·πd²/4 (1000 psi on a 2 in bore), shown only with a ram on the port', () => {
+    const tank = part('tank', { id: 't', x: 0, y: 0.5, dials: { pressure: '1000 psi', bore: '2 in' } });
+    ok(!Y.build({ parts: [tank] }).readouts.some(x => x.id === 't.force'));
+    const b = Y.build({ parts: [tank, part('crate', { id: 'c', x: 0, y: 2 }), part('ram', { a: { part: 't', anchor: 'port' }, b: { part: 'c', anchor: 'bottom' } })] });
     const F = Y.dial.parse('1000 psi', 'pressure').si * Math.PI * 0.0508 * 0.0508 / 4;
     near(b.readouts.find(x => x.id === 't.force').read(b.world), F, 1e-5);
     near(Y.site.pistonForce(2e6, 0.05), 2e6 * Math.PI * 0.0025 / 4, 1e-12);

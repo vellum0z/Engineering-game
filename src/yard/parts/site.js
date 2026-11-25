@@ -21,12 +21,15 @@
   //
   // Constants are the course values in SE.physics.gravity (H5, P1 and P5 use
   // the same ones): G = 66.73e-12 m^3/(kg s^2) and the mean radius and mass
-  // of each body. Earth at 0 m and 0 deg gives 9.81 m/s^2.
+  // of each body.
   //
-  // Model: g = G·M / r^2 with r = R + altitude (a sphere). On Earth the
-  // latitude dial scales that by the international gravity formula's ratio
-  // g(φ)/g(0), which carries the spin and the flattening: about +0.5 % at
-  // the poles. Moon and Mars ignore latitude.
+  // Model, as the course gives it:
+  //   Earth near the ground (altitude up to 10 km): the international gravity
+  //     formula plus the free-air drop,
+  //     g = 9.780327(1 + 0.0053024 sin²φ − 0.0000058 sin²2φ) − 3.086e-6·h
+  //   Earth from 100 km up, and the Moon and Mars everywhere: g = G·M/r²
+  //     with r = R + h (latitude ignored).
+  //   Between 10 and 100 km the two are blended linearly, so g never jumps.
   var BODY_CHOICES = ['Earth', 'Moon', 'Mars'];
   function gravityConsts() {
     var GR = SE.physics && SE.physics.gravity;
@@ -38,17 +41,23 @@
       gLatitude: function (phi) { var s = Math.sin(phi * DEG), s2 = Math.sin(2 * phi * DEG); return 9.780327 * (1 + 0.0053024 * s * s - 0.0000058 * s2 * s2); }
     };
   }
+  var NEAR = 10e3, FAR = 100e3;
+  function sphereG(B, h) { var r = B.R + h; return gravityConsts().G * B.M / (r * r); }
+  function surfaceG(phiDeg, h) { return gravityConsts().gLatitude(phiDeg) - FREE_AIR * h; }
+  var FREE_AIR = 3.086e-6;
   function siteG(bodyName, altitude, latitudeRad) {
     var GR = gravityConsts(), key = String(bodyName || 'Earth').toLowerCase();
-    var B = GR.BODIES[key] || GR.BODIES.earth, r = B.R + (altitude || 0);
-    var g = GR.G * B.M / (r * r);
-    if (key === 'earth' && latitudeRad) g *= GR.gLatitude(latitudeRad / DEG) / GR.gLatitude(0);
-    return g;
+    var B = GR.BODIES[key] || GR.BODIES.earth, h = altitude || 0;
+    if (key !== 'earth' || h >= FAR) return sphereG(B, h);
+    var near = surfaceG((latitudeRad || 0) / DEG, h);
+    if (h <= NEAR) return near;
+    var k = (h - NEAR) / (FAR - NEAR);
+    return near + k * (sphereG(B, h) - near);
   }
 
   Y.definePart({
     type: 'site', name: 'Site marker', category: 'Site', onePerDesign: true,
-    blurb: 'Where the yard is. Sets gravity as g = G·M/r², with r the body\'s radius plus the altitude. On Earth the latitude adds the spin and flattening correction (up to +0.5 % at the poles).',
+    blurb: 'Where the yard is, which sets gravity. On Earth up to 10 km: g = 9.780327(1 + 0.0053024 sin²φ − 0.0000058 sin²2φ) − 3.086×10⁻⁶ h. From 100 km up, and on the Moon and Mars: g = G·M/r² with r = radius + altitude (blended in between).',
     size: { w: 0.8, h: 1.4 },
     dials: [
       { key: 'body', label: 'Body', choice: BODY_CHOICES, def: 'Earth' },
@@ -156,11 +165,15 @@
       return { body: body, force: pistonForce(b.si('pressure'), b.si('bore')), pressure: b.si('pressure'), bore: b.si('bore') };
     },
     plate: function (inst) { return ['Charged to ' + inst.dials.pressure, 'Bore ' + inst.dials.bore]; },
-    readouts: function (built) {
-      return [
-        { key: 'pressure', label: 'pressure', q: 'pressure', read: function () { return built.pressure; } },
-        { key: 'force', label: 'piston force', q: 'force', read: function () { return built.force; } }
-      ];
+    // The piston force only means something when a ram is mounted on the
+    // port: a tank feeding some other part's cylinder shows just its pressure.
+    readouts: function (built, b) {
+      var id = built.inst.id, mounted = ((b.out.design && b.out.design.parts) || []).some(function (p) {
+        return p.type === 'ram' && p.a && p.a.part === id && p.a.anchor === 'port';
+      });
+      var r = [{ key: 'pressure', label: 'pressure', q: 'pressure', read: function () { return built.pressure; } }];
+      if (mounted) r.push({ key: 'force', label: 'ram force (p·A)', q: 'force', read: function () { return built.force; } });
+      return r;
     }
   });
 
