@@ -166,6 +166,8 @@ function rigidGap(j) {
 function runCase(kind, seed) {
   const r = rng(seed * 7919 + kind.length);
   const spec = BUILDS[kind](r), w = spec.w;
+  // what the yard would tell the player before Run
+  const preDiag = P.diagnose ? P.diagnose(w, { build: true, dt: 1 / 60 }) : [];
   const dt = 1 / 60, steps = 600;
   const E0 = energy(w);
   let maxStep = 0, total = 0, worstGap = 0, maxSpeed = 0, issues = [];
@@ -210,7 +212,9 @@ function runCase(kind, seed) {
   if (spec.crush) {
     // the light crate must still be under the heavy one, at its own height
     const b = spec.crush;
-    if (b.c.y < 0.25 - 0.02 || Math.abs(b.c.x) > 0.3) issues.push('light crate crushed or squeezed out (y ' + b.c.y.toFixed(3) + ', x ' + b.c.x.toFixed(2) + ')');
+    // beyond the engine's stack limit the build must be flagged as an error instead
+    const flagged = preDiag.some(d => d.code === 'mass-ratio-stack' && d.severity === 'error');
+    if (!flagged && (b.c.y < 0.25 - 0.02 || Math.abs(b.c.x) > 0.3)) issues.push('light crate crushed or squeezed out (y ' + b.c.y.toFixed(3) + ', x ' + b.c.x.toFixed(2) + ')');
   }
   if (spec.tunnel) {
     const { bullet, wall } = spec.tunnel;
