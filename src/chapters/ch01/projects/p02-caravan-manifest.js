@@ -141,9 +141,10 @@
   var SPUR_CAM = { fit: { lo: { x: -3, y: -1 }, hi: { x: 33, y: 5 } } };
 
   var PAD = { parts: [
-    { id: 'tanker', type: 'p02-tanker', x: 4, y: 0, dials: { fill: '2.4 m' }, locked: true, open: ['fill'], label: 'settlement tanker' }
+    { id: 'tanker', type: 'p02-tanker', x: 3, y: 0, dials: { fill: '2.4 m' }, locked: true, open: ['fill'], label: 'settlement tanker' },
+    { id: 'depot', type: 'zone', x: 16.75, y: 1.6, dials: { width: '5.5 m', height: '3.2 m' }, locked: true, label: 'mud depot' }
   ] };
-  var PAD_CAM = { fit: { lo: { x: -2, y: -1 }, hi: { x: 10, y: 5 } } };
+  var PAD_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 22, y: 5 } } };
 
   var BAY = { parts: [
     { id: 'flatbed', type: 'p02-flatbed', x: 4, y: 0, dials: { pressure: '118 psi' }, locked: true, open: ['pressure'], label: 'caravan flatbed' }
@@ -151,9 +152,10 @@
   var BAY_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 9, y: 4 } } };
 
   var DOCK = { parts: [
-    { id: 'wagon', type: 'p02-wagon', x: 4, y: 0, dials: { blocks: '6' }, locked: true, open: ['blocks'], label: 'caravan wagon' }
+    { id: 'wagon', type: 'p02-wagon', x: 3, y: 0, dials: { blocks: '6' }, locked: true, open: ['blocks'], label: 'caravan wagon' },
+    { id: 'camp', type: 'zone', x: 16.75, y: 1.2, dials: { width: '5.5 m', height: '2.4 m' }, locked: true, label: 'caravan camp' }
   ] };
-  var DOCK_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 9, y: 5 } } };
+  var DOCK_CAM = { fit: { lo: { x: -1, y: -1 }, hi: { x: 22, y: 5 } } };
 
   /* ------------------------------------------------------------ goals */
 
@@ -196,12 +198,17 @@
     return 'pass';
   };
 
+  function parked(s, id) {
+    var p = s.pos(id);
+    return s.held('parked:' + id, !!p && p.x >= DEPOT.x0 && p.x <= DEPOT.x1 && s.speed(id) < 0.05, 1);
+  }
+
   var tankGoal = G.all(
-    G.never(function (s) { var b = broke(s, 'tanker'); return b ? 'The axle snapped under ' + f3(s.part('tanker').cargo) + ' kg of mud. Its plate says 3.00 t.' : null; }),
+    G.never(function (s) { return broke(s, 'tanker') ? 'The axle snapped under ' + f3(s.part('tanker').cargo) + ' kg of mud. Its plate says 3.00 t.' : null; }),
     function (s) {
       var p = s.part('tanker'); if (!p) return { fail: 'The tanker is missing.' };
-      if (p.cargo < 0.5 * AXLE_KG) return s.t > 1 ? { fail: 'Only ' + f3(p.cargo) + ' kg of mud aboard, under half a load. That trip isn\'t worth the diesel.' } : null;
-      return s.t >= 3 ? 'pass' : null;
+      if (!parked(s, 'tanker')) return null;
+      return p.cargo >= 0.5 * AXLE_KG ? 'pass' : { fail: 'Only ' + f3(p.cargo) + ' kg of mud delivered, under half a load. That trip wasn\'t worth the diesel.' };
     }
   );
 
@@ -220,14 +227,16 @@
   );
 
   // Blocks still sitting on the wagon bed.
-  function aboard(p) { return p.blocks.filter(function (k) { return k.c.y > p.body.c.y; }).length; }
+  function aboard(p) { return p.blocks.filter(function (k) { return k.c.y > p.load.c.y && Math.abs(k.c.x - p.load.c.x) < 2.3; }).length; }
 
   var wagonGoal = G.all(
     G.never(function (s) { return broke(s, 'wagon') ? 'The wagon axle snapped. Its plate says 3 500 lb.' : null; }),
+    G.never(function (s) { var p = s.part('wagon'); return p && p.blocks.some(function (k) { return k.c.y < 0.5; }) ? 'A block slid off the wagon. Go easier on it.' : null; }),
     function (s) {
       var p = s.part('wagon'); if (!p) return { fail: 'The wagon is missing.' };
-      if (!aboard(p)) return { fail: 'Nothing loaded. The caravan paid for counterweights.' };
-      return s.t >= 3 ? 'pass' : null;
+      if (!p.blocks.length) return { fail: 'Nothing loaded. The caravan paid for counterweights.' };
+      if (!parked(s, 'wagon')) return null;
+      return aboard(p) ? 'pass' : { fail: 'The wagon reached camp empty.' };
     }
   );
 
@@ -268,23 +277,28 @@
         { pass: false, add: [{ type: 'push', a: { part: 'car' }, dials: { force: '5 kN', angle: '0 deg', time: '2 s' } }] }        // too gentle to latch
       ],
       'P2.mud': [
-        { set: { tanker: { fill: '1.70 m' } } },
+        // push 4 kN for 4 s: v = (4000 - 1059 drag) x 4 / 5396 kg = 2.2 m/s, it coasts into the depot
+        { set: { tanker: { fill: '1.70 m' } }, add: [{ type: 'push', a: { part: 'tanker' }, dials: { force: '4 kN', angle: '0 deg', time: '4 s' } }] },
         // the FPS route: 3.42 slug/ft^3 x 32.2 ft/s^2 = 110.1 lb/ft^3; 3000 x 9.81 / 4.448 = 6616 lb;
-        // / 110.1 lb/ft^3 = 60.1 ft^3; over 10.76 ft^2 of floor = 5.58 ft. Fill to 5.55 ft.
-        { set: { tanker: { fill: '5.55 ft' } } },
-        { pass: false, set: { tanker: { fill: '1.705 m' } } },  // density rounded to 1.76 Mg/m^3 before dividing
-        { pass: false, set: { tanker: { fill: '0.8 m' } } }     // 1410 kg: under half a load
+        // / 110.1 lb/ft^3 = 60.1 ft^3; over 10.76 ft^2 of floor = 5.58 ft. Fill to 5.55 ft, and winch it over (it stops with 5.5 m of line out, in the depot).
+        { set: { tanker: { fill: '5.55 ft' } }, add: [{ type: 'winch', a: { part: 'ground', at: { x: 22, y: 0.3 } }, b: { part: 'tanker' }, dials: { speed: '0.5 m/s', pull: '3 kN', rating: '20 kN', stop: '5.5 m' } }] },
+        { pass: false, set: { tanker: { fill: '1.705 m' } }, add: [{ type: 'push', a: { part: 'tanker' }, dials: { force: '4 kN', angle: '0 deg', time: '4 s' } }] },  // density rounded to 1.76 Mg/m^3 first
+        { pass: false, set: { tanker: { fill: '0.8 m' } }, add: [{ type: 'push', a: { part: 'tanker' }, dials: { force: '3 kN', angle: '0 deg', time: '4 s' } }] }       // 1410 kg: under half a load
       ],
       'P2.air': [
         { set: { flatbed: { pressure: '537 kPa' } } },
         { set: { flatbed: { pressure: '78 psi' } } },
+        // or run the bag softer and let a helper spring take the rest: at 400 kPa the bag gives
+        // 400e3 x 0.049 087 = 19.63 kN at 300 mm; W = 26.38 kN, so the spring must push 6.75 kN there.
+        // k = 100 kN/m from the chassis to the deck (0.60 m apart as built) with rest 0.6675 m.
+        { set: { flatbed: { pressure: '400 kPa' } }, add: [{ type: 'spring', a: { part: 'ground', at: { x: 4, y: 0.25 } }, b: { part: 'flatbed' }, dials: { k: '100 kN/m', rest: '0.6675 m' } }] },
         { pass: false, set: { flatbed: { pressure: '118 psi' } } },   // copied off their sheet: 814 kPa, bursts
         { pass: false, set: { flatbed: { pressure: '400 kPa' } } }    // bag too soft: on the bump stops
       ],
       'P2.blocks': [
-        { set: { wagon: { blocks: '3' } } },
-        { set: { wagon: { blocks: '2' } } },                    // safe but light: passes with points off
-        { pass: false, set: { wagon: { blocks: '4' } } }
+        { set: { wagon: { blocks: '3' } }, add: [{ type: 'push', a: { part: 'wagon' }, dials: { force: '2 kN', angle: '0 deg', time: '4 s' } }] },
+        { set: { wagon: { blocks: '3' } }, add: [{ type: 'winch', a: { part: 'ground', at: { x: 22, y: 0.3 } }, b: { part: 'wagon' }, dials: { speed: '0.6 m/s', pull: '2 kN', rating: '20 kN', stop: '5.5 m' } }] },
+        { pass: false, set: { wagon: { blocks: '4' } }, add: [{ type: 'push', a: { part: 'wagon' }, dials: { force: '2 kN', angle: '0 deg', time: '4 s' } }] }
       ]
     },
     jobs: [
@@ -330,9 +344,9 @@
       },
       {
         id: 'P2.mud', design: PAD, yard: { camera: PAD_CAM },
-        objective: 'Fill the tanker as full as its axle can take',
-        label: 'Mud: **3.42 slug/ft³**. Tank floor **1.00 m²**. Axle rated **3.00 t** of cargo. Set the tanker\'s fill depth.',
-        goal: tankGoal, timeout: 6,
+        objective: 'Deliver as much mud to the depot as the axle can take',
+        label: 'Mud: **3.42 slug/ft³**. Tank floor **1.00 m²**. Axle rated **3.00 t** of cargo. Set the fill depth. The tanker has no engine: get it to the depot any way you like.',
+        goal: tankGoal, timeout: 40,
         hints: [
           'Get the density into kg/m³. Then the depth that puts 3000 kg in a 1.00 m² tank follows.',
           'Multiply by (14.59 kg / 1 slug) and by (1 ft / 0.3048 m)³. The length factor is cubed because the unit is a volume. Depth = mass ÷ (density × floor area).',
@@ -345,7 +359,7 @@
           if (p && p.cargo > AXLE_KG) return 'Way over. Check that the length factor is **cubed**: a cubic foot is 0.0283 m³, not 0.3048.';
           return 'The axle load gauge shows what each centimetre of mud weighs, if you want to check your density.';
         },
-        success: function (ctx) { return 'Filled and holding: **' + f3(ctx.result.state.part('tanker').cargo) + ' kg** of mud on a 3000 kg axle.'; }
+        success: function (ctx) { return 'Delivered: **' + f3(ctx.result.state.part('tanker').cargo) + ' kg** of mud on a 3000 kg axle.'; }
       },
       {
         id: 'P2.air', design: BAY, yard: { camera: BAY_CAM },
@@ -366,9 +380,9 @@
       },
       {
         id: 'P2.blocks', design: DOCK, yard: { camera: DOCK_CAM },
-        objective: 'Load as many blocks as the caravan wagon can carry',
-        label: 'Each block: **450 mm** across, **1.15 m** long, concrete at **2.40 Mg/m³**. Wagon axle plate: **3 500 lb**. Set how many go on.',
-        goal: wagonGoal, timeout: 5,
+        objective: 'Get as many blocks to the caravan camp as the wagon can carry',
+        label: 'Each block: **450 mm** across, **1.15 m** long, concrete at **2.40 Mg/m³**. Wagon axle plate: **3 500 lb**. Set how many go on. The wagon has no engine: get it to the camp any way you like.',
+        goal: wagonGoal, timeout: 40,
         hints: [
           'Volume, then mass, then weight, then pounds. Stay in SI until the last step.',
           'V = (π/4) d² L in m³. m = ρV with 2.40 Mg/m³ = 2400 kg/m³. W = mg in newtons, then multiply by (1 lb / 4.448 N).',
@@ -379,7 +393,7 @@
           var p = ctx.result.state.part('wagon');
           return p && p.blocks.length >= 4 ? 'If you got **439 lb** a block, that is the mass in kilograms with a pound label on it. A pound is a force: find W = mg first.' : 'Work out one block\'s weight in pounds, then how many fit under the plate.';
         },
-        success: 'Three blocks, 2 904 lb on a 3 500 lb axle. The caravan grumbles, then pays for three.'
+        success: function (ctx) { var n = aboard(ctx.result.state.part('wagon')); return n === 3 ? 'Three blocks, 2 904 lb on a 3 500 lb axle. The caravan grumbles, then pays for three.' : 'Delivered ' + n + '. A third block would have fitted under the plate.'; }
       }
     ],
     deeper: [
@@ -501,26 +515,61 @@
     }
   });
 
-  // The settlement tanker: a tank on a rated axle stand. Fill depth in any length unit.
+  // An engine-less vehicle: a chassis on greased wheels with a load body on a
+  // rated axle. Something has to move it (a push, a winch, a tow...). Rolling
+  // drag is 2 % of its weight, and inside the depot the yard hands chock the
+  // wheels. The axle is rated for the vertical load on it and fails after 3
+  // steps over its rating; sideways pulls go through the kingpin.
+  var DEPOT = { x0: 14, x1: 19.5 };
+  function vehicle(b, o) {
+    var g = b.site.g;
+    var chassis = b.body({ position: b.at({ x: 0, y: 0.3 }), label: b.inst.label || o.name, mass: o.chassisMass,
+      shapes: [{ shape: b.P.box(o.half, 0.3, null, 0, 0.12), material: 'frictionless' }] });
+    var load = b.body({ position: b.at({ x: 0, y: 0.6 + o.loadHalfH }), label: '', mass: o.loadMass,
+      shapes: [{ shape: b.P.box(o.loadHalfW, o.loadHalfH, null, 0, 0.04), material: o.loadMaterial }] });
+    var seat = b.at({ x: 0, y: 0.6 });
+    var axle = b.joint(new b.P.WeldJoint({ bodyA: chassis, bodyB: load, worldAnchor: seat, label: 'axle' }));
+    var limit = o.rating + o.loadTare * g, over = 0;
+    var built = { body: chassis, chassis: chassis, load: load, axle: axle, extra: [] };
+    built.axleLoad = function () { return axle.broken ? 0 : Math.max(0, axle.reaction().force.y - o.loadTare * g); };
+    function totalMass() { return chassis.m + load.m + built.extra.reduce(function (m, k) { return m + k.m; }, 0); }
+    function roll() {
+      if (!axle.broken) {
+        over = axle.reaction().force.y > limit ? over + 1 : 0;
+        if (over >= 3) {
+          var fy = axle.reaction().force.y;
+          axle.broken = true; b.world.removeJoint(axle);
+          b.world.emit('break', { joint: axle, force: fy, reason: 'force' });
+        }
+      }
+      var m = totalMass(), W = m * g, v = chassis.v.x;
+      var inDepot = chassis.c.x >= DEPOT.x0 && chassis.c.x <= DEPOT.x1;
+      var cap = inDepot ? 0.3 * W : 0.02 * W, tau = inDepot ? 0.5 : 0.2;
+      chassis.applyForce({ x: -Math.max(-cap, Math.min(cap, m * v / tau)), y: 0 }, chassis.c);
+    }
+    b.on('step', roll);
+    return built;
+  }
+
+  // The settlement tanker: a 1.00 m² tank on an axle rated 3.00 t of cargo.
   Y.definePart({
     type: 'p02-tanker', name: 'Tanker', category: 'Loads', library: false,
-    blurb: 'A 1.00 m² tank on one axle. Set how deep the crew fills it.',
-    size: { w: 1.6, h: 3 },
+    blurb: 'A 1.00 m² tank on one axle, no engine. Set how deep the crew fills it, then get it to the depot.',
+    size: { w: 3.2, h: 3.1 },
     dials: [{ key: 'fill', label: 'Fill depth', q: 'length', def: '2.4 m', min: 0, max: TANK_DEPTH }],
     build: function (b) {
-      var h = b.si('fill'), cargo = MUD_KG_M3 * TANK_AREA * h, tare = 900, g = b.site.g;
-      var c = b.at({ x: 0, y: 1.9 });
-      var tank = b.body({ position: c, label: b.inst.label || 'tanker', mass: tare + cargo,
-        shapes: [{ shape: b.P.box(0.7, 1.25, null, 0, 0.05), material: 'steel' }] });
-      var axle = b.joint(new b.P.WeldJoint({ bodyA: b.ground, bodyB: tank, worldAnchor: { x: c.x, y: c.y - 1.25 }, breakForce: (tare + AXLE_KG) * g, label: 'axle' }));
-      b.body({ type: 'static', position: b.at({ x: 0, y: 0.3 }), label: 'axle', shapes: [{ shape: b.P.box(0.15, 0.3), material: 'steel', sensor: true }] });
-      return { body: tank, axle: axle, cargo: cargo, fill: h, tare: tare,
-        load: function () { return axle.broken ? 0 : Math.max(0, axle.force() - tare * g); } };
+      var h = b.si('fill'), cargo = MUD_KG_M3 * TANK_AREA * h, tare = 900;
+      var built = vehicle(b, { name: 'tanker', half: 1.6, chassisMass: 1500, loadHalfW: 0.7, loadHalfH: 1.25, loadMass: tare + cargo, loadTare: tare, loadMaterial: 'steel', rating: AXLE_KG * b.site.g });
+      built.cargo = cargo; built.fill = h;
+      return built;
     },
-    plate: function () { return ['Tank floor 1.00 m² · 2.40 m deep', 'Axle rated 3.00 t of cargo']; },
-    readouts: function (built) { return [{ key: 'load', label: 'axle load', q: 'force', read: function () { return built.load(); } }]; },
+    plate: function () { return ['Tank floor 1.00 m² · 2.40 m deep', 'Axle rated 3.00 t of cargo', 'No engine']; },
+    readouts: function (built) {
+      return [{ key: 'load', label: 'axle load', q: 'force', read: function () { return built.axleLoad(); } },
+        { key: 'speed', label: 'speed', q: 'speed', read: function () { return built.chassis.v.x; } }];
+    },
     draw: function (ctx, cam, built) {
-      var t = built.body, fill = built.fill / TANK_DEPTH;
+      var t = built.load, fill = built.fill / TANK_DEPTH;
       var a = cam.worldToScreen(t.worldPoint({ x: -0.62, y: -1.17 + 2.34 * fill })), z = cam.worldToScreen(t.worldPoint({ x: 0.62, y: -1.17 }));
       ctx.save(); ctx.fillStyle = 'rgba(120,86,52,.85)'; ctx.fillRect(a.x, a.y, z.x - a.x, z.y - a.y); ctx.restore();
     }
@@ -579,27 +628,30 @@
     }
   });
 
-  // The caravan wagon on its pound-rated axle stand, with 0-6 counterweight blocks.
+  // The caravan wagon: a timber bed on a pound-rated axle, 0-6 counterweight
+  // blocks on it, no engine.
   Y.definePart({
     type: 'p02-wagon', name: 'Wagon', category: 'Loads', library: false,
-    blurb: 'The caravan wagon on its axle. Set how many counterweight blocks go on.',
-    size: { w: 4.2, h: 1 },
+    blurb: 'The caravan wagon, no engine. Set how many counterweight blocks go on, then get it to the depot.',
+    size: { w: 4.4, h: 1.6 },
     dials: [{ key: 'blocks', label: 'Blocks loaded', q: 'number', def: '6', min: 0, max: 6 }],
     build: function (b) {
-      var n = countOf(b, 'blocks', 6), g = b.site.g, tare = 400, c = b.at({ x: 0, y: 0.75 });
-      var bed = b.body({ position: c, label: b.inst.label || 'wagon', mass: tare, shapes: [{ shape: b.P.box(2.1, 0.1), material: 'timber' }] });
-      var axle = b.joint(new b.P.WeldJoint({ bodyA: b.ground, bodyB: bed, worldAnchor: { x: c.x, y: c.y - 0.1 }, breakForce: tare * g + WAGON_N, label: 'axle' }));
-      b.body({ type: 'static', position: b.at({ x: 0, y: 0.32 }), label: 'axle', shapes: [{ shape: b.P.circle(0.3), material: 'steel', sensor: true }] });
-      var blocks = [], mB = BLOCK_N / g;
+      var n = countOf(b, 'blocks', 6), g = b.site.g, tare = 400;
+      var built = vehicle(b, { name: 'wagon', half: 2.2, chassisMass: 600, loadHalfW: 2.1, loadHalfH: 0.1, loadMass: tare, loadTare: tare, loadMaterial: 'timber', rating: WAGON_N });
+      var bedTop = b.inst.y + 0.8, mB = BLOCK_N / g, blocks = [];
       for (var i = 0; i < n; i++) {
         var row = Math.floor(i / 3), col = i % 3;
-        blocks.push(b.body({ position: { x: c.x - 1.25 + 1.25 * col, y: c.y + 0.1 + 0.226 + 0.452 * row }, label: '', mass: mB,
+        blocks.push(b.body({ position: b.at({ x: -1.25 + 1.25 * col, y: 0.8 + 0.226 + 0.452 * row }), label: '', mass: mB,
           shapes: [{ shape: b.P.box(0.575, 0.225), material: 'concrete' }] }));
       }
-      return { body: bed, bodies: [bed].concat(blocks), axle: axle, blocks: blocks, tare: tare,
-        load: function () { return axle.broken ? 0 : Math.max(0, axle.force() - tare * g); } };
+      built.blocks = blocks; built.extra = blocks; built.bedTop = bedTop;
+      built.bodies = [built.chassis, built.load].concat(blocks);
+      return built;
     },
-    plate: function () { return ['Axle rated 3 500 lb', 'Blocks: 450 mm dia × 1.15 m, concrete 2.40 Mg/m³']; },
-    readouts: function (built) { return [{ key: 'load', label: 'axle load', q: 'force', read: function () { return built.load(); } }]; }
+    plate: function () { return ['Axle rated 3 500 lb', 'Blocks: 450 mm dia × 1.15 m, concrete 2.40 Mg/m³', 'No engine']; },
+    readouts: function (built) {
+      return [{ key: 'load', label: 'axle load', q: 'force', read: function () { return built.axleLoad(); } },
+        { key: 'speed', label: 'speed', q: 'speed', read: function () { return built.chassis.v.x; } }];
+    }
   });
 })(globalThis.SE);
