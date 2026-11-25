@@ -34,10 +34,10 @@
   // The test pad: a 60 kg load on greased runners (μ = 0.10 on concrete).
   var PAD = {
     site: { g: 9.81, floor: 'concrete' },
-    camera: { fit: { lo: { x: -1, y: -0.5 }, hi: { x: 20, y: 3.5 } } },
+    camera: { fit: { lo: { x: -0.3, y: -0.5 }, hi: { x: 14.5, y: 2.5 } } },
     poke: false,
     design: { parts: [
-      { id: 'load', type: 'h03-crate', x: 3, y: 0.5, dials: { mass: '60 kg', shape: 'crate 1 m', runners: 'greased' }, locked: true, open: ['shape', 'runners'], label: 'test load' },
+      { id: 'load', type: 'h03-crate', x: 2.5, y: 0.5, dials: { mass: '60 kg', shape: 'crate 1 m', runners: 'greased' }, locked: true, open: ['shape', 'runners'], label: 'test load' },
       { id: 'shove', type: 'push', a: { part: 'load' }, dials: { force: '120 N', angle: '0 deg', time: '3 s', start: '0 s' }, locked: true, open: ['force'], label: 'shove' }
     ] },
     readouts: ['load.travel', 'load.speed', 'load.tilt']
@@ -90,6 +90,8 @@
     subtitle: 'Particles, rigid bodies and point loads',
     sections: ['1.2'],
     minutes: 25,
+    pitch: 'Run the real thing and the simple model side by side. Find out when a dot, a stiff bar and a single arrow give the right answer.',
+    objective: 'Find when a simple model gives the real answer',
     intro: [
       'Hask has chalked three sketches on the side of a boxcar: a dot, a stiff bar, and a single arrow.',
       '"Real things are messy. A beam sags, a wheel squashes a little where it meets the rail, and a sled has a length. If we tracked all of that for every job we would never finish a calculation. So we **model**: we throw away the details that don\'t change the answer. Today the yard tells you which details those are. You run the real thing and the model side by side and see whether they agree."'
@@ -102,6 +104,8 @@
     ],
     yard: PAD,
     solutions: {
+      // Two ways that work: a stiffer material in the same section, or the
+      // same timber made deep enough. Width barely helps (sag goes as 1/b).
       'H3.rail': [
         { set: { shelf: { material: 'steel', depth: '120 mm', width: '80 mm' } } },
         { set: { shelf: { material: 'aluminium', depth: '120 mm', width: '80 mm' } } },
@@ -116,6 +120,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { goal: G.after(7) },
+        objective: 'Shove the 1 m crate and read how far it goes',
+        brief: 'A 60 kg crate on greased runners gets a 120 N shove for 3 s. Press **▶ Run** and read the **travel** gauge.',
         text: 'A **60 kg** load on greased runners (μ = 0.10 on this concrete). The shove is **120 N** for **3 s**, then it slides to a stop.\n\nPress **▶ Run** and read the **travel** gauge: how far the load\'s **centre** moved.',
         goalText: 'Run the 1 m crate',
         until: function (ctx, type) {
@@ -129,6 +135,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(7) },
+        objective: 'Run the same load as a sled, then as a point',
+        brief: 'Select the load and change its **shape**: run the **ladder sled 4.5 m**, then the **point**. Same mass, same shove.',
         text: 'Now change the load\'s **shape** without touching its mass: try the **ladder sled 4.5 m**, then the **point** (all 60 kg squeezed into a dot). Run each one and watch the travel gauge.',
         goalText: 'Run the ladder sled and the point',
         until: function (ctx, type) {
@@ -144,6 +152,7 @@
       },
       {
         type: 'rule', title: 'Size never entered it',
+        brief: function (ctx) { return 'Every shape went **' + f3(seen(ctx, 'h3shapes').point) + ' m**. Size and shape never enter $a = (F - \\mu mg)/m$, so the load can be a dot.'; },
         law: 'a = \\frac{F - \\mu m g}{m}',
         eq: function () { return ['a_{push} = \\frac{120\\u{ N} - (0.10)(60\\u{ kg})(9.81\\u{ m/s^2})}{60\\u{ kg}} = 1.02\\u{ m/s^2}', 'a_{slide} = -\\mu g = -0.981\\u{ m/s^2}']; },
         text: function (ctx) {
@@ -154,6 +163,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(6) },
+        objective: 'Tip the tall crate over, then try it as a point',
+        brief: 'Set shape **tall crate 2 m**, runners **bare**, shove **400 N**. Run it, then run the same as a **point**.',
         text: 'Now make it turn. Set the shape to **tall crate 2 m**, the runners to **bare** (μ about 0.55), and the shove to **400 N**. Run it, then run the same thing as a **point**.',
         goalText: 'Run the tall crate and the point, both on bare runners at 400 N',
         until: function (ctx, type) {
@@ -172,10 +183,12 @@
       },
       {
         type: 'say', who: 'hask',
+        brief: 'A dot can\'t tip. The particle model is fair while a body\'s size doesn\'t change how it moves: a sliding load, or a 1.2 m drone on a 5 km trip.',
         text: 'Two places the dot pays off:\n\n- The **supply drone** has a frame 1.2 m across and flies a 5 km run over the valley. The frame is about 0.02 % of the trip. For where it goes and how long it takes, it is a dot with mass.\n- Three haul ropes tied to a small **steel ring** all pull along lines through the ring\'s centre, so its diameter never shows up when you balance the forces.\n\nThe catch is the one you just saw: the moment a body can **turn**, where the forces act on it matters, and so does its size. Then you need the next model.'
       },
       {
         type: 'reveal', kicker: 'Idealization', title: 'Particle',
+        brief: 'A **particle** has mass, but its size can be neglected.',
         text: 'A **particle** has mass, but its size can be neglected. Its geometry drops out of the analysis, which makes the analysis much simpler. It is fair when the body\'s size doesn\'t change how it moves, like a load sliding without turning or a drone on a long trip.'
       },
 
@@ -183,6 +196,8 @@
       {
         type: 'watch', who: 'hask',
         yard: Object.assign({}, BAY, { goal: G.after(5) }),
+        objective: 'Hang the crate on the steel shelf and read the wall moment',
+        brief: 'A 100 kg crate hangs from a 2.4 m shelf. Run it in **steel** and compare the **wall moment** with weight × distance.',
         text: 'The loading bay. A **2.4 m** shelf, 80 mm wide and 120 mm deep, is bolted to the depot wall, with a **100 kg** crate slung from its tip.\n\nThe **rigid-body** model says the wall has to hold up the crate and the shelf, and resist a moment of **weight × distance**, as if the shelf never bent. Run it in **steel** and read the **wall moment** and **tip sag** gauges.',
         goalText: 'Run the steel shelf',
         until: function (ctx, type) {
@@ -200,6 +215,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(6), camera: BAY.camera, readouts: BAY.readouts },
+        objective: 'Run the shelf in aluminium, timber and rubber',
+        brief: 'Change the shelf\'s **material** and run each one. Watch where the crate ends up.',
         text: 'Same shelf, same crate. Change the **material**: run **aluminium**, **timber** and **rubber**. Keep an eye on where the crate ends up.',
         goalText: 'Run aluminium, timber and rubber',
         until: function (ctx, type) {
@@ -222,6 +239,7 @@
       {
         type: 'rule', title: 'Stiff enough means rigid enough',
         law: 'M_{wall} = W\\,L \\quad \\t{(rigid model)}',
+        brief: function (ctx) { var r = seen(ctx, 'h3mat').rubber; return 'Stiff shelves give the rigid model\'s moment, whatever they\'re made of. Rubber folds and gives only **' + (r.M / r.rigid * 100).toFixed(0) + ' %** of it.'; },
         text: function (ctx) {
           var s = seen(ctx, 'h3mat');
           return 'Steel, aluminium and timber all sag a little, but a few millimetres on 2.4 m doesn\'t move the crate closer to the wall, so the wall feels what the rigid model says it should, **whatever the shelf is made of**. Rubber is different: it folds under little more than its own weight, the crate ends up sitting on the floor, and the wall moment drops to **' + (s.rubber.M / s.rubber.rigid * 100).toFixed(0) + ' %** of the rigid answer. The model only holds while the deformation is small compared with the body.';
@@ -229,6 +247,7 @@
       },
       {
         type: 'reveal', kicker: 'Idealization', title: 'Rigid body',
+        brief: 'A **rigid body** doesn\'t change shape under load, so its material doesn\'t enter the force analysis.',
         text: 'A **rigid body** is a huge number of particles that all stay at fixed distances from one another, before and after a load goes on. Its shape doesn\'t change, so the material it is made of doesn\'t enter the analysis of the forces.\n\nReal steel structures deform so little that the rigid-body model is the right one to start with. Check it when the body is soft, long and thin, or when the deformation itself is what you need to know (how far a rubber seal squashes, how much a rail sags).'
       },
 
@@ -236,6 +255,8 @@
       {
         type: 'build', who: 'hask',
         yard: { design: bay(), bin: [{ type: 'h03-bags', count: 1, dials: { mass: '300 kg', spread: '1.2 m', centre: '1.8 m' } }], readouts: ['shelf.sag', 'shelf.moment', 'shelf.shear'], camera: BAY.camera },
+        objective: 'Lay the sandbags on the shelf',
+        brief: 'Take the **Sandbags** from the bin and click the shelf. They cover the last 1.2 m.',
         text: 'Back to the steel shelf. Juno wants to stack **300 kg of sandbags** on it. Take the **Sandbags** and click the shelf to lay them on. They start spread over the last **1.2 m** of the shelf (centre **1.8 m** from the wall).',
         goalText: 'Sandbags on the shelf',
         until: function (ctx) { var b = ctx.find('h03-bags'); return !!(b && b.a && b.a.part === 'shelf'); }
@@ -243,6 +264,8 @@
       {
         type: 'watch', who: 'hask',
         yard: { keep: true, goal: G.after(5), camera: BAY.camera, readouts: BAY.readouts },
+        objective: 'Run the bags spread, as one point, then at the tip',
+        brief: 'Run them as laid. Then set **spread 0 m** (one point, same centre). Then **centre 2.4 m** (the tip).',
         text: 'Run it three ways and compare the gauges:\n\n1. as laid, **spread 1.2 m**\n2. the same weight as one **point** at the same centre: set **spread** to **0 m**\n3. that point moved to the **tip**: **centre 2.4 m**',
         goalText: 'Run all three',
         until: function (ctx, type) {
@@ -266,6 +289,7 @@
       {
         type: 'rule', title: 'One arrow, in the right place',
         law: 'M_{wall} = W\\,\\bar{x}',
+        brief: function (ctx) { var s = seen(ctx, 'h3bags'); return 'One point at the bags\' middle gives the same wall force and moment. At the tip it is **' + f2((s.tip.M / s.spread.M - 1) * 100) + ' %** off.'; },
         text: function (ctx) {
           var s = seen(ctx, 'h3bags');
           return 'The wall can\'t tell the spread bags from a single point load at their middle: same force, same moment, and a tip sag within **' + f2(Math.abs(s.point.sag / s.spread.sag - 1) * 100) + ' %**. Put the arrow at the tip instead and the moment is **' + f2((s.tip.M / s.spread.M - 1) * 100) + ' %** too big.\n\nA wheel on a rail touches a patch about 15 mm long. Anywhere you put the arrow inside a patch that small, the answer is the same, so you don\'t even have to think about where it goes. With a wide pallet you do.';
@@ -274,6 +298,7 @@
       {
         type: 'reveal', kicker: 'Idealization', title: 'Concentrated force',
         eq: '\\frac{c}{L} \\ll 1 \\quad \\Rightarrow \\quad \\t{treat the load as acting at a point}',
+        brief: 'A **concentrated force** puts a whole load on one point. It\'s fair when the loaded patch is small, like a wheel on a rail.',
         text: 'A **concentrated force** squeezes a whole load down to **one point** on a body. It is a fair model when the area the load acts over is very small compared with the body, like a wheel on a rail (c/L tiny).\n\nSo the three idealizations are:\n\n- **Particle**: mass, negligible size.\n- **Rigid body**: no deformation under load.\n- **Concentrated force**: a load acting at a point.',
         formula: 'ch01.idealizations'
       },
@@ -282,6 +307,8 @@
       {
         type: 'job', id: 'H3.rail', who: 'juno',
         yard: { design: RAIL, bin: [], readouts: ['shelf.sag', 'shelf.moment', 'crate.gap'], camera: BAY.camera },
+        objective: 'Hang the 326 kg trolley load clear of the truck bed',
+        brief: 'The truck bed is **24 mm** under the load and the timber plank sags too far. Change the rail so the load hangs clear and nothing breaks.',
         text: 'Juno wants a hoist trolley running out over the loading bay on a salvaged bar bolted to the wall: **2.4 m** long, carrying **3.2 kN** (the loaded trolley, 326 kg) at its tip.\n\nThe truck backs in underneath with its bed **24 mm** below the hanging load, so the rail may sag at most 1 % of its length. The crew has put up an 80 × 120 mm **timber** plank as a trial. Run it, then pick the rail\'s **material**, **depth** and **width** so the load hangs clear of the truck and nothing breaks. There is a steel bar of the same size in the scrap pile.',
         goalText: 'Load hanging still, clear of the truck bed, nothing broken',
         goal: G.all(
@@ -310,6 +337,8 @@
       {
         type: 'free', who: 'hask',
         yard: { design: bay(hung('100 kg'), ['material', 'length', 'depth', 'width']), bin: [{ type: 'h03-bags', count: 2 }, { type: 'h03-hang', count: 2 }], readouts: ['shelf.sag', 'shelf.moment', 'shelf.shear'], camera: { fit: { lo: { x: -1.5, y: -0.3 }, hi: { x: 8, y: 5 } } }, goal: null, poke: true },
+        objective: 'Free play: break the rigid model, then fix it',
+        brief: 'Everything on the shelf is open, plus sandbags and slung crates. Ideas are in the list below.',
         text: 'The bay is yours: the shelf\'s material, length and section are all open, and you have sandbags and slung crates. While it runs you can drag things with the mouse.',
         prompts: [
           'Find the shallowest steel shelf that still sags less than 1 % of its length with the 100 kg crate.',
