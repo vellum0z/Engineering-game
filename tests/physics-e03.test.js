@@ -261,3 +261,62 @@ suite('physics E03: robustness', () => {
     ok(bodies.every(b => b.c.y > 0 && b.c.y < 30 && Math.abs(b.c.x) < 5.5), 'a box escaped the bin');
   });
 });
+
+suite('physics E03: fast bodies (continuous collision)', () => {
+  // A body that travels further in one step than the speculative margin
+  // (2 cm) could jump a thin wall. contact.js sweeps such bodies and stops
+  // them at the time of impact; these are the fuzzer's "tunnel" cases.
+  function wallWorld(gravity) { return world({ gravity: gravity || { x: 0, y: -g } }); }
+  function mech(w) { return w.bodies.reduce((s, b) => b.type === 'dynamic' ? s + b.kineticEnergy() - b.m * w.gravity.y * b.c.y : s, 0); }
+
+  test('0.2 m ball at 75 m/s vs a static 7.2 cm wall (fuzz seed 6): stops at the wall, rebounds at e·v (within 2%)', () => {
+    const w = wallWorld({ x: 0, y: 0 }), e = 0.3;
+    w.add(new P.Body({ type: 'static', position: { x: 5, y: 0 }, shapes: [{ shape: P.box(0.036, 1.5), friction: 0, restitution: e }] }));
+    const b = w.add(new P.Body({ position: { x: 0, y: 0 }, velocity: { x: 75, y: 0 }, mass: 2, shapes: [{ shape: P.circle(0.2), friction: 0, restitution: e }] }));
+    let maxX = -Infinity;
+    w.run(0.5, DT, () => { maxX = Math.max(maxX, b.c.x); });
+    ok(maxX < 5 - 0.036 - 0.2 + 0.01, 'reached x = ' + maxX + ' (wall face at 4.964)');
+    near(b.v.x, -e * 75, 0.02);
+  });
+  test('1 kg box at 100 m/s vs a free 10 kg, 2 cm plate (no gravity): no pass-through, momentum to 1e-6, textbook velocities (within 2%)', () => {
+    const w = wallWorld({ x: 0, y: 0 }), e = 0.5, m1 = 1, m2 = 10, v1 = 100;
+    const plate = w.add(new P.Body({ position: { x: 5, y: 0 }, mass: m2, shapes: [{ shape: P.box(0.01, 1), friction: 0, restitution: e }] }));
+    const b = w.add(new P.Body({ position: { x: 0, y: 0 }, velocity: { x: v1, y: 0 }, mass: m1, shapes: [{ shape: P.box(0.1, 0.1), friction: 0, restitution: e }] }));
+    let crossed = false;
+    w.run(1, DT, () => { if (b.c.x > plate.c.x) crossed = true; });
+    ok(!crossed, 'box went through the plate');
+    near(m1 * b.v.x + m2 * plate.v.x, m1 * v1, 1e-6, 'momentum');
+    // Hibbeler 15.4: v1' = (m1 - e m2) v1 / (m1 + m2) = -36.4 m/s, v2' = (1 + e) m1 v1 / (m1 + m2) = 13.6 m/s
+    near(b.v.x, (m1 - e * m2) * v1 / (m1 + m2), 0.02, 'bullet');
+    near(plate.v.x, (1 + e) * m1 * v1 / (m1 + m2), 0.02, 'plate');
+  });
+  test('60 fast shots (20–150 m/s, 2–10 cm walls, static and dynamic): none pass through, energy never rises > 0.5%', () => {
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    for (let i = 0; i < 60; i++) {
+      const w = world(); ground(w);
+      const thick = 0.02 + 0.08 * rnd(), dyn = i % 2 === 1, size = 0.05 + 0.35 * rnd();
+      const wall = w.add(new P.Body({ type: dyn ? 'dynamic' : 'static', position: { x: 5, y: 1.5 }, mass: dyn ? 5 + 495 * rnd() : undefined, shapes: [P.box(thick / 2, 1.5)] }));
+      const b = w.add(new P.Body({ position: { x: 0, y: 1.5 }, velocity: { x: 20 + 130 * rnd(), y: 0 }, mass: 0.1 + 50 * rnd(),
+        shapes: [i % 4 < 2 ? P.box(size, size) : P.circle(size)] }));
+      const E0 = mech(w);
+      let Emax = E0, through = false;
+      w.run(1, DT, () => { Emax = Math.max(Emax, mech(w)); if (b.c.x > wall.c.x && wall.c.x < 5.3) through = true; });
+      ok(!through, 'shot ' + i + ' went through');
+      ok(Emax <= E0 * 1.005, 'shot ' + i + ': energy rose ' + ((Emax / E0 - 1) * 100).toFixed(3) + '%');
+    }
+  });
+  test('a crate sliding at 50 m/s on frictionless ground is not slowed by the sweep (within 0.1%)', () => {
+    const w = world(); ground(w, { friction: 0 });
+    const b = box(w, -40, 0.5, 10, { friction: 0 }, { velocity: { x: 50, y: 0 } });
+    w.run(1);
+    near(b.v.x, 50, 0.001); near(b.c.x, 10, 0.001);
+  });
+  test('a 0.1 m ball dropped onto a 2 cm static plank from 50 m lands on it, not under it', () => {
+    const w = world();
+    w.add(new P.Body({ type: 'static', position: { x: 0, y: 0 }, shapes: [P.box(2, 0.01)] }));
+    const b = w.add(new P.Body({ position: { x: 0, y: 50 }, velocity: { x: 0, y: -30 }, mass: 1, shapes: [{ shape: P.circle(0.1), restitution: 0 }] }));
+    w.run(4);
+    ok(b.c.y > 0.05, 'fell through to y = ' + b.c.y);
+  });
+});
