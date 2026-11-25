@@ -57,8 +57,8 @@
     overlapError: 0.5,           // overlap deeper than this share of the thinner part
     jointRatioWarn: 100,         // effective-mass ratio across a rigid joint
     jointRatioError: 1000,       //   rods: 1:100 drifts ~2 cm, 1:1000 ~20 cm
-    stackRatioWarn: 100,         // heavy on light: 1:100 sinks ~1-2 cm
-    stackRatioError: 300,        //   1:300 sinks ~5 cm, 1:1000 is crushed through
+    stackRatioWarn: 50,          // heavy on light: holds to 1:150 with < 2 cm sink
+    stackRatioError: 150,        //   beyond 1:150 the light part is crushed or squeezed out
     carryRatioWarn: 100,         // heaviest load / lightest part on its path to ground
     carryRatioError: 1000,
     leverWarn: 10,               // anchor distance / part size

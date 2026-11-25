@@ -7,6 +7,8 @@
  *   solve(ct, invH, useBias, cfg)  each substep; useBias false = relax pass
  *   restitute(ct, cfg)             once, after the substeps
  *   pointForces(ct, h)             [{ point, normal, tangent }] in N, for gauges
+ *   continuous(world, bodies)      once, after restitution: sweeps fast bodies
+ *                                  so they can't jump thin walls (see below)
  * Each contact point keeps normalImpulse / tangentImpulse (N·s per substep),
  * which broadphase.js carries over between steps by feature id.
  *
@@ -241,6 +243,11 @@
     var mA = A.invM, mB = B.invM, iA = A.invI, iB = B.invI;
     var vAx = A.v.x, vAy = A.v.y, wA = A.w, vBx = B.v.x, vBy = B.v.y, wB = B.w;
     var pts = ct.points, any = false;
+    // A face contact has two points solved one after the other, so one pass
+    // leaves them with unequal bounce speeds and spins the bodies. A few
+    // passes converge both to -e·v (the clamp at zero keeps it from ever
+    // pulling, so this can only remove energy, never add it).
+    for (var pass = 0; pass < (pts.length > 1 ? 6 : 1); pass++)
     for (var i = 0; i < pts.length; i++) {
       var cp = pts[i], rA = cp.rA, rB = cp.rB;
       if (cp.relativeVelocity > -cfg.restitutionThreshold || cp.maxNormalImpulse === 0) continue;
@@ -282,8 +289,154 @@
 
   function prepareWithStep(ct, h, cfg) { ct.h = h; prepareContact(ct, h, cfg); }
 
+  /* ----------------------------------------------------------- continuous */
+  // Speculative points only exist for pairs that start the step within
+  // SPECULATIVE of each other, so a body that moves further than that in one
+  // step can jump a thin wall. After the substeps, every dynamic body that
+  // moved more than half its smallest extent (Box2D 3's "fast body" test)
+  // plus the speculative margin is swept from its start pose to its end pose against every shape it may
+  // collide with, static or dynamic (those at their end pose). If the sweep
+  // hits and the end pose is too deep for a contact to resolve (see the
+  // depth test below), the body is moved back to the time of impact,
+  // LINEAR_SLOP short of the surface, and keeps its velocity: next step that gap is a speculative
+  // contact, which stops it at the surface (and restitution bounces it).
+  // Time of impact is found by conservative advancement on the GJK distance:
+  // the closing speed along the separating normal is bounded by
+  // dot(Δc, n) + |Δθ|·rMax, so stepping t by (d - target) / bound never
+  // overshoots.
+  // A pair that already starts within SPECULATIVE is skipped: it has a
+  // speculative contact, and sweeping it would stall a fast body that slides
+  // along the floor.
+
+  function shapeExtents(shape, lc) {
+    // min: smallest distance from the shape's centroid to its surface;
+    // max: largest distance from the body centre to the surface
+    var r = shape.radius || 0, pts, i, mn = Infinity, mx = 0, ce;
+    if (shape.type === 'circle') { pts = [shape.center]; mn = r; ce = shape.center; }
+    else if (shape.type === 'capsule') { pts = [shape.center1, shape.center2]; mn = r; }
+    else if (shape.type === 'polygon') {
+      pts = shape.vertices; ce = shape.centroid || pts[0];
+      for (i = 0; i < shape.count; i++) mn = Math.min(mn, M.dot(shape.normals[i], M.sub(pts[i], ce)) + r);
+    } else { pts = [shape.point1, shape.point2]; mn = r; }
+    for (i = 0; i < pts.length; i++) mx = Math.max(mx, M.dist(pts[i], lc) + r);
+    return { min: mn, max: mx };
+  }
+
+  function bodyExtents(b) {
+    if (b._ccd && b._ccd.n === b.fixtures.length && b._ccd.lc === b.localCenter) return b._ccd;
+    var mn = Infinity, mx = 0;
+    b.fixtures.forEach(function (f) {
+      if (f.sensor) return;
+      var e = shapeExtents(f.shape, b.localCenter);
+      mn = Math.min(mn, e.min); mx = Math.max(mx, e.max);
+    });
+    if (!isFinite(mn)) mn = 0;
+    b._ccd = { n: b.fixtures.length, lc: b.localCenter, min: Math.max(mn, P.LINEAR_SLOP), max: mx };
+    return b._ccd;
+  }
+
+  function poseAt(b, t) {
+    var a = b.angle0 + t * (b.angle - b.angle0), q = M.rot(a);
+    var c = M.lerp(b.c0, b.c, t);
+    return { p: M.sub(c, M.rotate(q, b.localCenter)), q: q };
+  }
+
+  // Fraction of the sweep at which shape (on body b) first comes within
+  // `target` of shapeB at xfB; 1 if never, 0 if it starts that close.
+  var toiNormal = null;                                  // separating normal at the last hit
+  function timeOfImpact(b, shape, shapeB, xfB, target, rMax) {
+    toiNormal = null;
+    var dc = M.sub(b.c, b.c0), dA = Math.abs(b.angle - b.angle0), t = 0;
+    for (var iter = 0; iter < 64; iter++) {
+      var d = P.query.shapeDistance(shape, poseAt(b, t), shapeB, xfB);
+      if (d.distance <= target + 0.25 * P.LINEAR_SLOP) return t;
+      toiNormal = d.normal;
+      var bound = M.dot(dc, d.normal) + dA * rMax;
+      if (bound <= 1e-9) return 1;                       // separating for the rest of the sweep
+      t += (d.distance - target) / bound;
+      if (t >= 1) return 1;
+    }
+    return t;
+  }
+
+  // Extent of a shape along direction n.
+  function thickness(shape, xf, n) {
+    var core = P.shapeCore(shape, xf), lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < core.count; i++) { var d = M.dot(core.v[i], n); if (d < lo) lo = d; if (d > hi) hi = d; }
+    return hi - lo + 2 * (core.radius || 0);
+  }
+
+  // Fixtures whose boxes may overlap lo..hi. Uses the broadphase trees when
+  // they exist: static boxes are exact; dynamic boxes were fattened at the
+  // start of the step, so the query is grown by the furthest any body moved.
+  function candidates(world, lo, hi, reach) {
+    var st = world._bp;
+    if (!st || !st.dyn || !st.stat) return P.query.boxQuery(world, lo, hi);
+    var out = [];
+    var add = function (px) { out.push(px.fixture); };
+    st.stat.query(lo.x, lo.y, hi.x, hi.y, add);
+    st.dyn.query(lo.x - reach, lo.y - reach, hi.x + reach, hi.y + reach, add);
+    return out;
+  }
+
+  function continuous(world, bodies) {
+    var slop = P.LINEAR_SLOP, spec = P.SPECULATIVE, bp = P.broadphase, reach = 0, i;
+    for (i = 0; i < bodies.length; i++) {
+      if (bodies[i].c0) reach = Math.max(reach, M.dist(bodies[i].c, bodies[i].c0) + Math.abs(bodies[i].angle - bodies[i].angle0) * bodyExtents(bodies[i]).max);
+    }
+    for (i = 0; i < bodies.length; i++) {
+      var b = bodies[i];
+      if (b.type !== 'dynamic' || b.awake === false || !b.c0) continue;
+      var ext = bodyExtents(b);
+      var travel = M.dist(b.c, b.c0) + Math.abs(b.angle - b.angle0) * ext.max;
+      // the speculative margin already covers the first SPECULATIVE metres
+      if (travel < 0.5 * ext.min + spec) continue;
+
+      // swept box: start and end boxes of the body
+      var t0 = poseAt(b, 0), t1 = b.transform();
+      var lo = M.v(Infinity, Infinity), hi = M.v(-Infinity, -Infinity);
+      b.fixtures.forEach(function (f) {
+        if (f.sensor) return;
+        [P.aabb(f.shape, t0), P.aabb(f.shape, t1)].forEach(function (bb) {
+          lo.x = Math.min(lo.x, bb.lo.x); lo.y = Math.min(lo.y, bb.lo.y);
+          hi.x = Math.max(hi.x, bb.hi.x); hi.y = Math.max(hi.y, bb.hi.y);
+        });
+      });
+      var others = candidates(world, lo, hi, reach);
+      var best = 1;
+      for (var k = 0; k < others.length; k++) {
+        var fo = others[k], o = fo.body;
+        if (o === b || fo.sensor) continue;
+        var xfO = o.transform(), ob = P.aabb(fo.shape, xfO);
+        if (ob.lo.x > hi.x || ob.hi.x < lo.x || ob.lo.y > hi.y || ob.hi.y < lo.y) continue;
+        for (var j = 0; j < b.fixtures.length; j++) {
+          var f = b.fixtures[j];
+          if (f.sensor || (bp && bp.shouldCollide && !bp.shouldCollide(world, f, fo))) continue;
+          // already close at the start: the speculative contact has it
+          if (P.query.shapeDistance(f.shape, t0, fo.shape, xfO).distance < spec) continue;
+          var t = timeOfImpact(b, f.shape, fo.shape, xfO, slop, ext.max);
+          if (t >= best || !toiNormal) continue;
+          // Only rewind when the end pose is past the point the next step's
+          // contact could resolve: penetration along n beyond a quarter of
+          // the two shapes' combined depth (half is where the narrowphase
+          // would push out the far side). A body landing on thick ground is
+          // left to the contact; moving a jointed body back would tear its
+          // joints apart for a frame.
+          var depth = M.dot(M.sub(b.c, M.lerp(b.c0, b.c, t)), toiNormal);
+          if (depth > 0.25 * (thickness(f.shape, t1, toiNormal) + thickness(fo.shape, xfO, toiNormal))) best = t;
+        }
+      }
+      if (best < 1) {
+        var c = M.lerp(b.c0, b.c, best), a = b.angle0 + best * (b.angle - b.angle0);
+        b.c = c; b.angle = a; b.q = M.rot(a);
+        b.toiCount = (b.toiCount || 0) + 1;
+      }
+    }
+  }
+
   P.contactSolver = {
     prepare: prepareWithStep, warmStart: warmStartContact, solve: solveContact,
-    restitute: restituteContact, pointForces: pointForces, STICK_SPEED: STICK_SPEED
+    restitute: restituteContact, pointForces: pointForces, continuous: continuous,
+    timeOfImpact: timeOfImpact, STICK_SPEED: STICK_SPEED
   };
 })(globalThis.SE);

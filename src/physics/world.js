@@ -139,6 +139,7 @@
       contacts.forEach(function (ct) { CS.solve(ct, invH, false, cfg); });
     }
     contacts.forEach(function (ct) { CS.restitute(ct, cfg); });
+    if (CS.continuous) CS.continuous(this, dyn);       // fast bodies: time of impact
     dyn.forEach(function (b) { b.force = M.v(0, 0); b.torque = 0; b.lastApplied = b.appliedLog; b.appliedLog = []; });
     this.joints.forEach(function (j) { if (j.postStep) j.postStep(dt); });
     S.brk.check(this, dt);
