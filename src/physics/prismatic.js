@@ -7,7 +7,7 @@
  *     localAxisA | worldAxis,                       // direction of travel (unit), default +x
  *     enableLimit, lowerTranslation, upperTranslation,  // m from the anchor
  *     enableMotor, motorSpeed (m/s), maxMotorForce (N), // speed-controlled ram
- *     motorForce (N),                                // force-controlled ram: constant push
+ *     motorForce (N), maxRamSpeed (m/s, default 2),  // force-controlled ram
  *     stiffness (N/m), damping (N·s/m), restTranslation (m),  // spring along the axis
  *     breakForce (N), breakTorque (N·m)
  *   })
@@ -16,8 +16,10 @@
  * axis, so a new joint reads 0 and positive is extension along the axis.
  *
  * The game sets rams by force (kN): a force-controlled ram pushes B along
- * +axis (and A the opposite way, through the same point) with motorForce
- * every substep, so a crate on ice accelerates at exactly F/m. A
+ * +axis (and A the opposite way, through the same point) with exactly
+ * motorForce, so a crate on ice accelerates at F/m, until the ram reaches
+ * its stroke speed maxRamSpeed (like a real ram, whose pump limits the
+ * flow). It never pulls. A
  * speed-controlled ram drives toward motorSpeed but never pushes harder than
  * maxMotorForce, so it stalls against a load that needs more.
  *
@@ -59,6 +61,8 @@
     this.motorSpeed = def.motorSpeed || 0;
     this.maxMotorForce = def.maxMotorForce || 0;
     this.motorForce = def.motorForce || 0;
+    this.maxRamSpeed = def.maxRamSpeed != null ? def.maxRamSpeed : 2;
+    this.ramImpulse = 0;
     this.stiffness = def.stiffness || 0;
     this.damping = def.damping || 0;
     this.restTranslation = def.restTranslation || 0;
@@ -120,14 +124,14 @@
   };
 
   PrismaticJoint.prototype.axialImpulse = function () {
-    return this.springImpulse + this.motorImpulse + this.lowerImpulse - this.upperImpulse;
+    return this.springImpulse + this.motorImpulse + this.ramImpulse + this.lowerImpulse - this.upperImpulse;
   };
 
   // Runs once at the start of every substep, so it is also where the
   // force-controlled ram adds its push: F·h along the axis per substep.
   PrismaticJoint.prototype.warmStart = function () {
     var A = this.bodyA, B = this.bodyB, g = this.geometry();
-    var ax = this.axialImpulse() + this.motorForce / this.invH;
+    var ax = this.axialImpulse();
     var px = g.perp.x * this.perpImpulse + g.axis.x * ax, py = g.perp.y * this.perpImpulse + g.axis.y * ax;
     var LA = this.perpImpulse * g.s1 + this.angularImpulse + ax * g.a1;
     var LB = this.perpImpulse * g.s2 + this.angularImpulse + ax * g.a2;
@@ -158,13 +162,27 @@
       applyAxial(A, B, g.axis, g.a1, g.a2, imp);
     }
 
+    // force-controlled ram: pushes with exactly motorForce while it is
+    // slower than maxRamSpeed in the push direction, and never pulls back.
+    // That is a hydraulic ram's pressure-limited, flow-limited behaviour,
+    // and it keeps a big ram on a light part from flinging it off at
+    // thousands of m/s.
+    if (this.motorForce !== 0 && k > 0) {
+      var dir = this.motorForce > 0 ? 1 : -1;
+      imp = -mass * (vel() - dir * this.maxRamSpeed);
+      var oldR = this.ramImpulse, maxR = Math.abs(this.motorForce) * h;
+      this.ramImpulse = dir > 0 ? M.clamp(oldR + imp, 0, maxR) : M.clamp(oldR + imp, -maxR, 0);
+      imp = this.ramImpulse - oldR;
+      applyAxial(A, B, g.axis, g.a1, g.a2, imp);
+    } else this.ramImpulse = 0;
+
     // translation limits (speculative while open, soft once violated)
     if (this.enableLimit && k > 0) {
       var C, bias, ms, is, next;
       if (this.lowerTranslation > -Infinity) {
         C = tr - this.lowerTranslation; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;
-        else if (useBias) { bias = this.jointSoft.biasRate * C; ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = P.capBias(this.jointSoft.biasRate * C, P.MAX_JOINT_PUSH); ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
         imp = -mass * ms * (vel() + bias) - is * this.lowerImpulse;
         next = Math.max(this.lowerImpulse + imp, 0);
         imp = next - this.lowerImpulse; this.lowerImpulse = next;
@@ -173,7 +191,7 @@
       if (this.upperTranslation < Infinity) {
         C = this.upperTranslation - tr; bias = 0; ms = 1; is = 0;
         if (C > 0) bias = C * this.invH;
-        else if (useBias) { bias = this.jointSoft.biasRate * C; ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
+        else if (useBias) { bias = P.capBias(this.jointSoft.biasRate * C, P.MAX_JOINT_PUSH); ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale; }
         imp = -mass * ms * (-vel() + bias) - is * this.upperImpulse;
         next = Math.max(this.upperImpulse + imp, 0);
         imp = next - this.upperImpulse; this.upperImpulse = next;
@@ -197,7 +215,7 @@
     var c1 = M.dot(g.perp, M.sub(B.v, A.v)) + g.s2 * B.w - g.s1 * A.w, c2 = B.w - A.w;
     var b1 = 0, b2 = 0, ms = 1, is = 0;
     if (useBias) {
-      b1 = this.jointSoft.biasRate * M.dot(g.perp, g.d); b2 = this.jointSoft.biasRate * this.angle();
+      b1 = P.capBias(this.jointSoft.biasRate * M.dot(g.perp, g.d), P.MAX_JOINT_PUSH); b2 = P.capBias(this.jointSoft.biasRate * this.angle(), P.MAX_JOINT_TURN);
       ms = this.jointSoft.massScale; is = this.jointSoft.impulseScale;
     }
     var s = P.solve2({ k11: k11, k12: k12, k22: k22 }, c1 + b1, c2 + b2);
@@ -219,14 +237,14 @@
     } else {
       r.ja[0] = 0; r.ja[1] = 0; r.ja[2] = -1;
       r.jb[0] = 0; r.jb[1] = 0; r.jb[2] = 1;
-      r.C = this.angle();
+      r.C = this.angle(); r.angular = true;
     }
   };
   PrismaticJoint.prototype.blockImpulse = function (slot) { return slot ? this.angularImpulse : this.perpImpulse; };
   PrismaticJoint.prototype.blockAdd = function (slot, d) { if (slot) this.angularImpulse += d; else this.perpImpulse += d; };
 
-  PrismaticJoint.prototype.axialForce = function () { return this.axialImpulse() * this.invH + this.motorForce; };
-  PrismaticJoint.prototype.motorForceNow = function () { return this.motorImpulse * this.invH + this.motorForce; };
+  PrismaticJoint.prototype.axialForce = function () { return this.axialImpulse() * this.invH; };
+  PrismaticJoint.prototype.motorForceNow = function () { return (this.motorImpulse + this.ramImpulse) * this.invH; };
   PrismaticJoint.prototype.reaction = function () {
     var axis = this.axis(), perp = M.perp(axis), fa = this.axialForce(), fp = this.perpImpulse * this.invH;
     return { force: M.v(axis.x * fa + perp.x * fp, axis.y * fa + perp.y * fp), torque: this.torque() };
@@ -236,6 +254,19 @@
 
   // A running ram keeps both bodies awake (sleeping skips joints whose
   // bodies are all asleep).
+  PrismaticJoint.prototype.postStep = function (dt) { if (this.blockLeader && this.block) P.jointBlock.guard(this.block, dt); };
+  // Most work the ram or motor can do in a step, for the energy guard:
+  // force times the speed it is allowed to drive at.
+  PrismaticJoint.prototype.driveWork = function (dt) {
+    var v = Math.abs(this.speed()), W = 0;
+    if (this.motorForce !== 0) W += Math.abs(this.ramImpulse * this.invH) * Math.min(v, this.maxRamSpeed) * dt;
+    if (this.enableMotor) W += Math.abs(this.motorImpulse * this.invH) * Math.min(v, Math.abs(this.motorSpeed)) * dt;
+    return W;
+  };
+  PrismaticJoint.prototype.storedEnergy = function () {
+    if (!(this.stiffness > 0)) return 0;
+    var c = this.translation() - this.restTranslation; return 0.5 * this.stiffness * c * c;
+  };
   PrismaticJoint.prototype.preStep = function () {
     if (this.motorForce !== 0 || (this.enableMotor && this.motorSpeed !== 0 && this.maxMotorForce > 0)) {
       this.bodyA.wake(); this.bodyB.wake();
@@ -246,6 +277,6 @@
   (P.jointTypes = P.jointTypes || {}).prismatic = {
     ctor: PrismaticJoint,
     fields: ['localAxisA', 'referenceAngle', 'enableLimit', 'lowerTranslation', 'upperTranslation',
-      'enableMotor', 'motorSpeed', 'maxMotorForce', 'motorForce', 'stiffness', 'damping', 'restTranslation']
+      'enableMotor', 'motorSpeed', 'maxMotorForce', 'motorForce', 'maxRamSpeed', 'stiffness', 'damping', 'restTranslation']
   };
 })(globalThis.SE);
