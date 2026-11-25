@@ -128,3 +128,15 @@ suite('yard: area dials', () => {
     ok(!D.parse('3 kg', 'area').ok);
   });
 });
+
+// A sandbox job must be winnable more than one way: at least two passing reference builds.
+suite('yard: every Act I job has two or more passing reference builds', () => {
+  const ch = SE.content.chapter('ch01');
+  const jobs = [];
+  ch.levels.filter(lv => lv.yard).forEach(lv => SE.content.walkSteps(lv.steps, s => { if (s.type === 'job') jobs.push([lv, s.id]); }));
+  ch.projects.filter(p => p.yard).forEach(p => p.jobs.forEach(j => jobs.push([p, j.id])));
+  jobs.forEach(([owner, id]) => test(owner.id + ' ' + id, () => {
+    const n = [].concat((owner.solutions || {})[id] || []).filter(b => b.pass !== false).length;
+    ok(n >= 2, id + ' has ' + n + ' passing reference build(s)');
+  }));
+});

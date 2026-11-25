@@ -176,7 +176,7 @@
       ctx.save(); ctx.fillStyle = 'rgba(79,138,46,.18)'; ctx.fillRect(a.x, a.y, w, h);
       ctx.setLineDash([8, 6]); ctx.strokeStyle = 'rgba(120,190,80,.9)'; ctx.lineWidth = 2; ctx.strokeRect(a.x, a.y, w, h);
       ctx.setLineDash([]); ctx.fillStyle = 'rgba(160,220,120,.95)'; ctx.font = '12px "IBM Plex Mono", monospace';
-      ctx.fillText(built.inst.label || 'target', a.x + 4, a.y + 14); ctx.restore();
+      ctx.fillText(built.inst.label || 'target', a.x + 4, a.y + h - 5); ctx.restore();
     }
   });
 

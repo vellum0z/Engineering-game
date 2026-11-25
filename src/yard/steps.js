@@ -179,7 +179,10 @@
     this.clearYardWatchers();
     if (s.yard) this.setYard(s.yard);
     else if (this.yard && this.yard.goal && s.type !== 'job') { this.yard.goal = null; }
-    if (this.yard) this.yard.setObjective(this.objectiveFor(s));
+    if (this.yard) {
+      this.yard.setObjective(this.objectiveFor(s));
+      if (['say', 'rule', 'reveal', 'deeper', 'summary'].indexOf(s.type) >= 0 && this.yard.selected) this.yard.select(null);
+    }
     var fn = { build: this.yardBuildStep, watch: this.yardBuildStep, rule: this.yardRuleStep, job: this.yardJobStep, free: this.yardFreeStep, say: this.yardSayStep, reveal: this.yardRevealStep }[s.type];
     if (!fn) { this.guideNow = { text: val(s.text, this.yardCtx()) || '' }; return baseRender.call(this, s, done); }
     if (s.onEnter) { try { s.onEnter(this.yardCtx()); } catch (e) { console.error(e); } }
