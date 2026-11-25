@@ -22,7 +22,8 @@
  * snapshot are removed on restore, so lazily created fields (peakForce,
  * sleepTime) don't leak from the later run into the replay.
  * Modules whose state isn't plain data (the broadphase's trees and pair
- * set) keep it in fields starting with `_bp` on the world and the bodies;
+ * set, the island solver's rows) keep it in fields starting with `_bp` or
+ * `_isl` on the world, the bodies and the joints;
  * those are skipped here and saved through the module's own
  * saveState(world) / loadState(world, state) hooks instead.
  *
@@ -97,7 +98,7 @@
   }
 
   // Fields owned by a module's saveState/loadState hooks, not copied here.
-  function hooked(k) { return k.charCodeAt(0) === 95 && k.lastIndexOf('_bp', 0) === 0; }
+  function hooked(k) { return k.charCodeAt(0) === 95 && (k.lastIndexOf('_bp', 0) === 0 || k.lastIndexOf('_isl', 0) === 0); }
 
   function captureFields(obj, skip, refs, memo) {
     var out = {};
@@ -145,7 +146,7 @@
 
   /* ---------------------------------------------------------- snapshots */
   // Stage modules with their own saveState/loadState, called in this order.
-  var HOOKED = ['broadphase', 'islands'];
+  var HOOKED = ['broadphase', 'islands', 'island'];
   function hookStates(world) {
     var out = {};
     HOOKED.forEach(function (name) {
