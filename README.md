@@ -10,7 +10,15 @@ The game follows the topic order of R.C. Hibbeler's *Engineering Mechanics: Stat
 
 ### ▶ [Play online](https://vellum0z.github.io/Engineering-game/)
 
-Opens in any desktop browser (Chrome, Firefox, Edge or Safari). Nothing to install.
+Opens in any desktop browser (Chrome, Firefox, Edge or Safari), and on phones and tablets. Nothing to install.
+
+### 📱 Play on an Android phone
+
+1. Open the [play link](https://vellum0z.github.io/Engineering-game/) in Chrome.
+2. Tap **📲 Install as an app** on the title screen (or Chrome's menu ⋮ → **Install app** / **Add to Home screen**).
+3. Salvage Engineer now has its own icon, opens full screen, and works with no connection.
+
+Touch controls: tap a part in the bin, then tap the yard to place it. Tap a part to edit it (Properties sits under the yard; turn the phone sideways to see both at once). Drag a part to move it, drag empty yard to pan, pinch to zoom, **⤢ Fit** to see the whole yard again.
 
 ### ⬇ [Download to play offline](https://github.com/vellum0z/Engineering-game/releases/latest/download/salvage-engineer.zip)
 

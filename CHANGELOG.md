@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Play on phones and tablets. Touch controls in the build yard: tap to place and select, drag to move parts or pan, pinch to zoom, and a Fit button. Phone layouts for upright (yard pinned on top, cards below) and sideways (yard and cards side by side).
+- Installable app: a web app manifest, home-screen icons and a service worker, so Chrome on Android (and desktop Chrome or Edge) can install the game and it opens offline. The title screen shows an "Install as an app" button when the browser offers it.
+
+### Fixed
+- The page no longer grows wider than a narrow screen in the build yard.
+- Selecting a part in a manual project opens the Jobs tab, where Properties lives.
+
 ## [0.2.0] - 2026-11-24
 
 ### Changed

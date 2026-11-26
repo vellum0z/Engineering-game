@@ -130,7 +130,8 @@
         el('div', { class: 'btn-col' }, [
           btn(started ? 'Continue ▸' : 'Start ▸', function () { self.show('map'); }, 'primary big'),
           btn('Import a save file', function () { self.importSave(); }, 'ghost'),
-          btn('Settings', function () { self.settingsModal(); }, 'ghost')
+          btn('Settings', function () { self.settingsModal(); }, 'ghost'),
+          SE.app && SE.app.canInstall() ? btn('📲 Install as an app', function () { SE.app.install(); }, 'ghost install-btn') : null
         ]),
         el('p', { class: 'title-foot', html: inline('Follows the topic order of Hibbeler\'s *Engineering Mechanics* (14th ed.) as a companion. Not affiliated with the author or publisher.') }),
         !this.persisted ? el('p', { class: 'warn small', text: 'Your browser is blocking storage, so export your save before closing the page.' }) : null
