@@ -20,7 +20,7 @@
       version: CURRENT,
       createdAt: now,
       updatedAt: now,
-      settings: { sound: true, volume: 0.6, reducedMotion: false, textSize: 1 },
+      settings: { sound: true, music: true, volume: 0.6, reducedMotion: false, textSize: 1 },
       chapters: {},          // chapterId -> { levels: {id: {...}}, projects: {id: {...}}, sandbox: {...} }
       bests: {},             // taskId -> { score, grade, at }
       unlocks: { tools: [], materials: [] },

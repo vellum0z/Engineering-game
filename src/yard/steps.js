@@ -159,7 +159,7 @@
     if (lv.goals) body.appendChild(el('div', {}, [el('h3', { text: 'What this level teaches' }), el('ul', {}, lv.goals.map(function (g) { return el('li', { html: inline(g) }); }))]));
     if (lv.intro) body.appendChild(el('div', {}, [el('h3', { text: 'The story' }), el('div', { class: 'step-body', html: md(lv.intro) })]));
     var y = this.yard;
-    body.appendChild(el('div', {}, [el('h3', { text: 'Controls' }), el('div', { class: 'step-body', html: md('Pick a part in the bin, then click the yard to place it. Click a part to set its numbers, with units. Drag to move, **R** rotates, **Delete** removes. Scroll to zoom, right-drag to pan. **▶ Run**: the physics decides, and any build that does the job counts.') }),
+    body.appendChild(el('div', {}, [el('h3', { text: 'Controls' }), el('div', { class: 'step-body', html: md('- **Parts bin** (left of the yard): click a part, then click in the yard to place it. Cables and other connectors take a click on each end.\n- **Properties** (right): click any part in the yard to see and change its dials, like mass or force. Type the unit: 240 kg, 2.5 kN, 40 cm.\n- **▶ Run** (top): the physics decides. Any build that meets the 🎯 objective counts. **↺ Reset** to change the build again.\n- **Live readouts** (under the yard): meters the simulation measures. They are read-only; click one to select its part.\n- Drag to move, **R** rotates, **Delete** removes. Scroll to zoom, right-drag to pan.') }),
       y ? btn('Show the controls tour', function () { m.close(); y.showCoach(); }, 'ghost small') : null]));
     var m = SE.ui.modal({ title: 'Guide · ' + lv.id + ' ' + lv.title, body: body, class: 'guide-modal' });
   };

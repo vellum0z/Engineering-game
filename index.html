@@ -2,12 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Salvage Engineer</title>
 <meta name="description" content="A survival-engineering game that teaches engineering mechanics.">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#1d1916">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="styles/main.css">
 <link rel="stylesheet" href="styles/yard.css">
+<link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
 <div id="app"></div>
@@ -60,6 +65,8 @@
 <script src="src/yard/design.js"></script>
 <script src="src/yard/judge.js"></script>
 <script src="src/yard/yard.js"></script>
+<script src="src/yard/panels.js"></script>
+<script src="src/yard/sound.js"></script>
 <script src="src/yard/parts/core.js"></script>
 <script src="src/yard/parts/rigging.js"></script>
 <script src="src/yard/parts/measure.js"></script>

@@ -1,0 +1,107 @@
+/* Phones and tablets: touch-sized controls, a yard that stays on screen,
+   no sideways page scroll. Loaded after the other sheets. */
+
+/* Grid tracks may shrink below their content (a long status line or toolbar
+   must not widen the page past the screen). */
+.play-layout > * { min-width: 0; }
+.stage-canvas { touch-action: none; }
+html { -webkit-tap-highlight-color: transparent; }
+
+/* ---------------------------------------------------- touch screens */
+@media (pointer: coarse) {
+  .btn { min-height: 40px; }
+  .btn.small { min-height: 36px; }
+  .icon-btn, .tool-btn { min-height: 36px; min-width: 36px; }
+  .yard-speed, .gauge-unit { min-height: 32px; }
+  .yard-toggle input { width: 20px; height: 20px; }
+  .bin-part { min-height: 40px; }
+  .tree-row { min-height: 40px; }
+  .dial-input { font-size: 16px; padding: 8px; }
+  .yard-tip { display: none !important; }
+}
+
+/* ----------------------------------------------- phone, upright */
+@media (max-width: 760px) {
+  .topbar { position: static; gap: 6px; padding: 4px 8px; min-height: 0; }
+  .crumbs { font-size: 12px; flex-basis: 100%; order: 3; overflow-x: auto; white-space: nowrap; }
+  .toolbar { flex-wrap: nowrap; overflow-x: auto; }
+
+  .play-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  /* the yard stays pinned at the top while the cards below it scroll */
+  .stage-wrap { position: sticky !important; top: 0 !important; z-index: 15; height: 56vh; height: 56dvh; border-right: none; border-bottom: 3px solid var(--rust-dark); }
+  .yard-wrap { height: 60vh; height: 60dvh; }
+  .panel { padding: 12px 12px 40vh; }
+  .yard-inspector, .step-card { scroll-margin-top: calc(60dvh + 10px); }
+
+  .yard-bar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 5px 6px; scrollbar-width: none; }
+  .yard-bar::-webkit-scrollbar { display: none; }
+  .yard-bar > * { flex: none; }
+  .yard-bar .tb-label { display: none; }
+  .tb-labelled { padding-left: 8px; }
+  .yard-clock { margin-left: 0; }
+  .yard-err, .yard-diag { flex-basis: auto; white-space: nowrap; }
+
+  .yard-body { min-height: 0; }
+  .yard-body .yard-view { min-height: 150px; }
+  .yard-bin { max-height: none; }
+  .panel-title { font-size: 23px; }
+  .bin-head, .bin-locked, .bin-search { display: none; }
+  .bin-list { flex-wrap: nowrap; overflow-x: auto; padding: 5px 6px; gap: 6px; }
+  .bin-group { flex-wrap: nowrap; }
+  .bin-cat { display: none; }
+  .bin-part { flex: none; white-space: nowrap; }
+
+  .yard-objective { left: 6px; top: 6px; padding: 5px 9px 6px; max-width: calc(100% - 12px); }
+  .obj-text { font-size: 14px; }
+  .obj-note { font-size: 12px; }
+  .obj-kicker { font-size: 10px; }
+  .yard-status { font-size: 11.5px; padding: 3px 6px; min-height: 24px; }
+  .yard-strip { flex-wrap: nowrap; overflow-x: auto; padding: 5px 6px; }
+  .strip-head { display: none; }
+  .strip-meters { flex-wrap: nowrap; }
+  .gauge { flex: none; min-width: 108px; }
+  .yard-coach { position: fixed; z-index: 100; }
+  .coach-card { max-width: calc(100% - 24px); max-height: calc(100% - 24px); overflow-y: auto; padding: 12px 14px; }
+  .coach-list li { font-size: 13px; }
+  .guide-body { max-height: 60vh; }
+  .modal, .sheet { max-width: calc(100vw - 16px); }
+}
+
+/* ------------------------------------------- phone, turned sideways */
+@media (max-height: 520px) and (orientation: landscape) {
+  /* a slim top bar, then the yard and the cards side by side filling the rest */
+  .topbar { position: sticky; top: 0; height: 44px; min-height: 0; padding: 2px 8px; flex-wrap: nowrap; overflow: hidden; }
+  .brand-name { display: none; }
+  .crumbs { overflow: hidden; white-space: nowrap; }
+  .play-layout { grid-template-columns: minmax(0, 1.6fr) minmax(250px, 1fr); min-height: 0; }
+  .stage-wrap, .yard-wrap { position: sticky !important; top: 44px !important; height: calc(100vh - 44px); height: calc(100dvh - 44px); border-right: 3px solid var(--rust-dark); border-bottom: none; }
+  .panel { max-height: calc(100vh - 44px); max-height: calc(100dvh - 44px); padding: 10px 10px 30px; }
+  .yard-inspector, .step-card { scroll-margin-top: 10px; }
+  .yard-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .yard-bar > * { flex: none; }
+  .yard-bar .tb-label { display: none; }
+  .yard-body { flex-direction: row; min-height: 0; }
+  .yard-body .yard-view { min-height: 0; }
+  .topbar .icon-btn, .topbar .tool-btn { min-height: 32px; min-width: 32px; padding: 2px 6px; }
+  .panel-title { font-size: 21px; }
+  .gauge { padding: 1px 6px 2px; }
+  .gauge-val { font-size: 13px; }
+  .yard-bin { width: 112px; max-height: none; border-top: none; border-right: 2px solid var(--iron2); }
+  .bin-head, .bin-search { display: none; }
+  .bin-list { display: block; }
+  .bin-group { flex-direction: column; }
+  .bin-part { width: 100%; font-size: 11.5px; }
+  .yard-strip { flex-wrap: nowrap; overflow-x: auto; }
+  .strip-head { display: none; }
+  .strip-meters { flex-wrap: nowrap; }
+  .gauge { flex: none; }
+  .yard-objective { left: 6px; top: 6px; max-width: 58%; padding: 3px 8px 4px; }
+  .yard-objective .obj-note, .obj-kicker { display: none; }
+  .obj-text { font-size: 12px; margin: 0; }
+  .yard-bar { padding: 3px 6px; }
+  .yard-bar .btn.small, .yard-speed { min-height: 30px; padding-top: 2px; padding-bottom: 2px; }
+  .gauge-unit { min-height: 24px; }
+  .yard-status { min-height: 20px; padding: 1px 6px; font-size: 11px; }
+  .yard-coach { position: fixed; z-index: 100; }
+  .coach-card { max-height: calc(100% - 16px); overflow-y: auto; }
+}

@@ -14,6 +14,9 @@ Thanks for helping! The game is plain HTML, CSS and JavaScript with no build ste
 
 ```
 index.html                 script order = load order (tests read it too)
+sw.js                      offline cache for the installable app: list every new file in FILES
+manifest.webmanifest       app name and icons for installing on phones
+styles/mobile.css          touch and phone layouts
 physics-lab.html           physics engine test bench
 styles/                    main.css, yard.css
 src/physics/               the physics engine (SE.phys); each file's header is its API
@@ -52,3 +55,7 @@ A job that asks the player to write a setting down (a plate, a label, a certific
 ## Tests
 
 `node tests/run.js` loads every non-UI script listed in `index.html`, then runs every `tests/*.test.js`. Every job needs a reference build that passes and one that must fail, in the level's `solutions`; `tests/yard.test.js` runs them headless through the same judge the game uses. Add a test for each new part against the textbook result it stands for, and for any new engine behaviour.
+
+## Phones and the offline cache
+
+On a phone the yard is driven by touch (pointer events with `pointerType === 'touch'`): one finger taps, drags parts or pans, two fingers pinch-zoom. Check new UI at 412 px wide upright and sideways (Chrome DevTools device mode, Pixel 7). When served over http(s), `sw.js` caches the game and serves the cached copy first, refreshing it in the background, so after editing a file reload twice (or tick DevTools → Application → Service workers → *Update on reload*). Any new script, stylesheet or asset must go in `FILES` in `sw.js`; `tests/pwa.test.js` fails otherwise.

@@ -53,6 +53,7 @@
       var s = this.save.settings;
       SE.audio.setEnabled(!!s.sound);
       SE.audio.setVolume(s.volume == null ? 0.6 : s.volume);
+      SE.audio.setMusic && SE.audio.setMusic(s.music !== false);
       document.documentElement.style.setProperty('--text-scale', String(s.textSize || 1));
       document.documentElement.classList.toggle('reduced-motion', !!s.reducedMotion);
     },
@@ -129,7 +130,8 @@
         el('div', { class: 'btn-col' }, [
           btn(started ? 'Continue ▸' : 'Start ▸', function () { self.show('map'); }, 'primary big'),
           btn('Import a save file', function () { self.importSave(); }, 'ghost'),
-          btn('Settings', function () { self.settingsModal(); }, 'ghost')
+          btn('Settings', function () { self.settingsModal(); }, 'ghost'),
+          SE.app && SE.app.canInstall() ? btn('📲 Install as an app', function () { SE.app.install(); }, 'ghost install-btn') : null
         ]),
         el('p', { class: 'title-foot', html: inline('Follows the topic order of Hibbeler\'s *Engineering Mechanics* (14th ed.) as a companion. Not affiliated with the author or publisher.') }),
         !this.persisted ? el('p', { class: 'warn small', text: 'Your browser is blocking storage, so export your save before closing the page.' }) : null
@@ -286,11 +288,12 @@
       var self = this, s = this.save.settings;
       function row(label, input) { return el('label', { class: 'set-row' }, [el('span', { text: label }), input]); }
       var snd = el('input', { type: 'checkbox', checked: !!s.sound, onchange: function () { s.sound = snd.checked; self.applySettings(); if (s.sound) { SE.audio.unlock && SE.audio.unlock(); SE.audio.ambient && SE.audio.ambient(true); } self.persist(); self.refreshTopbar(); } });
+      var mus = el('input', { type: 'checkbox', checked: s.music !== false, onchange: function () { s.music = mus.checked; self.applySettings(); if (s.music) { SE.audio.unlock && SE.audio.unlock(); SE.audio.ambient && SE.audio.ambient(true); } self.persist(); } });
       var vol = el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: s.volume, oninput: function () { s.volume = Number(vol.value); self.applySettings(); self.persist(); } });
       var rm = el('input', { type: 'checkbox', checked: !!s.reducedMotion, onchange: function () { s.reducedMotion = rm.checked; self.applySettings(); self.persist(); } });
       var ts = el('input', { type: 'range', min: 0.9, max: 1.3, step: 0.05, value: s.textSize || 1, oninput: function () { s.textSize = Number(ts.value); self.applySettings(); self.persist(); } });
       var body = el('div', { class: 'settings' }, [
-        row('Sound', snd), row('Volume', vol), row('Reduce motion (no shake/flash)', rm), row('Text size', ts),
+        row('Sound', snd), row('Music', mus), row('Volume', vol), row('Reduce motion (no shake/flash)', rm), row('Text size', ts),
         el('h3', { text: 'Your save' }),
         el('p', { class: 'muted', text: this.persisted ? 'Progress saves automatically in this browser. Export a file to back it up or move it to another computer. Save files keep working across game updates.' : 'This browser blocks storage. Export your save to keep progress.' }),
         el('div', { class: 'btn-row wrap' }, [
