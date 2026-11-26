@@ -59,6 +59,8 @@
     this.yard = new Y.Yard(Object.assign({ unlocked: this.save.unlocks }, opts));
     this.yard.mount(this.yardEl, this.inspector);
     this.yard.on('result', function (r) { self.onResult(r); });
+    // Properties live on the Jobs tab: picking a part from another tab opens it.
+    this.yard.on('select', function (e) { if (e.part && self.inspector.style.display === 'none') self.show('jobs'); });
     return this.yard;
   };
 

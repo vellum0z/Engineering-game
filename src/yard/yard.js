@@ -251,7 +251,13 @@
     if (!this.cam) return;
     var c = this.opts.camera;
     this.cam.resize();
-    if (c && c.center) { this.cam.center = { x: c.center.x, y: c.center.y }; this.cam.zoom = c.zoom || 40; return; }
+    if (c && c.center) {
+      // A level's camera is framed for a desktop-sized yard (about 860 x 420 px).
+      // On a smaller canvas (a phone) zoom out so the same stretch of yard fits.
+      var z = c.zoom || 40, w = this.cam.width(), h = this.cam.height();
+      if (w > 0 && h > 0) z = Math.min(z, z * Math.min(w / 860, h / 420) * 1.05);
+      this.cam.center = { x: c.center.x, y: c.center.y }; this.cam.zoom = Math.max(z, this.cam.minZoom || 2); return;
+    }
     var box = (c && c.fit) || this.designBounds();
     this.cam.fit(box, 40);
   };
@@ -280,7 +286,8 @@
     var d = Y.partDef(entry.type);
     if (this.coachEl && this.coachEl.classList.contains('show')) { this.coachEl.classList.remove('show'); try { localStorage.setItem('se.yard.coach', '1'); } catch (e) {} }
     this.placing = { entry: entry, binIndex: binIndex, def: d, stage: 0 };
-    this.flash(d.connector ? (d.attach ? 'Click the part to clip the ' + d.name.toLowerCase() + ' onto.' : 'Click the first end of the ' + d.name.toLowerCase() + ' (an anchor point).') : 'Click in the yard to place the ' + d.name.toLowerCase() + '.', 'info');
+    var tap = this.touchUI ? 'Tap' : 'Click';
+    this.flash(d.connector ? (d.attach ? tap + ' the part to clip the ' + d.name.toLowerCase() + ' onto.' : tap + ' the first end of the ' + d.name.toLowerCase() + ' (an anchor point).') : tap + ' in the yard to place the ' + d.name.toLowerCase() + '.', 'info');
     this.refreshBin();
     if (this.canvas) this.canvas.focus();
   };
@@ -344,8 +351,24 @@
     var dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
     return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
   }
+  // Touch: fingers are wide, so taps look a little further for a part.
+  Yard.isTouch = function () {
+    try { return !!(globalThis.matchMedia && globalThis.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; }
+  };
+  Yard.prototype.partNear = function (p, touch) {
+    var id = this.partAt(p);
+    if (id || !touch) return id;
+    var z = this.cam.zoom;
+    for (var r = 10; r <= 24 && !id; r += 7) {
+      for (var k = 0; k < 8 && !id; k++) {
+        var a = k * Math.PI / 4;
+        id = this.partAt({ x: p.x + Math.cos(a) * r / z, y: p.y + Math.sin(a) * r / z });
+      }
+    }
+    return id;
+  };
   Yard.prototype.nearestAnchor = function (p, maxPx) {
-    var best = null, bd = (maxPx || 14) / this.cam.zoom;
+    var best = null, bd = (maxPx || (this.lastTouch ? 26 : 14)) / this.cam.zoom;
     Y.anchorsOf(this.design).forEach(function (a) {
       var dd = Math.hypot(a.x - p.x, a.y - p.y);
       if (dd < bd) { bd = dd; best = a; }
@@ -356,6 +379,14 @@
 
   Yard.prototype.bindPointer = function () {
     var self = this, c = this.canvas, drag = null, space = false;
+    // Touch: one finger taps, drags parts or pans empty yard; two fingers pinch-zoom and pan.
+    var touches = {}, pinch = null;
+    var nTouches = function () { return Object.keys(touches).length; };
+    var local = function (e) { var r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    var pinchState = function () {
+      var ids = Object.keys(touches), a = touches[ids[0]], b = touches[ids[1]];
+      return { d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    };
     c.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     c.addEventListener('wheel', function (e) {
       e.preventDefault();
@@ -363,30 +394,60 @@
       self.cam.zoomAt({ x: e.clientX - r.left, y: e.clientY - r.top }, Math.exp(-e.deltaY * 0.0015));
     }, { passive: false });
     c.addEventListener('pointerdown', function (e) {
-      c.focus();
+      var touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+      self.lastTouch = touch;
+      if (!touch) c.focus();
+      if (touch) {
+        touches[e.pointerId] = local(e);
+        try { c.setPointerCapture(e.pointerId); } catch (er) { /* synthetic events */ }
+        if (nTouches() >= 2) {
+          // second finger: drop whatever the first one was doing and pinch
+          if (drag && drag.kind === 'move' && drag.moved) { var mi = self.inst(drag.id); if (mi) self.changed('move', { part: mi }); }
+          if (drag && drag.kind === 'poke') self.endPoke();
+          drag = null; pinch = pinchState();
+          return;
+        }
+        if (pinch) return;
+      }
       var p = self.pointerWorld(e);
       if (e.button === 1 || e.button === 2 || space) { drag = { kind: 'pan', x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
       if (self.mode !== 'edit') {
         if (self.opts.poke !== false) self.startPoke(p);
+        if (touch && !self.pokeJoint) { drag = { kind: 'pan', x: e.clientX, y: e.clientY }; return; }
         drag = { kind: 'poke' }; c.setPointerCapture(e.pointerId);
         return;
       }
       if (self.placing) { self.placeClick(p); return; }
-      var id = self.partAt(p);
+      var id = self.partNear(p, touch);
       self.select(id);
       var inst = id && self.inst(id);
       if (inst && !inst.locked && !Y.partDef(inst.type).connector) {
-        drag = { kind: 'move', id: id, dx: inst.x - p.x, dy: inst.y - p.y, moved: false };
+        drag = { kind: 'move', id: id, dx: inst.x - p.x, dy: inst.y - p.y, moved: false, sx: e.clientX, sy: e.clientY, touch: touch };
         c.setPointerCapture(e.pointerId);
+      } else if (touch) {
+        drag = { kind: 'pan', x: e.clientX, y: e.clientY };
       }
     });
     c.addEventListener('pointermove', function (e) {
+      if (touches[e.pointerId]) {
+        touches[e.pointerId] = local(e);
+        if (pinch && nTouches() >= 2) {
+          var now = pinchState();
+          self.cam.pan(now.m.x - pinch.m.x, now.m.y - pinch.m.y);
+          self.cam.zoomAt(now.m, now.d / pinch.d);
+          pinch = now;
+          return;
+        }
+        if (pinch) return;
+      }
       var p = self.pointerWorld(e);
       self.hover = p;
       if (!drag) return;
       if (drag.kind === 'pan') { self.cam.pan(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; return; }
       if (drag.kind === 'poke') { if (self.pokeJoint) self.pokeJoint.setTarget(p); return; }
       if (drag.kind === 'move') {
+        // a finger wobbles: ignore the first few pixels so a tap only selects
+        if (drag.touch && !drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 8) return;
         var inst = self.inst(drag.id); if (!inst) return;
         inst.x = self.snap(p.x + drag.dx); inst.y = self.snap(p.y + drag.dy);
         self.restOnFloor(inst);
@@ -394,10 +455,15 @@
         self.rebuild();
       }
     });
-    var up = function () {
+    var up = function (e) {
+      if (touches[e.pointerId]) {
+        delete touches[e.pointerId];
+        if (pinch) { if (nTouches() < 2) pinch = null; drag = null; if (nTouches() === 0) self.hover = null; return; }
+      }
       if (drag && drag.kind === 'move' && drag.moved) { var inst = self.inst(drag.id); self.changed('move', { part: inst }); }
       if (drag && drag.kind === 'poke') self.endPoke();
       drag = null;
+      if (e.pointerType === 'touch') self.hover = null;
     };
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);

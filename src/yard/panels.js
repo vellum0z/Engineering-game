@@ -42,6 +42,8 @@
     this.root = stageEl; this.inspectorEl = inspectorEl || null;
     SE.ui.clear(stageEl);
     stageEl.classList.add('yard');
+    this.touchUI = Yard.isTouch();
+    if (this.touchUI) stageEl.classList.add('touch');
     this.canvas = el('canvas', { class: 'yard-canvas', 'aria-label': 'Build yard. Place parts, then press Run.', tabindex: '0' });
     this.toastEl = el('div', { class: 'yard-flash' });
     this.barEl = el('div', { class: 'yard-bar', role: 'toolbar', 'aria-label': 'Simulation controls' });
@@ -88,7 +90,13 @@
   Yard.prototype.showCoach = function () {
     if (!this.coachEl) return;
     var el = SE.ui.el, box = SE.ui.clear(this.coachEl);
-    var tips = [
+    var tips = this.touchUI ? [
+      ['🧰', 'Parts bin (under the yard).', 'Tap a part, then tap in the yard to place it.'],
+      ['🔧', 'Properties (scroll down).', 'Tap any part in the yard to edit its mass, force and other dials. Type units: 240 kg, 2.5 kN.'],
+      ['▶', 'Run (top).', 'The physics decides. Any build that meets the 🎯 objective counts.'],
+      ['📟', 'Live readouts (bottom).', 'Meters the simulation measures while it runs. You read them; you don\'t type in them.'],
+      ['✋', 'Move around.', 'Drag a part to move it. Drag empty yard to pan, pinch to zoom. Rotate and Remove are in Properties.']
+    ] : [
       ['🧰', 'Parts bin (left).', 'Click a part, then click in the yard to place it.'],
       ['🔧', 'Properties (right).', 'Click any part in the yard to edit its mass, force and other dials there. Type units: 240 kg, 2.5 kN.'],
       ['▶', 'Run (top).', 'The physics decides. Any build that meets the 🎯 objective counts.'],
@@ -125,6 +133,7 @@
     bar.appendChild(el('div', { class: 'tb-group tb-labelled' }, [el('span', { class: 'tb-label', text: 'Show' }),
       ov('forces', 'Force arrows', 'Draw the forces acting on each part'), ov('weights', 'Weights', 'Draw each part\'s weight (mg)')]));
     bar.appendChild(this.clockEl = el('span', { class: 'yard-clock mono', title: 'Simulated time' }));
+    bar.appendChild(btn('⤢ Fit', function () { self.fitView(); }, 'ghost small yard-fit', { title: 'Fit the whole yard in view', 'aria-label': 'Fit the yard in view' }));
     bar.appendChild(btn('? Help', function () { self.showCoach(); }, 'ghost small yard-help', { title: 'How the yard works' }));
     if (!this.ready() && this.mode === 'edit') {
       var e0 = this.built.errors[0], bad = e0.part && this.inst(e0.part);
@@ -144,6 +153,7 @@
   // One line that says what a click does right now.
   Yard.prototype.statusText = function () {
     var pl = this.placing, inst = this.selected && this.inst(this.selected);
+    if (this.touchUI) return this.touchStatusText(pl, inst);
     if (this.mode === 'run') return (this.stepper && this.stepper.paused ? 'Paused.' : 'Running.') + (this.opts.poke !== false ? ' Drag a load to give it a shove.' : '') + ' Press ↺ Reset to change the build.';
     if (this.mode === 'done') return 'Run finished. Press ↺ Reset to change the build, or ▶ Run to try again.';
     if (pl) {
@@ -157,6 +167,18 @@
       return nameOf(inst) + ' selected. ' + (editable ? 'Change its dials in Properties on the right. ' : '') + (inst.locked ? 'It is fixed in place.' : 'Drag to move, R rotates, Delete removes.') + ' Esc deselects.';
     }
     return 'Click a part to see and change its properties. Pick a part from the bin to add one. Scroll to zoom, right-drag to pan.';
+  };
+  Yard.prototype.touchStatusText = function (pl, inst) {
+    if (this.mode === 'run') return (this.stepper && this.stepper.paused ? 'Paused.' : 'Running.') + (this.opts.poke !== false ? ' Drag a load to shove it.' : '') + ' ↺ Reset to change the build.';
+    if (this.mode === 'done') return 'Run finished. ↺ Reset to change the build.';
+    if (pl) {
+      var nm = pl.def.name.toLowerCase();
+      if (!pl.def.connector) return 'Tap where the ' + nm + ' goes. Tap it in the bin again to cancel.';
+      if (pl.def.attach) return 'Tap the part to clip the ' + nm + ' onto. Tap it in the bin again to cancel.';
+      return pl.stage === 1 ? 'Now tap the other end of the ' + nm + '.' : 'Tap the first end of the ' + nm + ' (a ring or a part).';
+    }
+    if (inst) return nameOf(inst) + ' selected. Settings are in Properties below.';
+    return 'Tap a part to edit it. Drag to pan, pinch to zoom.';
   };
   Yard.prototype.refreshStatus = function () {
     if (!this.statusEl) return;
@@ -373,6 +395,7 @@
     c.addEventListener('pointerleave', hide);
     c.addEventListener('pointerdown', function () { if (self.tipEl) self.tipEl.classList.remove('show'); });
     c.addEventListener('pointermove', function (e) {
+      if (e.pointerType === 'touch') return;
       if (e.buttons || self.placing || self.mode === 'run') { if (self.tipEl.classList.contains('show')) hide(); return; }
       var id = self.partAt(self.pointerWorld(e)), inst = id && self.inst(id);
       if (!inst) { if (self.hoverId) hide(); return; }
